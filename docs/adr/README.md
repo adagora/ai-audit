@@ -19,3 +19,4 @@ Format: Nygard (Status, Context, Decision, Consequences), at most ~40 lines, fil
 - [9. One decision per request, before forwarding](0009-inspect-whole-request.md)
 - [10. Prompt injection is an advisory signal on untrusted content only](0010-advisory-prompt-injection-signal.md)
 - [11. Response content is logged per key, off by default](0011-response-content-per-key.md)
+- [12. Unknown token usage is never counted as zero](0012-unknown-usage-never-zero.md)

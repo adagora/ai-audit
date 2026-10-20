@@ -37,7 +37,8 @@ export function extract(api: Api, body: string, sse: boolean): Out {
     } else {
       const blocks: Record<number, { type: string; name?: string; text: string }> = {};
       if (sse) for (const e of sseData(body)) {
-        if (e.type === "message_start") { o.model = e.message.model; o.usage = au(e.message.usage); }
+        // message_start output_tokens is a placeholder; only message_delta carries the final count (aborted stream => output unknown)
+        if (e.type === "message_start") { o.model = e.message.model; o.usage = { ...au(e.message.usage), output: undefined }; }
         if (e.type === "content_block_start") blocks[e.index] = { type: e.content_block.type, name: e.content_block.name, text: e.content_block.text ?? "" };
         if (e.type === "content_block_delta") blocks[e.index].text += e.delta.text ?? e.delta.partial_json ?? "";
         if (e.type === "message_delta") { o.stop = e.delta?.stop_reason; if (e.usage?.output_tokens != null) o.usage = { ...o.usage, output: e.usage.output_tokens }; }
