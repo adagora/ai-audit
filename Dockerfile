@@ -1,4 +1,4 @@
-# BASE=node:26.10.0-slim (default) or platformatic/node-caged:26.10.0-slim (V8 pointer compression, 4 GiB heap cap; see DECISIONS.md #24)
+# BASE=node:26.10.0-slim (default) or platformatic/node-caged:26.10.0-slim (V8 pointer compression, 4 GiB heap cap; see docs/adr/0005-official-node-image.md)
 ARG BASE=node:26.10.0-slim
 FROM ${BASE} AS build
 WORKDIR /app
