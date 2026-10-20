@@ -25,6 +25,8 @@ Gateway: `ai-audit keygen --name agent` creates a virtual key (only its hash goe
 `docker build -t ai-audit .` (default `BASE=node:26.10.0-slim`; `--build-arg BASE=platformatic/node-caged:26.10.0-slim` for V8 pointer compression) · `docker run -p 8787:8787 -v $PWD/data:/data ai-audit`. bwrap inside Docker needs `--cap-add SYS_ADMIN --security-opt seccomp=unconfined --security-opt apparmor=unconfined --security-opt systempaths=unconfined`, otherwise attachments fail closed (422).
 Pointer compression, measured (`node bench/memory.mjs`, 5 runs each): JS heap −35% (6.3 vs 9.7 MB) but RSS unchanged (~180 MB both) and throughput −8%. The proxy holds almost no objects, so we keep the official image as default. Details: [ADR 0005](docs/adr/0005-official-node-image.md). Design decisions: [docs/adr](docs/adr/).
 
+Proxy overhead, measured (`npm run bench:overhead`, loopback mock, Node 22, 3 runs): **+0.6–0.7 ms p50, ~+1.1 ms p95** per request at concurrency 1 (redaction included); at concurrency 16 one process caps at ~2000 req/s. Details: [docs/performance/2026-10-20](docs/performance/2026-10-20/README.md).
+
 ## Quinelings example (Node ≥ 22)
 `npm run example:quote` (add `-- --live` for one gpt-4o-mini call): the LLM proposes a machining quote, a QDL program computes the price and approval, the log stores the program hash and inputs, a replay reproduces the result, a tampered rate is caught, and a wrong LLM price is overridden and flagged for review.
 

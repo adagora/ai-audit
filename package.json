@@ -9,7 +9,8 @@
     "build": "tsc",
     "test": "tsc && node --test dist/test/*.test.js",
     "demo": "tsc && node dist/src/demo.js",
-    "example:quote": "node examples/quineling-quote/run.mjs"
+    "example:quote": "node examples/quineling-quote/run.mjs",
+    "bench:overhead": "tsc && node bench/overhead.mjs"
   },
   "keywords": [
     "ai-act",
