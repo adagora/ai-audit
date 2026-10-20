@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { scanText, type Finding } from "./scan.js";
 import type { Unit, Word } from "./worker.js";
+import { signalsInText, type Signal } from "./injection.js";
 
 const WORKER = fileURLToPath(new URL("./worker.js", import.meta.url));
 const has = (c: string) => { try { execFileSync("which", [c], { stdio: "ignore" }); return true; } catch { return false; } };
@@ -12,7 +13,7 @@ export const TOOLS_OK = ["tesseract", "pdftotext", "pdfinfo", "pdftoppm", "pytho
 const SUPPORTED = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "application/pdf"]);
 
 export interface Att { path: (string | number)[]; mime: string; b64: string; set: (b64: string) => void }
-export interface AttResult { findings: Finding[]; failed?: "unsupported" | "inspection_failed"; unmappable?: boolean; sanitized?: string }
+export interface AttResult { findings: Finding[]; signals?: Signal[]; failed?: "unsupported" | "inspection_failed"; unmappable?: boolean; sanitized?: string }
 
 /** Find inline attachments (OpenAI data: URIs / file_data, Anthropic base64 sources) and external references we can't inspect. */
 export function discover(body: unknown): { atts: Att[]; refs: string[] } {
@@ -74,16 +75,17 @@ export async function inspectAttachment(a: { mime: string; b64: string }, where:
   if (!SUPPORTED.has(a.mime)) return { findings: [], failed: "unsupported" };
   const r = await work({ op: "extract", mime: a.mime, b64: a.b64, raster: true });
   if (!r.ok) return { findings: [], failed: "inspection_failed" };
-  const findings: Finding[] = []; let unmappable = false;
+  const findings: Finding[] = [], signals: Signal[] = []; let unmappable = false;
   const pages: { b64: string; boxes: Word["box"][]; all: boolean }[] = [];
   for (const u of r.units as Unit[]) {
     const spans = scanText(u.text, p.carnet); spans.forEach((s) => findings.push({ rule: s.rule, path: `${where}#${u.where}` }));
+    if (depth === 0) signalsInText(u.text, `${where}#${u.where}`, signals); // advisory only (ADR 0010)
     if (u.png) {
       const m = boxesFor(u.words ?? [], p.carnet);
       pages.push({ b64: u.png, boxes: m.boxes, all: false });
     } else if (spans.length && a.mime !== "application/pdf") unmappable = unmappable || u.where !== "meta"; // image meta is dropped on re-encode
   }
-  let res: AttResult = { findings };
+  let res: AttResult = { findings, ...(signals.length && { signals }) };
   if (findings.length) {
     if (a.mime === "application/pdf") {
       // text layer / metadata can't be edited safely: rebuild raster-only PDF if allowed, blanking pages we can't map precisely

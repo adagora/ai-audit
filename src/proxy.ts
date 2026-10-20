@@ -3,6 +3,7 @@ import http from "node:http";
 import { randomUUID } from "node:crypto";
 import { AuditLog, sha256, stats } from "./audit.js";
 import { decide, hasDuplicateKeys, inspect, redactText, scanText, type Mode } from "./scan.js";
+import { toolResultSignals, type Signal } from "./injection.js";
 import { extract, type Api } from "./extract.js";
 import { discover, inspectAttachment, cacheStats, TOOLS_OK } from "./attachments.js";
 import { timingSafeEqual } from "node:crypto";
@@ -96,16 +97,19 @@ export function createProxy(o: ProxyOpts) {
       if (refs.length && o.mode !== "advisory") return reject("audit_uninspectable_reference"); // remote URL / file id: fail closed
       if (atts.length && !TOOLS_OK) return reject("audit_inspection_unavailable");
       const profile = { carnet: o.carnet, allowPageRedaction: !!o.allowPageRedaction, id: `rules-v1|pr=${!!o.allowPageRedaction}|carnet=${sha256([...(o.carnet ?? [])].sort().join())}` };
+      const signals: Signal[] = toolResultSignals(body); // advisory only, never affects the decision (ADR 0010)
       const sanitize: (() => void)[] = [];
       for (const a of atts) {
         metrics.attachments++;
         const r = await inspectAttachment(a, a.path.join("."), profile);
         if (r.failed) return reject(r.failed === "unsupported" ? "audit_unsupported_attachment" : "audit_inspection_failed");
         r.findings.forEach((f) => findings.push({ ...f, unredactable: !r.sanitized }));
+        r.signals?.forEach((x) => signals.push(x));
         if (r.sanitized) sanitize.push(() => a.set(r.sanitized!));
       }
       const d = decide(o.mode, findings); decisionTag = d.action;
       res.setHeader("x-audit-finding-count", String(findings.length));
+      if (signals.length) res.setHeader("x-audit-signal-count", String(signals.length));
       if (d.action === "forward-redacted") sanitize.forEach((f) => f());
       const fwd = d.action === "forward-redacted" || alias ? Buffer.from(JSON.stringify(value)) : raw; // clean + unaliased => original bytes
       const rec = {
@@ -113,7 +117,7 @@ export function createProxy(o: ProxyOpts) {
         systemId: str(req.headers["x-audit-system-id"]), useCase: str(req.headers["x-audit-use-case"]),
         ...who, model: typeof body.model === "string" ? body.model : undefined, requestedModel: alias ? requestedModel : undefined, stream: body.stream === true,
         requestHash: sha256(raw.toString("latin1")), forwardedPromptDigest: sha256(fwd.toString("latin1")),
-        decision: { mode: o.mode, action: d.action, findings: d.findings.map((f) => ({ rule: f.rule, path: f.path })) },
+        decision: { mode: o.mode, action: d.action, findings: d.findings.map((f) => ({ rule: f.rule, path: f.path })), ...(signals.length && { signals }) },
       };
       const write = (extra: object) => { if (route !== "count") o.log.append({ kind: "llm-call", id: rid, ts: new Date(t0).toISOString(), ...rec, ...extra, latencyMs: Date.now() - t0 } as any); };
       if (d.action === "block") { clearTimeout(timer); write({ upstreamStatus: null }); return fail(d.status!, d.code!, d.findings.map((f) => f.rule)); }

@@ -16,6 +16,7 @@ Clients: `ANTHROPIC_BASE_URL=http://127.0.0.1:8787 claude` · `OPENAI_BASE_URL=h
 | `advisory` | original forwarded, finding logged |
 
 Uninspectable attachment (corrupt, unsupported, remote URL, file id) → 422. Detects: Gitleaks key shapes (AWS, GitHub, OpenAI, Anthropic, GCP, Stripe, Slack, JWT incl. wrapped, private keys), e-mail, phone, PESEL, IBAN; also catches secrets split across text parts, OCR text, PDF text and metadata.
+Prompt-injection signal: a few deterministic rules flag suspicious instructions in tool results and attachment text. It is logged only (rule + path), never blocks, and is easy to bypass ([ADR 0010](docs/adr/0010-advisory-prompt-injection-signal.md)).
 
 ## Log tools
 `ai-audit verify [--anchors a.jsonl]` checks the chain (with anchors it also catches a swapped or truncated file) · `ai-audit anchor --anchors a.jsonl` (run daily, keep the anchors file somewhere else) · `ai-audit report --from 2026-10-01 --to 2026-11-01`.

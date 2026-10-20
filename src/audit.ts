@@ -136,7 +136,7 @@ export function report(log: AuditLog, from: string, to: string): { md: string; s
   const calls = all.filter((r) => r.kind === "llm-call" && inRange(r.ts)) as any[];
   const llm = { calls: calls.length, blocked: calls.filter((c) => c.decision.action === "block").length,
     redacted: calls.filter((c) => c.decision.action === "forward-redacted").length,
-    withFindings: calls.filter((c) => c.decision.findings.length).length, upstreamErrors: calls.filter((c) => c.upstreamStatus >= 400).length,
+    withFindings: calls.filter((c) => c.decision.findings.length).length, withInjectionSignals: calls.filter((c) => c.decision.signals?.length).length, upstreamErrors: calls.filter((c) => c.upstreamStatus >= 400).length,
     inputTokens: calls.reduce((a, c) => a + (c.usage?.input ?? 0), 0), outputTokens: calls.reduce((a, c) => a + (c.usage?.output ?? 0), 0) };
   const count = (xs: string[]) => [...xs.reduce((m, x) => m.set(x, (m.get(x) ?? 0) + 1), new Map<string, number>())].map(([k, x]) => `- ${k}: ${x}`);
   const md = [
@@ -150,6 +150,7 @@ export function report(log: AuditLog, from: string, to: string): { md: string; s
     "## Wywołania LLM przez proxy", "| Metryka | Wartość |", "|---|---|", ...Object.entries(llm).map(([k, x]) => `| ${k} | ${x} |`), "",
     "### Według dostawcy / modelu / systemu", ...count(calls.map((c) => `${c.provider} / ${c.model ?? "?"} / ${c.systemId ?? "-"}`)), "",
     "### Wykryte reguły (tylko ID)", ...(calls.length ? count(calls.flatMap((c) => c.decision.findings.map((f: any) => f.rule))) : []), "",
+    "### Sygnały prompt injection (advisory, tylko ID)", ...count(calls.flatMap((c) => (c.decision.signals ?? []).map((f: any) => f.rule))), "",
     "_Raport generowany automatycznie z dziennika. Nie stanowi porady prawnej._",
   ].join("\n");
   return { md, stats, llm };
@@ -174,17 +175,17 @@ export function verifyAnchors(log: AuditLog, anchorsPath: string): { ok: boolean
 
 /** Usage time series over proxy calls, grouped by virtual key, model or hour (UTC). */
 export function stats(log: AuditLog, by: "key" | "model" | "hour", from = "", to = "~") {
-  const g = new Map<string, { requests: number; errors: number; blocked: number; input: number; output: number; cached: number; cacheWrite: number; latencyMs: number[] }>();
+  const g = new Map<string, { requests: number; errors: number; blocked: number; input: number; output: number; cached: number; cacheWrite: number; injection: number; latencyMs: number[] }>();
   for (const c of log.read() as any[]) {
     if (c.kind !== "llm-call" || c.ts < from || c.ts >= to) continue;
     const k = by === "key" ? c.virtualKey ?? "(provider key)" : by === "model" ? `${c.provider}/${c.model ?? "?"}` : c.ts.slice(0, 13) + ":00Z";
-    const r = g.get(k) ?? { requests: 0, errors: 0, blocked: 0, input: 0, output: 0, cached: 0, cacheWrite: 0, latencyMs: [] }; g.set(k, r);
+    const r = g.get(k) ?? { requests: 0, errors: 0, blocked: 0, input: 0, output: 0, cached: 0, cacheWrite: 0, injection: 0, latencyMs: [] }; g.set(k, r);
     r.requests++; if (c.decision?.action === "block") r.blocked++; else if (!(c.upstreamStatus >= 200 && c.upstreamStatus < 400)) r.errors++;
-    r.input += c.usage?.input ?? 0; r.output += c.usage?.output ?? 0; r.cached += c.usage?.cached ?? 0; r.cacheWrite += c.usage?.cacheWrite ?? 0; r.latencyMs.push(c.latencyMs ?? 0);
+    r.input += c.usage?.input ?? 0; r.output += c.usage?.output ?? 0; r.cached += c.usage?.cached ?? 0; r.cacheWrite += c.usage?.cacheWrite ?? 0; r.injection += c.decision?.signals?.length ?? 0; r.latencyMs.push(c.latencyMs ?? 0);
   }
   return [...g].sort(([a], [b]) => a.localeCompare(b)).map(([group, r]) => {
     const l = r.latencyMs.sort((a, b) => a - b);
-    return { group, requests: r.requests, errors: r.errors, blocked: r.blocked, inputTokens: r.input, outputTokens: r.output, cachedTokens: r.cached, cacheWriteTokens: r.cacheWrite,
+    return { group, requests: r.requests, errors: r.errors, blocked: r.blocked, inputTokens: r.input, outputTokens: r.output, cachedTokens: r.cached, cacheWriteTokens: r.cacheWrite, injectionSignals: r.injection,
       latencyAvgMs: Math.round(l.reduce((a, x) => a + x, 0) / l.length), latencyP95Ms: l[Math.min(l.length - 1, Math.floor(l.length * 0.95))] };
   });
 }

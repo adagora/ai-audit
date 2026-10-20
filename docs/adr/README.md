@@ -17,3 +17,4 @@ Format: Nygard (Status, Context, Decision, Consequences), at most ~40 lines, fil
 - [7. The log stores where a finding was, never what](0007-log-stores-no-values.md)
 - [8. Virtual client keys, provider keys only in the proxy](0008-virtual-keys.md)
 - [9. One decision per request, before forwarding](0009-inspect-whole-request.md)
+- [10. Prompt injection is an advisory signal on untrusted content only](0010-advisory-prompt-injection-signal.md)
