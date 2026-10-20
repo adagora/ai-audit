@@ -11,11 +11,11 @@ Clients: `ANTHROPIC_BASE_URL=http://127.0.0.1:8787 claude` · `OPENAI_BASE_URL=h
 
 | mode | finding → |
 |---|---|
-| `redact` (default) | replaced with `[REDACTED:rule]`; images blacked out; PDFs → 409 unless `--allow-page-redaction` |
+| `redact` (default) | replaced with `[REDACTED:rule]`; images blacked out; PDFs rebuilt as page images with findings blacked out (logged as `decision.rasterized`), `--no-page-redaction` or config `"pageRedaction": false` → 409 instead ([ADR 0013](docs/adr/0013-rasterize-pdfs-by-default.md)) |
 | `no-go` | 409, upstream never called, response lists rule IDs only |
 | `advisory` | original forwarded, finding logged |
 
-Uninspectable attachment (corrupt, unsupported, remote URL, file id) → 422. Detects: Gitleaks key shapes (AWS, GitHub, OpenAI, Anthropic, GCP, Stripe, Slack, JWT incl. wrapped, private keys), e-mail, phone, PESEL, IBAN; also catches secrets split across text parts, OCR text, PDF text and metadata.
+Uninspectable attachment (corrupt, unsupported, remote URL, file id) → 422. A rebuilt PDF or image is inspected again; if a finding survives or a box cannot be mapped → 409. A rasterized PDF reaches the model as page images only (no text layer, more tokens, OCR-quality answers). Detects: Gitleaks key shapes (AWS, GitHub, OpenAI, Anthropic, GCP, Stripe, Slack, JWT incl. wrapped, private keys), e-mail, phone, PESEL, IBAN; also catches secrets split across text parts, OCR text, PDF text and metadata.
 Prompt-injection signal: a few deterministic rules flag suspicious instructions in tool results and attachment text. It is logged only (rule + path), never blocks, and is easy to bypass ([ADR 0010](docs/adr/0010-advisory-prompt-injection-signal.md)).
 
 ## Log tools

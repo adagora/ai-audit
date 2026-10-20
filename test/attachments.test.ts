@@ -4,14 +4,14 @@ import { readFileSync, writeFileSync, appendFileSync, mkdtempSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mockUpstream, startProxy, makePdf, AWS, AUTH } from "./helpers.js";
-import { work, cacheStats, SANDBOX } from "../src/attachments.js";
+import { work, cacheStats, SANDBOX, inspectAttachment } from "../src/attachments.js";
 import { AuditLog, anchor, sha256, verifyAnchors } from "../src/audit.js";
 import { scanText } from "../src/scan.js";
 
 const up = await mockUpstream();
-const red = await startProxy(up.url, "redact"), pr = await startProxy(up.url, "redact", { allowPageRedaction: true });
+const red = await startProxy(up.url, "redact"), np = await startProxy(up.url, "redact", { pageRedaction: false }), ng = await startProxy(up.url, "no-go");
 const ck = await startProxy(up.url, "redact", { keys: [{ name: "team", sha256: sha256("team-key-1") }], upstreamKeys: { openai: "sk-upstream-1", anthropic: "sk-ant-upstream-1" } });
-after(() => { up.close(); [red, pr, ck].forEach((p) => p.close()); });
+after(() => { up.close(); [red, np, ng, ck].forEach((p) => p.close()); });
 const fx = (f: string) => readFileSync(new URL(`../../test/fixtures/${f}`, import.meta.url)).toString("base64");
 const KEY_PNG = fx("key.png"), CLEAN_PNG = fx("clean.png");
 const PDF = makePdf(["Offer 2026/10 for flange", `ci token ${AWS} do not share`]).toString("base64");
@@ -21,20 +21,26 @@ const ocrText = async (mime: string, b64: string) => ((await work({ op: "extract
 const last = () => up.seen[up.seen.length - 1];
 console.log("sandbox:", SANDBOX);
 
-test("PDF with a fake key: default -> 409 and upstream never called", async () => {
-  const n = up.seen.length;
-  const r = await post(red.url, "/v1/responses", { model: "gpt-x", input: [{ role: "user", content: [{ type: "input_file", filename: "offer.pdf", file_data: `data:application/pdf;base64,${PDF}` }] }] });
-  const j = await r.json(); assert.equal(r.status, 409); assert.equal(j.error.code, "audit_unredactable_finding"); assert.ok(j.error.findings.includes("aws-access-token"));
-  assert.equal(up.seen.length, n);
-});
+const pdfReq = { model: "gpt-x", input: [{ role: "user", content: [{ type: "input_file", filename: "offer.pdf", file_data: `data:application/pdf;base64,${PDF}` }] }] };
+for (const [name, p, code] of [["--no-page-redaction", () => np, "audit_unredactable_finding"], ["no-go", () => ng, "audit_findings_blocked"]] as const)
+  test(`PDF with a fake key, ${name} -> 409 and upstream never called`, async () => {
+    const n = up.seen.length;
+    const r = await post(p().url, "/v1/responses", pdfReq);
+    const j = await r.json(); assert.equal(r.status, 409); assert.equal(j.error.code, code); assert.ok(j.error.findings.includes("aws-access-token"));
+    assert.equal(up.seen.length, n);
+  });
 
-test("PDF with --allow-page-redaction: raster-rebuilt, re-inspected, key gone upstream", async () => {
-  const r = await post(pr.url, "/v1/messages", { model: "c", max_tokens: 5, messages: [{ role: "user", content: [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: PDF } }, { type: "text", text: "summarise" }] }] });
+test("PDF with a fake key, default redact: raster-rebuilt, re-inspected clean, key gone upstream, logged as rasterized", async () => {
+  const r = await post(red.url, "/v1/messages", { model: "c", max_tokens: 5, messages: [{ role: "user", content: [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: PDF } }, { type: "text", text: "summarise" }] }] });
   assert.equal(r.status, 200); await r.text();
-  const sent = JSON.parse(last().body.toString()).messages[0].content[0].source.data;
-  assert.notEqual(sent, PDF);
+  const fwd = last().body.toString(), sent = JSON.parse(fwd).messages[0].content[0].source.data;
+  assert.notEqual(sent, PDF); assert.ok(!fwd.includes(AWS) && !Buffer.from(sent, "base64").toString("latin1").includes(AWS));
   const txt = await ocrText("application/pdf", sent);
   assert.ok(!txt.includes("AKIA") && /Offer/.test(txt), txt);
+  const again = await inspectAttachment({ mime: "application/pdf", b64: sent }, "x", { pageRedaction: true, id: "t-reinspect" });
+  assert.equal(again.findings.length, 0); assert.ok(!again.failed);
+  const d = (red.log.read().at(-1) as any).decision;
+  assert.equal(d.action, "forward-redacted"); assert.deepEqual(d.rasterized, ["$.messages.0.content.0.source.data"]);
 });
 
 test("image (OpenAI image_url data URI) with OCR'd key -> boxes blacked out, rest kept", async () => {

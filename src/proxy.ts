@@ -10,7 +10,8 @@ import { timingSafeEqual } from "node:crypto";
 
 export interface ProxyOpts {
   upstreamOpenai: string; upstreamAnthropic: string; mode: Mode; log: AuditLog; maxBodyBytes?: number; timeoutMs?: number; carnet?: Set<string>;
-  allowPageRedaction?: boolean;
+  /** Rebuild PDFs with findings raster-only in redact mode (default true, ADR 0013); false restores 409. */
+  pageRedaction?: boolean;
   keys?: VKey[];                                        // virtual keys: if any, clients must present one (never a provider key)
   upstreamKeys?: { openai?: string; anthropic?: string }; // real provider keys, proxy env only, injected upstream
   aliases?: Record<string, Alias>;                      // client model name -> routed model (+ optional upstream)
@@ -96,9 +97,10 @@ export function createProxy(o: ProxyOpts) {
       const reject = (code: string) => { clearTimeout(timer); decisionTag = "reject"; return fail(422, code); };
       if (refs.length && o.mode !== "advisory") return reject("audit_uninspectable_reference"); // remote URL / file id: fail closed
       if (atts.length && !TOOLS_OK) return reject("audit_inspection_unavailable");
-      const profile = { carnet: o.carnet, allowPageRedaction: !!o.allowPageRedaction, id: `rules-v1|pr=${!!o.allowPageRedaction}|carnet=${sha256([...(o.carnet ?? [])].sort().join())}` };
+      const pageRedaction = o.pageRedaction !== false;
+      const profile = { carnet: o.carnet, pageRedaction, id: `rules-v1|pr=${pageRedaction}|carnet=${sha256([...(o.carnet ?? [])].sort().join())}` };
       const signals: Signal[] = toolResultSignals(body); // advisory only, never affects the decision (ADR 0010)
-      const sanitize: (() => void)[] = [];
+      const sanitize: (() => void)[] = [], rasterized: string[] = [];
       for (const a of atts) {
         metrics.attachments++;
         const r = await inspectAttachment(a, a.path.join("."), profile);
@@ -106,6 +108,7 @@ export function createProxy(o: ProxyOpts) {
         r.findings.forEach((f) => findings.push({ ...f, unredactable: !r.sanitized }));
         r.signals?.forEach((x) => signals.push(x));
         if (r.sanitized) sanitize.push(() => a.set(r.sanitized!));
+        if (r.rasterized) rasterized.push(a.path.join("."));
       }
       const d = decide(o.mode, findings); decisionTag = d.action;
       res.setHeader("x-audit-finding-count", String(findings.length));
@@ -117,7 +120,7 @@ export function createProxy(o: ProxyOpts) {
         systemId: str(req.headers["x-audit-system-id"]), useCase: str(req.headers["x-audit-use-case"]),
         ...who, model: typeof body.model === "string" ? body.model : undefined, requestedModel: alias ? requestedModel : undefined, stream: body.stream === true,
         requestHash: sha256(raw.toString("latin1")), forwardedPromptDigest: sha256(fwd.toString("latin1")),
-        decision: { mode: o.mode, action: d.action, findings: d.findings.map((f) => ({ rule: f.rule, path: f.path })), ...(signals.length && { signals }) },
+        decision: { mode: o.mode, action: d.action, findings: d.findings.map((f) => ({ rule: f.rule, path: f.path })), ...(signals.length && { signals }), ...(d.action === "forward-redacted" && rasterized.length && { rasterized }) },
       };
       const write = (extra: object) => { if (route !== "count") o.log.append({ kind: "llm-call", id: rid, ts: new Date(t0).toISOString(), ...rec, ...extra, latencyMs: Date.now() - t0 } as any); };
       if (d.action === "block") { clearTimeout(timer); write({ upstreamStatus: null }); return fail(d.status!, d.code!, d.findings.map((f) => f.rule)); }

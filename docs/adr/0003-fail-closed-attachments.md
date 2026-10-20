@@ -1,5 +1,5 @@
 # 3. Fail-closed inspection of attachments
-Status: Accepted (2026-10-20)
+Status: Accepted; PDF default superseded by 0013
 ## Context
 Images and PDFs can carry secrets and PII in pixels, metadata and text layers. Extraction runs untrusted parsers on untrusted input.
 ## Decision

@@ -13,7 +13,7 @@ export const TOOLS_OK = ["tesseract", "pdftotext", "pdfinfo", "pdftoppm", "pytho
 const SUPPORTED = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "application/pdf"]);
 
 export interface Att { path: (string | number)[]; mime: string; b64: string; set: (b64: string) => void }
-export interface AttResult { findings: Finding[]; signals?: Signal[]; failed?: "unsupported" | "inspection_failed"; unmappable?: boolean; sanitized?: string }
+export interface AttResult { findings: Finding[]; signals?: Signal[]; failed?: "unsupported" | "inspection_failed"; unmappable?: boolean; sanitized?: string; rasterized?: boolean }
 
 /** Find inline attachments (OpenAI data: URIs / file_data, Anthropic base64 sources) and external references we can't inspect. */
 export function discover(body: unknown): { atts: Att[]; refs: string[] } {
@@ -63,7 +63,7 @@ function boxesFor(words: Word[], carnet?: Set<string>) {
   return { spans, boxes: words.filter((w, i) => spans.some((s) => s.start < at[i] + w.text.length && s.end > at[i])).map((w) => w.box) };
 }
 
-export interface Profile { carnet?: Set<string>; allowPageRedaction: boolean; id: string }
+export interface Profile { carnet?: Set<string>; pageRedaction: boolean; id: string }
 const cache = new Map<string, AttResult>(); export const cacheStats = { hits: 0, misses: 0 };
 const MAX_CACHE = 1000;
 
@@ -88,12 +88,12 @@ export async function inspectAttachment(a: { mime: string; b64: string }, where:
   let res: AttResult = { findings, ...(signals.length && { signals }) };
   if (findings.length) {
     if (a.mime === "application/pdf") {
-      // text layer / metadata can't be edited safely: rebuild raster-only PDF if allowed, blanking pages we can't map precisely
-      if (!p.allowPageRedaction) res.unmappable = true;
+      // text layer / metadata can't be edited safely: rebuild raster-only PDF unless opted out (ADR 0013), blanking pages we can't map precisely
+      if (!p.pageRedaction) res.unmappable = true;
       else {
         const textPages = new Set(findings.map((f) => /#page(\d+)$/.exec(f.path)?.[1]).filter(Boolean).map(Number));
         pages.forEach((pg, i) => { if (textPages.has(i + 1) && !pg.boxes.length) pg.all = true; }); // whole-page redaction
-        res.sanitized = (await work({ op: "blackout", format: "PDF", pages })).b64;
+        res.sanitized = (await work({ op: "blackout", format: "PDF", pages })).b64; res.rasterized = true;
       }
     } else if (!unmappable) {
       const fmt = a.mime === "image/jpeg" ? "JPEG" : a.mime === "image/webp" ? "WEBP" : a.mime === "image/gif" ? "GIF" : "PNG";
@@ -101,7 +101,7 @@ export async function inspectAttachment(a: { mime: string; b64: string }, where:
     } else res.unmappable = true;
     if (res.sanitized) { // re-inspect the rebuilt artifact before approval
       const again = depth < 1 ? await inspectAttachment({ mime: a.mime, b64: res.sanitized }, where, p, depth + 1) : { findings: [{ rule: "x", path: where }] } as AttResult;
-      if (again.findings.length || again.failed) { res.sanitized = undefined; res.unmappable = true; }
+      if (again.findings.length || again.failed) { res.sanitized = undefined; res.rasterized = undefined; res.unmappable = true; }
     }
   }
   if (cache.size >= MAX_CACHE) cache.delete(cache.keys().next().value!);
