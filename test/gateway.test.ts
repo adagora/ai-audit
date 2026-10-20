@@ -4,11 +4,11 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { mockUpstream, startProxy } from "./helpers.js";
-import { sha256, stats } from "../src/audit.js";
+import { report, sha256, stats } from "../src/audit.js";
 
 const up = await mockUpstream(), other = await mockUpstream();
 const p = await startProxy(up.url, "redact", {
-  keys: [{ name: "claude-code", sha256: sha256("vk-A"), providers: ["anthropic"] }, { name: "quote-agent", sha256: sha256("vk-B"), models: ["fast", "gpt-x"], providers: ["openai"] }],
+  keys: [{ name: "claude-code", sha256: sha256("vk-A"), providers: ["anthropic"] }, { name: "quote-agent", sha256: sha256("vk-B"), models: ["fast", "gpt-x"], providers: ["openai"], logContent: true }],
   upstreamKeys: { openai: "sk-REAL-openai", anthropic: "sk-REAL-anthropic" },
   aliases: { fast: { model: "mock-1" }, local: { model: "qwen-local", upstream: other.url } },
   adminKeySha256: sha256("admin-1"),
@@ -49,4 +49,18 @@ test("usage time series: /audit/stats needs admin key; groups by key/model/hour;
   const cli = fileURLToPath(new URL("../src/cli.js", import.meta.url));
   const out = execFileSync(process.execPath, [cli, "stats", "--log", p.log.path, "--by", "model"]).toString();
   console.log(out); assert.match(out, /anthropic\/claude-x/); assert.match(out, /openai\/mock-1/);
+});
+
+test("content logging per key (ADR 0011): default key hashes only, logContent key logs redacted text", async () => {
+  const r1 = await call("vk-A", "/v1/messages", an); await r1.text();
+  const a = p.log.read().at(-1) as any;
+  assert.equal(a.virtualKey, "claude-code"); assert.equal(a.content, "hash"); assert.equal(a.output, undefined);
+  assert.equal(a.outputHash, sha256("Hello world"));
+  const r2 = await call("vk-B", "/v1/chat/completions", { ...oa("gpt-x"), stream: true }); await r2.text();
+  const b = p.log.read().at(-1) as any;
+  assert.equal(b.virtualKey, "quote-agent"); assert.equal(b.content, "redacted");
+  assert.equal(b.output, "Hello world, mail me at [REDACTED:pii-email]"); assert.equal(b.outputHash, sha256("Hello world, mail me at jan@firma.pl"));
+  const raw = readFileSync(p.log.path, "utf8"); assert.ok(!raw.includes("jan@firma.pl"));
+  assert.deepEqual(p.log.verifyChain(), { ok: true });
+  const rep = report(p.log, "1970", "9999"); assert.ok(rep.llm.contentLogged >= 1); assert.match(rep.md, /contentLogged/);
 });

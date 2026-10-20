@@ -1,5 +1,5 @@
 # 7. The log stores where a finding was, never what
-Status: Accepted (2026-10-20)
+Status: Accepted (2026-10-20); output logging narrowed by [0011](0011-response-content-per-key.md)
 ## Context
 The audit log is kept for months and read by more people than the traffic. A hash of a short value (PESEL, phone) can be brute-forced.
 ## Decision

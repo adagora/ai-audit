@@ -18,3 +18,4 @@ Format: Nygard (Status, Context, Decision, Consequences), at most ~40 lines, fil
 - [8. Virtual client keys, provider keys only in the proxy](0008-virtual-keys.md)
 - [9. One decision per request, before forwarding](0009-inspect-whole-request.md)
 - [10. Prompt injection is an advisory signal on untrusted content only](0010-advisory-prompt-injection-signal.md)
+- [11. Response content is logged per key, off by default](0011-response-content-per-key.md)

@@ -17,7 +17,7 @@ export interface ProxyOpts {
   adminKeySha256?: string;                              // protects GET /audit/stats
   quiet?: boolean;                                      // no JSON log lines on stderr
 }
-export interface VKey { name: string; sha256: string; models?: string[]; providers?: ("openai" | "anthropic")[] }
+export interface VKey { name: string; sha256: string; models?: string[]; providers?: ("openai" | "anthropic")[]; logContent?: boolean } // logContent: log redacted output/tool args (agent keys); default hashes only (ADR 0011)
 export interface Alias { model: string; upstream?: string }
 export const metrics = { requests: 0, byDecision: {} as Record<string, number>, byStatus: {} as Record<string, number>, latencyMsSum: 0, latencyMsMax: 0, attachments: 0, cache: cacheStats };
 const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
@@ -131,8 +131,10 @@ export function createProxy(o: ProxyOpts) {
       const captured = await pipe(up, res);
       const out = route === "count" ? undefined : extract(route, captured, sse);
       const red = (s: string) => redactText(s, scanText(s, o.carnet)); // output may contain PII too
+      const full = vkey?.logContent === true; // ADR 0011: content only for keys that opted in (agents/services)
       write({ upstreamStatus: up.status, clientAborted: !res.writableFinished || undefined, responseModel: out?.model, usage: out?.usage, stop: out?.stop,
-        output: out && red(out.text), toolCalls: out?.toolCalls.map((t) => ({ name: t.name, argsHash: sha256(t.args), args: red(t.args) })) });
+        ...(out && { content: full ? "redacted" : "hash", outputHash: sha256(out.text), ...(full && { output: red(out.text) }),
+          toolCalls: out.toolCalls.map((t) => ({ name: t.name, argsHash: sha256(t.args), ...(full && { args: red(t.args) }) })) }) });
     } catch { fail(500, "audit_internal_error"); }
   });
 }

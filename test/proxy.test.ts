@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
-import { AuditLog, report } from "../src/audit.js";
+import { AuditLog, report, sha256 } from "../src/audit.js";
 import { createProxy } from "../src/proxy.js";
 import { hasDuplicateKeys, scanText } from "../src/scan.js";
 import { mockUpstream, startProxy, AWS, PESEL, AUTH } from "./helpers.js";
@@ -73,8 +73,10 @@ for (const [name, path, body] of [
   if (stream) assert.match(t, /^(event|data):/); else assert.match(t, /Hello world/);
   const rec = proxies.redact.log.read().at(-1) as any;
   assert.equal(rec.upstreamStatus, 200); assert.ok(rec.usage.output >= 2);
-  if (name === "openai chat" && stream) assert.equal(rec.output, "Hello world, mail me at [REDACTED:pii-email]"); // output PII redacted in log only
-  else assert.equal(rec.output, "Hello world");
+  // no virtual key => default content mode "hash": output text never in the log (ADR 0011)
+  assert.equal(rec.content, "hash"); assert.equal(rec.output, undefined);
+  assert.equal(rec.outputHash, sha256(name === "openai chat" && stream ? "Hello world, mail me at jan@firma.pl" : "Hello world"));
+  for (const t of rec.toolCalls) { assert.equal(t.args, undefined); assert.match(t.argsHash, /^[0-9a-f]{64}$/); }
   assert.equal(rec.provider, name.startsWith("anthropic") ? "anthropic" : "openai");
 });
 

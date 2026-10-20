@@ -136,7 +136,7 @@ export function report(log: AuditLog, from: string, to: string): { md: string; s
   const calls = all.filter((r) => r.kind === "llm-call" && inRange(r.ts)) as any[];
   const llm = { calls: calls.length, blocked: calls.filter((c) => c.decision.action === "block").length,
     redacted: calls.filter((c) => c.decision.action === "forward-redacted").length,
-    withFindings: calls.filter((c) => c.decision.findings.length).length, withInjectionSignals: calls.filter((c) => c.decision.signals?.length).length, upstreamErrors: calls.filter((c) => c.upstreamStatus >= 400).length,
+    withFindings: calls.filter((c) => c.decision.findings.length).length, withInjectionSignals: calls.filter((c) => c.decision.signals?.length).length, contentLogged: calls.filter((c) => c.content === "redacted").length, upstreamErrors: calls.filter((c) => c.upstreamStatus >= 400).length,
     inputTokens: calls.reduce((a, c) => a + (c.usage?.input ?? 0), 0), outputTokens: calls.reduce((a, c) => a + (c.usage?.output ?? 0), 0) };
   const count = (xs: string[]) => [...xs.reduce((m, x) => m.set(x, (m.get(x) ?? 0) + 1), new Map<string, number>())].map(([k, x]) => `- ${k}: ${x}`);
   const md = [
