@@ -1,0 +1,8 @@
+node_modules/
+dist/
+live/
+*.log
+.env*
+audit*.jsonl
+demo-log.jsonl
+demo-report.md

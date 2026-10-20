@@ -1,0 +1,190 @@
+// Append-only, hash-chained JSONL decision log. No network, no deps.
+import { createHash, randomUUID } from "node:crypto";
+import { appendFileSync, closeSync, existsSync, fstatSync, openSync, readFileSync, readSync } from "node:fs";
+import vm from "node:vm";
+
+export const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
+const GENESIS = "0".repeat(64);
+
+export interface Step { source: string; input: unknown; output: unknown } // deterministic step
+export interface Review { reviewer: string; decision: "approved" | "overridden" | "rejected"; note?: string; at: string }
+export interface Entry {
+  systemId: string; useCase: string;
+  input: string; storeRedactedInput?: boolean;          // raw input never stored (RODO)
+  sources?: { doc: string; page?: number }[];
+  model?: { name: string; version: string };
+  prompt?: { templateId: string; template: string };
+  params?: Record<string, unknown>;
+  output: unknown;
+  step?: Step;
+}
+export interface Rec {
+  kind: "decision" | "review" | "llm-call"; id: string; ts: string; refId?: string;
+  systemId?: string; useCase?: string; inputHash?: string; redactedInput?: string;
+  sources?: { doc: string; page?: number }[]; model?: { name: string; version: string };
+  prompt?: { templateId: string; hash: string }; params?: Record<string, unknown>; output?: unknown;
+  step?: { sourceHash: string; input: unknown; outputHash: string };
+  review?: Review; prevHash: string; hash: string;
+  [extra: string]: unknown; // e.g. kind "llm-call" records written by the proxy
+}
+
+export function redact(s: string): string {
+  return s.replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, "[EMAIL]")
+    .replace(/\+?\d[\d \-]{7,}\d/g, "[PHONE]")
+    .replace(/\b\d{11}\b/g, "[PESEL]");
+}
+
+const canon = (o: unknown): string => JSON.stringify(o, (_k, v) =>
+  v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort()) : v);
+
+export class AuditLog {
+  steps = new Map<string, string>(); // sourceHash -> source (step registry; persist alongside log in real use)
+  constructor(public path: string, private now = () => new Date().toISOString()) {}
+
+  read(): Rec[] {
+    if (!existsSync(this.path)) return [];
+    return readFileSync(this.path, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  }
+  /** Hash of the last line, read from the file tail (O(record), safe with a second writer such as the CLI). */
+  private lastHash(): string {
+    if (!existsSync(this.path)) return GENESIS;
+    const fd = openSync(this.path, "r");
+    try {
+      let pos = fstatSync(fd).size, tail = "";
+      while (pos > 0) {
+        const n = Math.min(65536, pos); pos -= n; const b = Buffer.alloc(n); readSync(fd, b, 0, n, pos);
+        tail = b.toString("latin1") + tail; const t = tail.trimEnd(), nl = t.lastIndexOf("\n");
+        if (nl >= 0 || pos === 0) { const line = Buffer.from(t.slice(nl + 1), "latin1").toString("utf8"); return line ? JSON.parse(line).hash : GENESIS; }
+      }
+      return GENESIS;
+    } finally { closeSync(fd); }
+  }
+  append(r: Omit<Rec, "prevHash" | "hash">): Rec {
+    const prevHash = this.lastHash();
+    const body = { ...r, prevHash };
+    const rec = { ...body, hash: sha256(canon(body)) } as Rec;
+    appendFileSync(this.path, JSON.stringify(rec) + "\n");
+    return rec;
+  }
+
+  record(e: Entry): Rec {
+    let step: Rec["step"];
+    if (e.step) {
+      const sourceHash = sha256(e.step.source);
+      this.steps.set(sourceHash, e.step.source);
+      step = { sourceHash, input: e.step.input, outputHash: sha256(canon(e.step.output)) };
+    }
+    return this.append({
+      kind: "decision", id: randomUUID(), ts: this.now(), systemId: e.systemId, useCase: e.useCase,
+      inputHash: sha256(e.input), redactedInput: e.storeRedactedInput ? redact(e.input) : undefined,
+      sources: e.sources, model: e.model,
+      prompt: e.prompt && { templateId: e.prompt.templateId, hash: sha256(e.prompt.template) },
+      params: e.params, output: e.output, step,
+    });
+  }
+
+  approve(refId: string, reviewer: string, decision: Review["decision"], note?: string): Rec {
+    if (!this.read().some((r) => r.kind === "decision" && r.id === refId)) throw new Error(`unknown decision ${refId}`);
+    return this.append({ kind: "review", id: randomUUID(), ts: this.now(), refId, review: { reviewer, decision, note, at: this.now() } });
+  }
+
+  verifyChain(): { ok: boolean; badLine?: number; reason?: string } {
+    if (!existsSync(this.path)) return { ok: true };
+    const lines = readFileSync(this.path, "utf8").split("\n").filter(Boolean);
+    let prev = GENESIS;
+    for (let i = 0; i < lines.length; i++) {
+      let r: Rec;
+      try { r = JSON.parse(lines[i]); } catch { return { ok: false, badLine: i + 1, reason: "invalid JSON" }; }
+      const { hash, ...body } = r;
+      if (r.prevHash !== prev) return { ok: false, badLine: i + 1, reason: "prevHash mismatch" };
+      if (sha256(canon(body)) !== hash) return { ok: false, badLine: i + 1, reason: "hash mismatch" };
+      prev = hash;
+    }
+    return { ok: true };
+  }
+}
+
+/** Re-run a deterministic step in an isolated vm context with a time limit and a step budget.
+ *  Step source must be a function expression `(input, tick) => ...`; it must call tick() in loops. */
+export function replay(log: AuditLog, recId: string, opts = { timeoutMs: 200, maxSteps: 10_000 }) {
+  const r = log.read().find((x) => x.id === recId);
+  if (!r?.step) throw new Error("no deterministic step on record");
+  const source = log.steps.get(r.step.sourceHash);
+  if (!source || sha256(source) !== r.step.sourceHash) throw new Error("step source missing or altered");
+  let n = 0;
+  const tick = () => { if (++n > opts.maxSteps) throw new Error(`step budget exceeded (${opts.maxSteps})`); };
+  const fn = vm.runInNewContext(`(${source})`, Object.create(null), { timeout: opts.timeoutMs });
+  const out = vm.runInNewContext("fn(input, tick)", { fn, input: structuredClone(r.step.input), tick }, { timeout: opts.timeoutMs });
+  const output = JSON.parse(JSON.stringify(out)); // detach from vm realm
+  const outputHash = sha256(canon(output));
+  return { output, reproduced: outputHash === r.step.outputHash, steps: n };
+}
+
+export function report(log: AuditLog, from: string, to: string): { md: string; stats: Record<string, number>; llm: Record<string, number> } {
+  const all = log.read();
+  const inRange = (ts: string) => ts >= from && ts < to;
+  const dec = all.filter((r) => r.kind === "decision" && inRange(r.ts));
+  const ids = new Set(dec.map((d) => d.id));
+  const rev = all.filter((r) => r.kind === "review" && ids.has(r.refId!));
+  const last = new Map<string, Review>(); rev.forEach((r) => last.set(r.refId!, r.review!));
+  const overridden = [...last.values()].filter((v) => v.decision !== "approved").length;
+  const src = new Map<string, number>();
+  dec.forEach((d) => d.sources?.forEach((s) => { const k = `${s.doc}${s.page ? ` s.${s.page}` : ""}`; src.set(k, (src.get(k) ?? 0) + 1); }));
+  const v = log.verifyChain();
+  const stats = { decisions: dec.length, reviewed: last.size, unreviewed: dec.length - last.size, overridden,
+    overrideRatePct: last.size ? Math.round((overridden / last.size) * 1000) / 10 : 0, withReplayableStep: dec.filter((d) => d.step).length };
+  const calls = all.filter((r) => r.kind === "llm-call" && inRange(r.ts)) as any[];
+  const llm = { calls: calls.length, blocked: calls.filter((c) => c.decision.action === "block").length,
+    redacted: calls.filter((c) => c.decision.action === "forward-redacted").length,
+    withFindings: calls.filter((c) => c.decision.findings.length).length, upstreamErrors: calls.filter((c) => c.upstreamStatus >= 400).length,
+    inputTokens: calls.reduce((a, c) => a + (c.usage?.input ?? 0), 0), outputTokens: calls.reduce((a, c) => a + (c.usage?.output ?? 0), 0) };
+  const count = (xs: string[]) => [...xs.reduce((m, x) => m.set(x, (m.get(x) ?? 0) + 1), new Map<string, number>())].map(([k, x]) => `- ${k}: ${x}`);
+  const md = [
+    `# Raport audytowy AI (${from} – ${to})`, "",
+    `Integralność łańcucha: ${v.ok ? "OK ✅" : `NARUSZONA ❌ (linia ${v.badLine}: ${v.reason})`}`, "",
+    "| Metryka | Wartość |", "|---|---|",
+    ...Object.entries(stats).map(([k, x]) => `| ${k} | ${x} |`), "",
+    "## Decyzje według systemu", ...Object.entries(dec.reduce<Record<string, number>>((a, d) => ((a[`${d.systemId} / ${d.useCase}`] = (a[`${d.systemId} / ${d.useCase}`] ?? 0) + 1), a), {})).map(([k, x]) => `- ${k}: ${x}`), "",
+    "## Cytowane źródła", ...(src.size ? [...src].map(([k, x]) => `- ${k}: ${x}`) : ["- brak"]), "",
+    "## Modele", ...[...new Set(dec.filter((d) => d.model).map((d) => `${d.model!.name}@${d.model!.version}`))].map((m) => `- ${m}`), "",
+    "## Wywołania LLM przez proxy", "| Metryka | Wartość |", "|---|---|", ...Object.entries(llm).map(([k, x]) => `| ${k} | ${x} |`), "",
+    "### Według dostawcy / modelu / systemu", ...count(calls.map((c) => `${c.provider} / ${c.model ?? "?"} / ${c.systemId ?? "-"}`)), "",
+    "### Wykryte reguły (tylko ID)", ...(calls.length ? count(calls.flatMap((c) => c.decision.findings.map((f: any) => f.rule))) : []), "",
+    "_Raport generowany automatycznie z dziennika. Nie stanowi porady prawnej._",
+  ].join("\n");
+  return { md, stats, llm };
+}
+
+/** External anchor: append {ts, count, head} to a separate append-only file (keep it elsewhere: other disk, WORM bucket, git, email). */
+export function anchor(log: AuditLog, anchorsPath: string, now = new Date().toISOString()) {
+  const recs = log.read(), a = { ts: now, count: recs.length, head: recs.length ? recs[recs.length - 1].hash : GENESIS };
+  appendFileSync(anchorsPath, JSON.stringify(a) + "\n"); return a;
+}
+/** Detects a whole-file swap (recomputed chain) or truncation: every anchored head must still be at its position. */
+export function verifyAnchors(log: AuditLog, anchorsPath: string): { ok: boolean; anchors: number; reason?: string } {
+  const chain = log.verifyChain(); if (!chain.ok) return { ok: false, anchors: 0, reason: `chain broken at line ${chain.badLine}: ${chain.reason}` };
+  const recs = log.read(), as = readFileSync(anchorsPath, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  for (const a of as) {
+    if (recs.length < a.count) return { ok: false, anchors: as.length, reason: `truncated: anchor ${a.ts} saw ${a.count} records, log has ${recs.length}` };
+    const head = a.count ? recs[a.count - 1].hash : GENESIS;
+    if (head !== a.head) return { ok: false, anchors: as.length, reason: `swapped: record ${a.count} hash differs from anchor ${a.ts}` };
+  }
+  return { ok: true, anchors: as.length };
+}
+
+/** Usage time series over proxy calls, grouped by virtual key, model or hour (UTC). */
+export function stats(log: AuditLog, by: "key" | "model" | "hour", from = "", to = "~") {
+  const g = new Map<string, { requests: number; errors: number; blocked: number; input: number; output: number; cached: number; cacheWrite: number; latencyMs: number[] }>();
+  for (const c of log.read() as any[]) {
+    if (c.kind !== "llm-call" || c.ts < from || c.ts >= to) continue;
+    const k = by === "key" ? c.virtualKey ?? "(provider key)" : by === "model" ? `${c.provider}/${c.model ?? "?"}` : c.ts.slice(0, 13) + ":00Z";
+    const r = g.get(k) ?? { requests: 0, errors: 0, blocked: 0, input: 0, output: 0, cached: 0, cacheWrite: 0, latencyMs: [] }; g.set(k, r);
+    r.requests++; if (c.decision?.action === "block") r.blocked++; else if (!(c.upstreamStatus >= 200 && c.upstreamStatus < 400)) r.errors++;
+    r.input += c.usage?.input ?? 0; r.output += c.usage?.output ?? 0; r.cached += c.usage?.cached ?? 0; r.cacheWrite += c.usage?.cacheWrite ?? 0; r.latencyMs.push(c.latencyMs ?? 0);
+  }
+  return [...g].sort(([a], [b]) => a.localeCompare(b)).map(([group, r]) => {
+    const l = r.latencyMs.sort((a, b) => a - b);
+    return { group, requests: r.requests, errors: r.errors, blocked: r.blocked, inputTokens: r.input, outputTokens: r.output, cachedTokens: r.cached, cacheWriteTokens: r.cacheWrite,
+      latencyAvgMs: Math.round(l.reduce((a, x) => a + x, 0) / l.length), latencyP95Ms: l[Math.min(l.length - 1, Math.floor(l.length * 0.95))] };
+  });
+}

@@ -1,0 +1,73 @@
+#!/usr/bin/env node
+// Attachment worker: runs in a separate process (bwrap: no network, read-only FS, private /tmp; prlimit: CPU + address space).
+// stdin: one JSON job; stdout: one JSON result. Only local tools: poppler (pdfinfo/pdftotext/pdftoppm), tesseract, python3-PIL.
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+export interface Word { text: string; box: [number, number, number, number] }
+export interface Unit { where: string; text: string; words?: Word[]; png?: string }
+const run = (cmd: string, args: string[], input?: Buffer) =>
+  execFileSync(cmd, args, { input, maxBuffer: 256 << 20, env: { PATH: "/usr/bin:/bin", OMP_THREAD_LIMIT: "1", HOME: "/tmp" }, stdio: ["pipe", "pipe", "ignore"] });
+const PY_META = `import sys,json
+from PIL import Image
+im=Image.open(sys.argv[1]); im.load()
+out=[str(v) for v in im.info.values() if isinstance(v,(str,bytes))]
+ex=im.getexif()
+out+=[v.decode('utf8','replace') if isinstance(v,bytes) else str(v) for v in ex.values()]
+print(json.dumps({"format":im.format,"frames":getattr(im,"n_frames",1),"meta":out}))`;
+const PY_BLACK = `import sys,json
+from PIL import Image,ImageDraw
+job=json.load(sys.stdin); pages=[]
+for p in job["pages"]:
+  im=Image.open(p["file"]).convert("RGB"); d=ImageDraw.Draw(im)
+  for b in ([[0,0,im.width,im.height]] if p["all"] else p["boxes"]): d.rectangle([b[0]-2,b[1]-2,b[0]+b[2]+2,b[1]+b[3]+2],fill="black")
+  pages.append(im)
+pages[0].save(job["out"],format=job["format"],save_all=len(pages)>1,append_images=pages[1:])`;
+
+function ocr(file: string): { text: string; words: Word[] } {
+  const tsv = run("tesseract", [file, "stdout", "--psm", "11", "tsv"]).toString();
+  const words: Word[] = [];
+  for (const l of tsv.split("\n").slice(1)) {
+    const c = l.split("\t"); if (c.length < 12 || !c[11].trim() || Number(c[10]) < 0) continue;
+    words.push({ text: c[11], box: [+c[6], +c[7], +c[8], +c[9]] });
+  }
+  return { text: words.map((w) => w.text).join(" "), words };
+}
+
+function job(j: any): unknown {
+  const dir = mkdtempSync(join(tmpdir(), "w-")), f = join(dir, "in");
+  if (j.op === "blackout") { // pages: [{b64, boxes, all}] -> one image or PDF
+    const pages = j.pages.map((p: any, i: number) => { const pf = join(dir, `p${i}`); writeFileSync(pf, Buffer.from(p.b64, "base64")); return { file: pf, boxes: p.boxes, all: p.all }; });
+    const out = join(dir, "out"); run("python3", ["-c", PY_BLACK], Buffer.from(JSON.stringify({ pages, out, format: j.format })));
+    return { b64: readFileSync(out).toString("base64") };
+  }
+  writeFileSync(f, Buffer.from(j.b64, "base64"));
+  if (j.mime.startsWith("image/")) {
+    const m = JSON.parse(run("python3", ["-c", PY_META, f]).toString()); // also proves it decodes
+    if (m.frames > 1) throw new Error("multi-frame");
+    const o = ocr(f);
+    return { units: [{ where: "ocr", text: o.text, words: o.words, png: j.b64 }, { where: "meta", text: m.meta.join("\n") }] };
+  }
+  if (j.mime === "application/pdf") {
+    const info = run("pdfinfo", [f]).toString();
+    if (/^Encrypted:\s+yes/m.test(info)) throw new Error("encrypted");
+    const units: Unit[] = [{ where: "meta", text: info }];
+    const pages = run("pdftotext", ["-q", f, "-"]).toString().split("\f"); pages.pop();
+    pages.forEach((t, i) => units.push({ where: `page${i + 1}`, text: t }));
+    if (j.raster) { // rendered-page OCR: catches scanned pages and gives boxes for page redaction
+      run("pdftoppm", ["-r", "110", "-png", f, join(dir, "pg")]);
+      readdirSync(dir).filter((x) => x.startsWith("pg")).sort().forEach((x, i) => {
+        const o = ocr(join(dir, x)); units.push({ where: `page${i + 1}-ocr`, text: o.text, words: o.words, png: readFileSync(join(dir, x)).toString("base64") });
+      });
+    }
+    return { units };
+  }
+  throw new Error("unsupported");
+}
+
+let input = ""; process.stdin.on("data", (c) => (input += c)).on("end", () => {
+  try { process.stdout.write(JSON.stringify({ ok: true, ...(job(JSON.parse(input)) as object) })); }
+  catch { process.stdout.write(JSON.stringify({ ok: false })); } // never echo content or tool stderr
+});
