@@ -1,5 +1,5 @@
-# BASE=node:26.10.0-slim (default) or platformatic/node-caged:26.10.0-slim (V8 pointer compression, 4 GiB heap cap; see docs/adr/0005-official-node-image.md)
-ARG BASE=node:26.10.0-slim
+# BASE=node:26.12.1-slim (default) or platformatic/node-caged:26.10.0-slim (V8 pointer compression, 4 GiB heap cap; see docs/adr/0005-official-node-image.md)
+ARG BASE=node:26.12.1-slim
 FROM ${BASE} AS build
 WORKDIR /app
 COPY package.json package-lock.json ./

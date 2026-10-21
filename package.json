@@ -28,7 +28,7 @@
   "type": "module",
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.135.0",
-    "@types/node": "^20.19.43",
+    "@types/node": "^24.19.2",
     "openai": "^6.49.0",
     "tsrs": "0.18.0-ts7.1.0-dev.20260929",
     "typescript": "^5.9.3"
@@ -44,6 +44,6 @@
     "url": "git+https://github.com/adagora/ai-audit.git"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.23.4 <23 || >=24.22.1 <25 || >=26.12.1"
   }
 }
