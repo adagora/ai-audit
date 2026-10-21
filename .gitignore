@@ -6,3 +6,4 @@ live/
 audit*.jsonl
 demo-log.jsonl
 demo-report.md
+*.jsonl.lock

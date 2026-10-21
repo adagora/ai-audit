@@ -1,10 +1,14 @@
 // Append-only, hash-chained JSONL decision log. No network, no deps.
 import { createHash, randomUUID } from "node:crypto";
-import { appendFileSync, closeSync, existsSync, fstatSync, openSync, readFileSync, readSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, statSync, unlinkSync, writeSync } from "node:fs";
 import vm from "node:vm";
 
 export const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 const GENESIS = "0".repeat(64);
+const LOCK_STALE_MS = 10_000, LOCK_WAIT_MS = 5_000;
+const pause = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+/** Raised when the log cannot take a record (lock timeout or failure). */
+export class AuditLogUnavailable extends Error { constructor(reason: string) { super(`audit_log_unavailable: ${reason}`); } }
 
 export interface Step { source: string; input: unknown; output: unknown } // deterministic step
 export interface Review { reviewer: string; decision: "approved" | "overridden" | "rejected"; note?: string; at: string }
@@ -45,7 +49,8 @@ export class AuditLog {
     if (!existsSync(this.path)) return [];
     return readFileSync(this.path, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
   }
-  /** Hash of the last line, read from the file tail (O(record), safe with a second writer such as the CLI). */
+  /** Hash of the last line, read from the file tail (O(record)). Only consistent while the caller holds the
+   *  cross-process lock (withLock): a second writer process (CLI approve, a replica) could append in between. */
   private lastHash(): string {
     if (!existsSync(this.path)) return GENESIS;
     const fd = openSync(this.path, "r");
@@ -59,12 +64,28 @@ export class AuditLog {
       return GENESIS;
     } finally { closeSync(fd); }
   }
+  /** Exclusive O_EXCL lock file around read-tail + write, so appends from several processes stay one chain. */
+  private withLock<T>(fn: () => T): T {
+    const lock = this.path + ".lock", deadline = Date.now() + LOCK_WAIT_MS;
+    for (;;) {
+      try { const fd = openSync(lock, "wx"); writeSync(fd, String(process.pid)); closeSync(fd); break; }
+      catch (e: any) {
+        if (e.code !== "EEXIST") throw new AuditLogUnavailable(`lock ${e.code}`);
+        try { if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) { unlinkSync(lock); continue; } } catch { continue; }
+        if (Date.now() > deadline) throw new AuditLogUnavailable("lock timeout");
+        pause(2);
+      }
+    }
+    try { return fn(); } finally { try { unlinkSync(lock); } catch { /* already gone */ } }
+  }
   append(r: Omit<Rec, "prevHash" | "hash">): Rec {
-    const prevHash = this.lastHash();
-    const body = { ...r, prevHash };
-    const rec = { ...body, hash: sha256(canon(body)) } as Rec;
-    appendFileSync(this.path, JSON.stringify(rec) + "\n");
-    return rec;
+    return this.withLock(() => {
+      const prevHash = this.lastHash();
+      const body = { ...r, prevHash };
+      const rec = { ...body, hash: sha256(canon(body)) } as Rec;
+      appendFileSync(this.path, JSON.stringify(rec) + "\n");
+      return rec;
+    });
   }
 
   record(e: Entry): Rec {
