@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { AuditLog, anchor, report, sha256, stats, verifyAnchors } from "./audit.js";
 import { randomBytes } from "node:crypto";
 import { SANDBOX, TOOLS_OK } from "./attachments.js";
 import { createProxy } from "./proxy.js";
+import { listSessions, renderSessionHtml } from "./contextView.js";
 import type { Mode } from "./scan.js";
 import { scrubHistory } from "./history.js";
 import { createInspectionProfile } from "./profile.js";
@@ -14,7 +15,7 @@ const { values: a } = parseArgs({ args: rest, options: {
   "upstream-openai": { type: "string", default: "https://api.openai.com" }, "upstream-anthropic": { type: "string", default: "https://api.anthropic.com" },
   mode: { type: "string", default: "redact" }, log: { type: "string", default: "./audit.jsonl" }, port: { type: "string", default: "8787" },
   host: { type: "string", default: "127.0.0.1" }, anchors: { type: "string" }, config: { type: "string" }, by: { type: "string", default: "model" }, name: { type: "string", default: "client" }, "no-page-redaction": { type: "boolean", default: false }, "log-content": { type: "boolean", default: false }, "allow-hashes": { type: "string" }, from: { type: "string", default: "1970-01-01" }, to: { type: "string", default: "9999-12-31" },
-  input: { type: "string" }, output: { type: "string" }, format: { type: "string" }, "max-record-bytes": { type: "string" },
+  input: { type: "string" }, session: { type: "string" }, output: { type: "string" }, format: { type: "string" }, "max-record-bytes": { type: "string" },
 } });
 const log = new AuditLog(a.log!);
 if (cmd === "scrub" || cmd === "profile") {
@@ -62,5 +63,14 @@ if (cmd === "scrub" || cmd === "profile") {
   const v = verifyAnchors(log, a.anchors); console.log(v.ok ? `OK: chain intact, consistent with ${v.anchors} anchors` : `FAIL: ${v.reason}`); process.exit(v.ok ? 0 : 1);
 } else if (cmd === "verify") {
   const v = log.verifyChain(); console.log(v.ok ? `OK: ${log.read().length} records, chain intact` : `BROKEN at line ${v.badLine}: ${v.reason}`); process.exit(v.ok ? 0 : 1);
+} else if (cmd === "context") {
+  const records = log.read();
+  if (!a.session) console.table(listSessions(records));
+  else {
+    try {
+      const html = renderSessionHtml(records, a.session);
+      if (a.output) writeFileSync(a.output, html); else process.stdout.write(html);
+    } catch { console.error("audit_unknown_session"); process.exitCode = 2; }
+  }
 } else if (cmd === "report") console.log(report(log, a.from!, a.to!).md);
-else { console.error("usage: ai-audit serve|verify|anchor|report|stats|keygen|profile|scrub [--input FILE --output FILE --format json|jsonl --max-record-bytes N] [--allow-hashes FILE] [--config FILE] [--by key|model|hour] [--name N] [--log-content] [--anchors FILE] [--no-page-redaction] [--log ./audit.jsonl] [--mode redact|no-go|advisory] [--port 8787] [--from ISO --to ISO]"); process.exit(2); }
+else { console.error("usage: ai-audit serve|verify|anchor|report|stats|context [--session ID --output FILE]|keygen|profile|scrub [--input FILE --output FILE --format json|jsonl --max-record-bytes N] [--allow-hashes FILE] [--config FILE] [--by key|model|hour] [--name N] [--log-content] [--anchors FILE] [--no-page-redaction] [--log ./audit.jsonl] [--mode redact|no-go|advisory] [--port 8787] [--from ISO --to ISO]"); process.exit(2); }
