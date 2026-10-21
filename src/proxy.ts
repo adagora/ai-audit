@@ -4,6 +4,7 @@ import { AuditLog, AuditLogUnavailable, sha256, stats } from "./audit.js";
 import { decide, hasDuplicateKeys, inspect, type Mode } from "./scan.js";
 import { toolResultSignals, type Signal } from "./injection.js";
 import { extract, type Api } from "./extract.js";
+import { conversationItems, loadOrCreateSessionKey, SessionIndex } from "./session.js";
 import { composeContext, promptTokens, scaleToProvider } from "./context.js";
 import { Counter, Gauge, Histogram, OPENMETRICS_CONTENT_TYPE, exposition } from "./metrics.js";
 import { discover, inspectAttachment, cacheStats, TOOLS_OK } from "./attachments.js";
@@ -13,6 +14,7 @@ import { createInspectionProfile } from "./profile.js";
 export interface ProxyOpts {
   upstreamOpenai: string; upstreamAnthropic: string; mode: Mode; log: AuditLog; maxBodyBytes?: number; timeoutMs?: number; carnet?: Set<string>;
   pageRedaction?: boolean;
+  sessionKey?: Buffer;
   keys?: VKey[];
   upstreamKeys?: { openai?: string; anthropic?: string };
   aliases?: Record<string, Alias>;
@@ -32,6 +34,7 @@ export const metrics = {
   upstreamResponses: new Counter("ai_audit_upstream_responses", "Upstream responses by provider and status class."),
   upstreamErrors: new Counter("ai_audit_upstream_errors", "Forwarded requests that got no upstream response, by provider and reason."),
   unknownUsage: new Counter("ai_audit_unknown_usage", "Successful upstream calls without provider-reported usage, by field (ADR 0012)."),
+  sessionIndexRebuildFailures: new Counter("ai_audit_session_index_rebuild_failures", "Proxy starts where the session index could not be rebuilt from the log."),
   cacheHits: new Gauge("ai_audit_attachment_cache_hits", "Attachment inspection cache hits since start.", () => cacheStats.hits),
   cacheMisses: new Gauge("ai_audit_attachment_cache_misses", "Attachment inspection cache misses since start.", () => cacheStats.misses),
 };
@@ -47,6 +50,8 @@ const RESP_DROP = new Set(["content-encoding", "content-length", "transfer-encod
 export function createProxy(o: ProxyOpts) {
   const max = o.maxBodyBytes ?? 32 * 1024 * 1024, timeoutMs = o.timeoutMs ?? 180_000;
   const profile = createInspectionProfile(o);
+  const sessions = new SessionIndex(o.sessionKey ?? loadOrCreateSessionKey(o.log.path + ".session-key"));
+  try { sessions.rebuild(o.log.read()); } catch { metrics.sessionIndexRebuildFailures.inc(); }
   return http.createServer(async (req, res) => {
     const rid = randomUUID(), t0 = Date.now(); res.setHeader("x-request-id", rid);
     let decisionTag = "none", routeTag = "";
@@ -121,11 +126,14 @@ export function createProxy(o: ProxyOpts) {
         requestHash: sha256(raw.toString("latin1")), inspectionProfile: profile.receipt,
       };
       const composition = route === "count" ? undefined : composeContext(route, body, raw.length);
+      const items = route === "count" ? undefined : conversationItems(route, body);
+      const session = items && sessions.link(items);
+      if (session) sessions.remember(session);
       const reject = (code: string) => {
         clearTimeout(timer); decisionTag = "reject";
         if (route !== "count") o.log.append({ kind: "llm-call", id: rid, ts: new Date(t0).toISOString(), ...context,
           decision: { mode: profile.mode, action: "reject", findings: findings.map((f) => ({ rule: f.rule, path: f.path })) },
-          ...(composition && { context: composition }), upstreamStatus: null, error: code, latencyMs: Date.now() - t0 });
+          ...(composition && { context: composition }), ...(session && { session }), upstreamStatus: null, error: code, latencyMs: Date.now() - t0 });
         return fail(422, code);
       };
       if (refs.length && profile.mode !== "advisory") return reject("audit_uninspectable_reference");
@@ -148,7 +156,7 @@ export function createProxy(o: ProxyOpts) {
       if (d.action === "forward-redacted") sanitize.forEach((f) => f());
       const fwd = d.action === "forward-redacted" || alias ? Buffer.from(JSON.stringify(value)) : raw;
       const rec = {
-        ...context, forwardedPromptDigest: sha256(fwd.toString("latin1")), ...(composition && { context: composition }),
+        ...context, forwardedPromptDigest: sha256(fwd.toString("latin1")), ...(composition && { context: composition }), ...(session && { session }),
         decision: { mode: profile.mode, action: d.action, findings: d.findings.map((f) => ({ rule: f.rule, path: f.path })), ...(signals.length && { signals }), ...(d.action === "forward-redacted" && rasterized.length && { rasterized }) },
       };
       const write = (extra: object) => { if (route !== "count") o.log.append({ kind: "llm-call", id: rid, ts: new Date(t0).toISOString(), ...rec, ...extra, latencyMs: Date.now() - t0 } as any); };
