@@ -10,7 +10,7 @@ COPY src ./src
 COPY test ./test
 COPY examples ./examples
 COPY bench ./bench
-RUN npx tsc
+RUN npm run build
 
 FROM ${BASE}
 RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr poppler-utils python3-pil bubblewrap util-linux \

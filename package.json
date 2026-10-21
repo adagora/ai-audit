@@ -6,11 +6,12 @@
     "test": "test"
   },
   "scripts": {
-    "build": "tsc",
-    "test": "tsc && node --test dist/test/*.test.js",
-    "demo": "tsc && node dist/src/demo.js",
+    "build": "tsrs --skipLibCheck",
+    "test": "npm run build && node --test dist/test/*.test.js",
+    "demo": "npm run build && node dist/src/demo.js",
     "example:quote": "node examples/quineling-quote/run.mjs",
-    "bench:overhead": "tsc && node bench/overhead.mjs"
+    "bench:overhead": "npm run build && node bench/overhead.mjs",
+    "check:tsc": "tsc --noEmit"
   },
   "keywords": [
     "ai-act",
@@ -27,6 +28,7 @@
     "@anthropic-ai/sdk": "^0.135.0",
     "@types/node": "^20.19.43",
     "openai": "^6.49.0",
+    "tsrs": "0.18.0-ts7.1.0-dev.20260929",
     "typescript": "^5.9.3"
   },
   "optionalDependencies": {
