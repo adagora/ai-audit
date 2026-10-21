@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync, writeFileSync, appendFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mockUpstream, startProxy, makePdf, AWS, AUTH } from "./helpers.js";
+import { mockUpstream, startProxy, makePdf, AWS, AUTH, ATTACHMENT_TOOLS } from "./helpers.js";
 import { work, cacheStats, SANDBOX, inspectAttachment } from "../src/attachments.js";
 import { AuditLog, anchor, sha256, verifyAnchors } from "../src/audit.js";
 import { scanText } from "../src/scan.js";
@@ -24,14 +24,14 @@ console.log("sandbox:", SANDBOX);
 
 const pdfReq = { model: "gpt-x", input: [{ role: "user", content: [{ type: "input_file", filename: "offer.pdf", file_data: `data:application/pdf;base64,${PDF}` }] }] };
 for (const [name, p, code] of [["--no-page-redaction", () => np, "audit_unredactable_finding"], ["no-go", () => ng, "audit_findings_blocked"]] as const)
-  test(`PDF with a fake key, ${name} -> 409 and upstream never called`, async () => {
+  test(`PDF with a fake key, ${name} -> 409 and upstream never called`, ATTACHMENT_TOOLS, async () => {
     const n = up.seen.length;
     const r = await post(p().url, "/v1/responses", pdfReq);
     const j = await r.json(); assert.equal(r.status, 409); assert.equal(j.error.code, code); assert.ok(j.error.findings.includes("aws-access-token"));
     assert.equal(up.seen.length, n);
   });
 
-test("PDF with a fake key, default redact: raster-rebuilt, re-inspected clean, key gone upstream, logged as rasterized", async () => {
+test("PDF with a fake key, default redact: raster-rebuilt, re-inspected clean, key gone upstream, logged as rasterized", ATTACHMENT_TOOLS, async () => {
   const r = await post(red.url, "/v1/messages", { model: "c", max_tokens: 5, messages: [{ role: "user", content: [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: PDF } }, { type: "text", text: "summarise" }] }] });
   assert.equal(r.status, 200); await r.text();
   const fwd = last().body.toString(), sent = JSON.parse(fwd).messages[0].content[0].source.data;
@@ -44,7 +44,7 @@ test("PDF with a fake key, default redact: raster-rebuilt, re-inspected clean, k
   assert.equal(d.action, "forward-redacted"); assert.deepEqual(d.rasterized, ["$.messages.0.content.0.source.data"]);
 });
 
-test("image (OpenAI image_url data URI) with OCR'd key -> boxes blacked out, rest kept", async () => {
+test("image (OpenAI image_url data URI) with OCR'd key -> boxes blacked out, rest kept", ATTACHMENT_TOOLS, async () => {
   const r = await post(red.url, "/v1/chat/completions", chat([{ type: "text", text: "what is this?" }, { type: "image_url", image_url: { url: `data:image/png;base64,${KEY_PNG}` } }]));
   assert.equal(r.status, 200); await r.text();
   const url: string = JSON.parse(last().body.toString()).messages[0].content[1].image_url.url;
@@ -53,7 +53,7 @@ test("image (OpenAI image_url data URI) with OCR'd key -> boxes blacked out, res
   assert.match((red.log.read().at(-1) as any).decision.findings[0].path, /image_url\.url#ocr/);
 });
 
-test("clean image forwarded byte-identical; identical bytes hit the cache (no second OCR)", async () => {
+test("clean image forwarded byte-identical; identical bytes hit the cache (no second OCR)", ATTACHMENT_TOOLS, async () => {
   const body = { model: "c", max_tokens: 5, messages: [{ role: "user", content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: CLEAN_PNG } }] }] };
   const h0 = cacheStats.hits;
   const t1 = Date.now(); await (await post(red.url, "/v1/messages", body)).text(); const first = Date.now() - t1;
@@ -62,7 +62,7 @@ test("clean image forwarded byte-identical; identical bytes hit the cache (no se
   assert.equal(cacheStats.hits, h0 + 1); console.log(`clean image: first ${first} ms, cached ${second} ms`);
 });
 
-test("uninspectable attachments fail closed with 422", async () => {
+test("uninspectable attachments fail closed with 422", ATTACHMENT_TOOLS, async () => {
   for (const [body, code] of [
     [chat([{ type: "image_url", image_url: { url: "data:image/png;base64,bm90IGFuIGltYWdl" } }]), "audit_inspection_failed"],
     [chat([{ type: "image_url", image_url: { url: "https://example.com/x.png" } }]), "audit_uninspectable_reference"],
@@ -93,7 +93,7 @@ test("client key: wrong -> 401; right -> upstream gets the upstream key, never t
   assert.ok(!readFileSync(ck.log.path, "utf8").includes("upstream-1"));
 });
 
-test("metrics: counts by decision/status + latency, no content", async () => {
+test("metrics: counts by decision/status + latency, no content", ATTACHMENT_TOOLS, async () => {
   const m = await (await fetch(red.url + "/metrics")).text();
   const sum = (re: RegExp) => m.split("\n").filter((l) => re.test(l)).reduce((a, l) => a + Number(l.split(" ").at(-1)), 0);
   assert.ok(sum(/^ai_audit_requests_total\{.*decision="forward-redacted"/) >= 2 && sum(/^ai_audit_requests_total\{.*decision="reject"/) >= 4);
@@ -115,7 +115,7 @@ test("anchor: whole-file swap and truncation detected", () => {
   writeFileSync(log.path, orig); appendFileSync(log.path, ""); assert.equal(verifyAnchors(log, anc).ok, true);
 });
 
-test("attachment cache reuses only the same content-addressed inspection policy", async () => {
+test("attachment cache reuses only the same content-addressed inspection policy", ATTACHMENT_TOOLS, async () => {
   const carnet = new Set([sha256("synthetic-cache-profile-one")]);
   const profile = createInspectionProfile({ mode: "redact", carnet });
   const a = { mime: "image/png", b64: CLEAN_PNG };
@@ -131,7 +131,7 @@ test("attachment cache reuses only the same content-addressed inspection policy"
   assert.equal(cacheStats.misses, misses + 3);
 });
 
-test("a PDF containing an AWS secret-access assignment is sanitized by the shared scanner", async () => {
+test("a PDF containing an AWS secret-access assignment is sanitized by the shared scanner", ATTACHMENT_TOOLS, async () => {
   const secret = "B".repeat(40);
   const pdf = makePdf(["AWS_SECRET_ACCESS_KEY=", secret]).toString("base64");
   const r = await post(red.url, "/v1/messages", { model: "c", max_tokens: 5, messages: [{ role: "user", content: [
