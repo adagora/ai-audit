@@ -1,7 +1,7 @@
 // Universal LLM audit proxy: OpenAI + Anthropic wire formats, node:http + fetch, no deps.
 import http from "node:http";
 import { randomUUID } from "node:crypto";
-import { AuditLog, sha256, stats } from "./audit.js";
+import { AuditLog, AuditLogUnavailable, sha256, stats } from "./audit.js";
 import { decide, hasDuplicateKeys, inspect, type Mode } from "./scan.js";
 import { toolResultSignals, type Signal } from "./injection.js";
 import { extract, type Api } from "./extract.js";
@@ -21,7 +21,7 @@ export interface ProxyOpts {
 }
 export interface VKey { name: string; sha256: string; models?: string[]; providers?: ("openai" | "anthropic")[]; logContent?: boolean } // logContent: log redacted output/tool args (agent keys); default hashes only (ADR 0011)
 export interface Alias { model: string; upstream?: string }
-export const metrics = { requests: 0, byDecision: {} as Record<string, number>, byStatus: {} as Record<string, number>, latencyMsSum: 0, latencyMsMax: 0, attachments: 0, cache: cacheStats };
+export const metrics = { requests: 0, byDecision: {} as Record<string, number>, byStatus: {} as Record<string, number>, latencyMsSum: 0, latencyMsMax: 0, attachments: 0, logUnavailable: 0, logWriteFailures: 0, cache: cacheStats };
 const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 const ROUTES: Record<string, Api | "count" | undefined> = {
   "/v1/chat/completions": "openai-chat", "/v1/responses": "openai-responses", "/v1/messages": "anthropic-messages", "/v1/messages/count_tokens": "count",
@@ -44,6 +44,8 @@ export function createProxy(o: ProxyOpts) {
       if (!res.headersSent) res.writeHead(status, { "content-type": "application/json" });
       res.end(JSON.stringify({ type: "error", error: { type: "audit_proxy_error", code, message: code, ...(findings && { findings }) } }));
     };
+    const event = (name: string, e: unknown) => o.quiet || process.stderr.write(JSON.stringify({ ts: new Date().toISOString(), event: name, requestId: rid, reason: e instanceof Error ? e.message : "unknown" }) + "\n");
+    const logUnavailable = (e: unknown) => { metrics.logUnavailable++; event("audit_log_unavailable", e); return fail(503, "audit_log_unavailable"); };
     try {
       const url = new URL(req.url ?? "/", "http://x"), route = ROUTES[url.pathname];
       routeTag = url.pathname;
@@ -87,6 +89,9 @@ export function createProxy(o: ProxyOpts) {
       const raw = Buffer.concat(chunks); let body: any;
       try { body = JSON.parse(raw.toString("utf8")); } catch { clearTimeout(timer); return fail(400, "audit_malformed_json"); }
       if (hasDuplicateKeys(raw.toString("utf8"))) { clearTimeout(timer); return fail(400, "audit_duplicate_keys"); }
+
+      // fail closed: a request whose decision cannot be recorded is never forwarded (ADR 0016)
+      if (route !== "count") try { o.log.ensureWritable(); } catch (e) { clearTimeout(timer); decisionTag = "log-unavailable"; return logUnavailable(e); }
 
       // 2. inspect everything, then one decision
       const requestedModel = typeof body?.model === "string" ? body.model : undefined;
@@ -135,6 +140,7 @@ export function createProxy(o: ProxyOpts) {
       if (d.action === "block") { clearTimeout(timer); write({ upstreamStatus: null }); return fail(d.status!, d.code!, d.findings.map((f) => f.rule)); }
 
       // 3. forward, stream back while capturing
+      if (route !== "count") try { o.log.ensureWritable(); } catch (e) { clearTimeout(timer); decisionTag = "log-unavailable"; return logUnavailable(e); }
       let up: Response;
       try { up = await fetch(target, { method: "POST", headers, body: fwd, signal: ac.signal }); }
       catch { clearTimeout(timer); const code = ac.signal.aborted ? "audit_deadline_exceeded" : "audit_upstream_unreachable"; write({ upstreamStatus: null, error: code }); return fail(ac.signal.aborted ? 408 : 502, code); }
@@ -150,7 +156,10 @@ export function createProxy(o: ProxyOpts) {
       write({ upstreamStatus: up.status, clientAborted: !res.writableFinished || undefined, responseModel: out?.model, usage: out?.usage, stop: out?.stop,
         ...(out && { content: full ? "redacted" : "hash", outputHash: sha256(out.text), ...(full && { output: red(out.text) }),
           toolCalls: out.toolCalls.map((t) => ({ name: t.name, argsHash: sha256(t.args), ...(full && { args: red(t.args) }) })) }) });
-    } catch { fail(500, "audit_internal_error"); }
+    } catch (e) {
+      if (e instanceof AuditLogUnavailable) { metrics.logWriteFailures++; event("audit_log_write_failed", e); } // content-free
+      if (!res.writableEnded) fail(500, "audit_internal_error"); // never write after end (would crash the process)
+    }
   });
 }
 const str = (v: unknown) => (typeof v === "string" ? v.slice(0, 128) : undefined);

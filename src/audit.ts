@@ -1,13 +1,14 @@
 // Append-only, hash-chained JSONL decision log. No network, no deps.
 import { createHash, randomUUID } from "node:crypto";
-import { appendFileSync, closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, statSync, unlinkSync, writeSync } from "node:fs";
+import { accessSync, appendFileSync, closeSync, constants, existsSync, fstatSync, openSync, readFileSync, readSync, statSync, unlinkSync, writeSync } from "node:fs";
+import { dirname } from "node:path";
 import vm from "node:vm";
 
 export const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 const GENESIS = "0".repeat(64);
 const LOCK_STALE_MS = 10_000, LOCK_WAIT_MS = 5_000;
 const pause = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-/** Raised when the log cannot take a record (lock timeout or failure). */
+/** Raised when the log cannot take a record; callers must fail closed (ADR 0016). */
 export class AuditLogUnavailable extends Error { constructor(reason: string) { super(`audit_log_unavailable: ${reason}`); } }
 
 export interface Step { source: string; input: unknown; output: unknown } // deterministic step
@@ -59,6 +60,7 @@ export class AuditLog {
       while (pos > 0) {
         const n = Math.min(65536, pos); pos -= n; const b = Buffer.alloc(n); readSync(fd, b, 0, n, pos);
         tail = b.toString("latin1") + tail; const t = tail.trimEnd(), nl = t.lastIndexOf("\n");
+        if (pos + n === fstatSync(fd).size && n > 0 && b[n - 1] !== 0x0a) throw new AuditLogUnavailable("torn last line, run `ai-audit verify`");
         if (nl >= 0 || pos === 0) { const line = Buffer.from(t.slice(nl + 1), "latin1").toString("utf8"); return line ? JSON.parse(line).hash : GENESIS; }
       }
       return GENESIS;
@@ -78,9 +80,16 @@ export class AuditLog {
     }
     try { return fn(); } finally { try { unlinkSync(lock); } catch { /* already gone */ } }
   }
+  /** Throws AuditLogUnavailable unless the next append would succeed (writable, intact tail). Call before forwarding. */
+  ensureWritable(): void {
+    try { accessSync(existsSync(this.path) ? this.path : dirname(this.path), constants.W_OK); }
+    catch { throw new AuditLogUnavailable("not writable"); }
+    try { this.lastHash(); } catch (e) { throw e instanceof AuditLogUnavailable ? e : new AuditLogUnavailable("unparseable last line"); }
+  }
   append(r: Omit<Rec, "prevHash" | "hash">): Rec {
     return this.withLock(() => {
-      const prevHash = this.lastHash();
+      let prevHash: string;
+      try { prevHash = this.lastHash(); } catch (e) { throw e instanceof AuditLogUnavailable ? e : new AuditLogUnavailable("unparseable last line"); }
       const body = { ...r, prevHash };
       const rec = { ...body, hash: sha256(canon(body)) } as Rec;
       appendFileSync(this.path, JSON.stringify(rec) + "\n");
