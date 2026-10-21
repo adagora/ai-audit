@@ -18,7 +18,7 @@ const KEY_PNG = fx("key.png"), CLEAN_PNG = fx("clean.png");
 const PDF = makePdf(["Offer 2026/10 for flange", `ci token ${AWS} do not share`]).toString("base64");
 const post = (base: string, path: string, body: object, auth = AUTH) => fetch(base + path, { method: "POST", headers: { "content-type": "application/json", authorization: auth }, body: JSON.stringify(body) });
 const chat = (parts: unknown[]) => ({ model: "gpt-x", messages: [{ role: "user", content: parts }] });
-const ocrText = async (mime: string, b64: string) => ((await work({ op: "extract", mime, b64, raster: true })).units as any[]).map((u) => u.text).join(" ");
+const ocrText = async (mime: string, b64: string) => ((await work({ op: "extract", mime, raster: true }, undefined, undefined, undefined, [{ name: "in", data: Buffer.from(b64, "base64") }])).units as any[]).map((u) => u.text).join(" ");
 const last = () => up.seen[up.seen.length - 1];
 console.log("sandbox available:", SANDBOX_AVAILABLE);
 

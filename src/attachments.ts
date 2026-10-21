@@ -1,6 +1,7 @@
 import { spawn, execFileSync, spawnSync } from "node:child_process";
-import { existsSync, lstatSync, readlinkSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, lstatSync, readlinkSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { scanText, type Allowlist, type Finding } from "./scan.js";
@@ -25,8 +26,9 @@ export function sandboxMounts(): string[] {
 }
 const SANDBOX_ENV = ["--clearenv", "--setenv", "PATH", "/usr/bin:/bin", "--setenv", "HOME", "/tmp", "--setenv", "OMP_THREAD_LIMIT", "1"];
 const SANDBOX_ISOLATION = ["--unshare-all", "--die-with-parent", "--new-session", "--cap-drop", "ALL", "--tmpfs", "/tmp", "--proc", "/proc", "--dev", "/dev", "--chdir", "/tmp"];
-export function sandboxArgv(command: string[]): string[] {
-  return ["bwrap", ...sandboxMounts(), "--ro-bind", WORKER, SANDBOX_WORKER, ...SANDBOX_ISOLATION, ...SANDBOX_ENV, ...command];
+export const SANDBOX_JOB_DIR = "/job";
+export function sandboxArgv(command: string[], jobDir?: string): string[] {
+  return ["bwrap", ...sandboxMounts(), "--ro-bind", WORKER, SANDBOX_WORKER, ...SANDBOX_ISOLATION, ...(jobDir ? ["--bind", jobDir, SANDBOX_JOB_DIR] : []), ...SANDBOX_ENV, ...command];
 }
 const probeSandbox = () => has("bwrap") && spawnSync("bwrap", [...sandboxMounts(), ...SANDBOX_ISOLATION, ...SANDBOX_ENV, "/usr/bin/true"], { stdio: "ignore", timeout: 10_000 }).status === 0;
 export const SANDBOX_AVAILABLE = probeSandbox();
@@ -67,9 +69,45 @@ export const WORKER_WALL_CLOCK_MS = 120_000;
 export const WORKER_OUTPUT_LIMIT = 16 * 1024 * 1024;
 const PRLIMIT = ["prlimit", `--data=${WORKER_LIMITS.data}`, `--cpu=${WORKER_LIMITS.cpu}`, `--fsize=${WORKER_LIMITS.fsize}`, `--nofile=${WORKER_LIMITS.nofile}`, "--"];
 
-export function work(jobIn: object, timeoutMs = WORKER_WALL_CLOCK_MS, sandbox: "bwrap" | "disabled" = "bwrap", outputLimit = WORKER_OUTPUT_LIMIT): Promise<any> {
-  const argv = sandbox === "bwrap" ? sandboxArgv([...PRLIMIT, process.execPath, SANDBOX_WORKER]) : [...PRLIMIT, process.execPath, WORKER];
-  return new Promise((resolve) => {
+export const JOB_OUTPUT_LIMIT = 256 * 1024 * 1024;
+export const JOB_MAX_PAGES = 500;
+const OUTPUT_FILE = /^(pg-\d+\.png|out)$/;
+type JobFile = { name: string; data: Buffer };
+
+export function readJobFiles(dir: string, names: unknown[], inputs: Set<string>, limits = { bytes: JOB_OUTPUT_LIMIT, files: JOB_MAX_PAGES }): Map<string, Buffer> | undefined {
+  if (names.length > limits.files) return undefined;
+  const files = new Map<string, Buffer>(); let total = 0;
+  for (const name of names) {
+    if (typeof name !== "string" || !(OUTPUT_FILE.test(name) || inputs.has(name))) return undefined;
+    if (files.has(name)) continue;
+    const path = join(dir, name), st = lstatSync(path, { throwIfNoEntry: false });
+    if (!st?.isFile() || st.nlink !== 1) return undefined;
+    total += st.size; if (total > limits.bytes) return undefined;
+    const data = readFileSync(path); if (data.length !== st.size) return undefined;
+    files.set(name, data);
+  }
+  return files;
+}
+
+function resolveFiles(r: any, dir: string, inputs: Set<string>): any {
+  const units: Unit[] | undefined = Array.isArray(r.units) ? r.units : undefined;
+  const names = [...(units ?? []).filter((u) => u.file !== undefined).map((u) => u.file), ...(r.file !== undefined ? [r.file] : [])];
+  const files = readJobFiles(dir, names, inputs);
+  if (!files) return { ok: false, error: "attachment_job_files_invalid" };
+  const out = { ...r };
+  if (units) out.units = units.map(({ file, ...u }) => file === undefined ? u : { ...u, png: files.get(file)!.toString("base64") });
+  if (r.file !== undefined) { delete out.file; out.b64 = files.get(r.file)!.toString("base64"); }
+  return out;
+}
+
+export function work(jobIn: object, timeoutMs = WORKER_WALL_CLOCK_MS, sandbox: "bwrap" | "disabled" = "bwrap", outputLimit = WORKER_OUTPUT_LIMIT, inputs: JobFile[] = []): Promise<any> {
+  let dir: string;
+  try { dir = mkdtempSync(join(tmpdir(), "ai-audit-job-")); for (const f of inputs) writeFileSync(join(dir, f.name), f.data, { mode: 0o600 }); }
+  catch { return Promise.resolve({ ok: false, error: "worker_unavailable" }); }
+  const argv = sandbox === "bwrap" ? sandboxArgv([...PRLIMIT, process.execPath, SANDBOX_WORKER], dir) : [...PRLIMIT, process.execPath, WORKER];
+  const jobDir = sandbox === "bwrap" ? SANDBOX_JOB_DIR : dir;
+  const inputNames = new Set(inputs.map((f) => f.name));
+  return new Promise<any>((resolve) => {
     const p = spawn(argv[0], argv.slice(1), { stdio: ["pipe", "pipe", "ignore"], env: { PATH: "/usr/bin:/bin", OMP_THREAD_LIMIT: "1" } });
     const chunks: Buffer[] = []; let size = 0, failure: string | undefined;
     const stop = (reason: string) => { failure ??= reason; p.kill("SIGKILL"); };
@@ -80,10 +118,13 @@ export function work(jobIn: object, timeoutMs = WORKER_WALL_CLOCK_MS, sandbox: "
       clearTimeout(t);
       if (failure) return resolve({ ok: false, error: failure });
       if (code !== 0) return resolve({ ok: false, error: "attachment_inspection_incomplete" });
-      try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch { resolve({ ok: false, error: "attachment_inspection_incomplete" }); }
+      let r: any;
+      try { r = JSON.parse(Buffer.concat(chunks).toString()); } catch { return resolve({ ok: false, error: "attachment_inspection_incomplete" }); }
+      if (!r?.ok) return resolve(r);
+      try { resolve(resolveFiles(r, dir, inputNames)); } catch { resolve({ ok: false, error: "attachment_job_files_invalid" }); }
     });
-    p.stdin.on("error", () => {}); p.stdin.end(JSON.stringify({ ...jobIn, limits: WORKER_LIMITS, toolAddressSpace: TOOL_ADDRESS_SPACE_LIMIT }));
-  });
+    p.stdin.on("error", () => {}); p.stdin.end(JSON.stringify({ ...jobIn, jobDir, limits: WORKER_LIMITS, toolAddressSpace: TOOL_ADDRESS_SPACE_LIMIT }));
+  }).finally(() => rmSync(dir, { recursive: true, force: true }));
 }
 
 function boxesFor(words: Word[], carnet?: Allowlist) {
@@ -102,10 +143,11 @@ export async function inspectAttachment(a: { mime: string; b64: string }, where:
   const hit = cache.get(key); if (hit) { cacheStats.hits++; return structuredClone(hit); }
   cacheStats.misses++;
   if (!SUPPORTED.has(a.mime)) return { findings: [], failed: "unsupported" };
-  const r = await work({ op: "extract", mime: a.mime, b64: a.b64, raster: true }, undefined, p.sandbox, p.outputLimit);
+  const r = await work({ op: "extract", mime: a.mime, raster: true }, undefined, p.sandbox, p.outputLimit, [{ name: "in", data: Buffer.from(a.b64, "base64") }]);
   if (!r.ok) return { findings: [], failed: "inspection_failed" };
   const findings: Finding[] = [], signals: Signal[] = []; let unmappable = false;
   const pages: { b64: string; boxes: Word["box"][]; all: boolean }[] = [];
+  const blackout = (format: string) => work({ op: "blackout", format, pages: pages.map(({ boxes, all }) => ({ boxes, all })) }, undefined, p.sandbox, p.outputLimit, pages.map((pg, i) => ({ name: `in-${i}`, data: Buffer.from(pg.b64, "base64") })));
   for (const u of r.units as Unit[]) {
     const spans = scanText(u.text, p.carnet); spans.forEach((s) => findings.push({ rule: s.rule, path: `${where}#${u.where}` }));
     if (depth === 0) signalsInText(u.text, `${where}#${u.where}`, signals);
@@ -121,11 +163,11 @@ export async function inspectAttachment(a: { mime: string; b64: string }, where:
       else {
         const textPages = new Set(findings.map((f) => /#page(\d+)$/.exec(f.path)?.[1]).filter(Boolean).map(Number));
         pages.forEach((pg, i) => { if (textPages.has(i + 1) && !pg.boxes.length) pg.all = true; });
-        res.sanitized = (await work({ op: "blackout", format: "PDF", pages }, undefined, p.sandbox, p.outputLimit)).b64; res.rasterized = true;
+        res.sanitized = (await blackout("PDF")).b64; res.rasterized = true;
       }
     } else if (!unmappable) {
       const fmt = a.mime === "image/jpeg" ? "JPEG" : a.mime === "image/webp" ? "WEBP" : a.mime === "image/gif" ? "GIF" : "PNG";
-      res.sanitized = (await work({ op: "blackout", format: fmt, pages }, undefined, p.sandbox, p.outputLimit)).b64;
+      res.sanitized = (await blackout(fmt)).b64;
     } else res.unmappable = true;
     if (res.sanitized) {
       const again = depth < 1 ? await inspectAttachment({ mime: a.mime, b64: res.sanitized }, where, p, depth + 1) : { findings: [{ rule: "x", path: where }] } as AttResult;

@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { accessSync, constants, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { accessSync, constants, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 export interface Word { text: string; box: [number, number, number, number] }
-export interface Unit { where: string; text: string; words?: Word[]; png?: string }
+export interface Unit { where: string; text: string; words?: Word[]; png?: string; file?: string }
 const TOOL_OUTPUT_LIMIT = 16 * 1024 * 1024;
 let toolAddressSpace = 0;
 const run = (cmd: string, args: string[], input?: Buffer) =>
@@ -47,7 +46,7 @@ function ocr(file: string): { text: string; words: Word[] } {
 }
 
 function job(j: any): unknown {
-  const dir = mkdtempSync(join(tmpdir(), "w-")), f = join(dir, "in");
+  const dir = j.jobDir as string, f = join(dir, "in");
   if (j.op === "check") {
     const readable = (path: string) => { try { accessSync(path, constants.R_OK); return true; } catch { return false; } };
     const toolOutput = (bytes: number) => { try { return run("head", ["-c", String(bytes), "/dev/zero"]).length; } catch { return "output_limit"; } };
@@ -55,16 +54,15 @@ function job(j: any): unknown {
       toolLimits: run("cat", ["/proc/self/limits"]).toString(), ...(j.toolOutputBytes !== undefined && { toolOutput: toolOutput(j.toolOutputBytes) }), ...(j.stdoutBytes && { filler: "x".repeat(j.stdoutBytes) }) };
   }
   if (j.op === "blackout") {
-    const pages = j.pages.map((p: any, i: number) => { const pf = join(dir, `p${i}`); writeFileSync(pf, Buffer.from(p.b64, "base64")); return { file: pf, boxes: p.boxes, all: p.all }; });
-    const out = join(dir, "out"); run("python3", ["-c", PY_BLACK], Buffer.from(JSON.stringify({ pages, out, format: j.format })));
-    return { b64: readFileSync(out).toString("base64") };
+    const pages = j.pages.map((p: any, i: number) => ({ file: join(dir, `in-${i}`), boxes: p.boxes, all: p.all }));
+    run("python3", ["-c", PY_BLACK], Buffer.from(JSON.stringify({ pages, out: join(dir, "out"), format: j.format })));
+    return { file: "out" };
   }
-  writeFileSync(f, Buffer.from(j.b64, "base64"));
   if (j.mime.startsWith("image/")) {
     const m = JSON.parse(run("python3", ["-c", PY_META, f]).toString());
     if (m.frames > 1) throw new Error("multi-frame");
     const o = ocr(f);
-    return { units: [{ where: "ocr", text: o.text, words: o.words, png: j.b64 }, { where: "meta", text: m.meta.join("\n") }] };
+    return { units: [{ where: "ocr", text: o.text, words: o.words, file: "in" }, { where: "meta", text: m.meta.join("\n") }] };
   }
   if (j.mime === "application/pdf") {
     const info = run("pdfinfo", [f]).toString();
@@ -74,8 +72,8 @@ function job(j: any): unknown {
     pages.forEach((t, i) => units.push({ where: `page${i + 1}`, text: t }));
     if (j.raster) {
       run("pdftoppm", ["-r", "110", "-png", f, join(dir, "pg")]);
-      readdirSync(dir).filter((x) => x.startsWith("pg")).sort().forEach((x, i) => {
-        const o = ocr(join(dir, x)); units.push({ where: `page${i + 1}-ocr`, text: o.text, words: o.words, png: readFileSync(join(dir, x)).toString("base64") });
+      readdirSync(dir).filter((x) => /^pg-\d+\.png$/.test(x)).sort().forEach((x, i) => {
+        const o = ocr(join(dir, x)); units.push({ where: `page${i + 1}-ocr`, text: o.text, words: o.words, file: x });
       });
     }
     return { units };

@@ -10,4 +10,5 @@ ADR 0003 rejected a PDF with a finding with 409 unless `--allow-page-redaction` 
 - `no-go` still blocks, `advisory` still forwards the original.
 ## Consequences
 - The model loses the text layer: more tokens per page, answer quality depends on rendering/OCR, tables and small print may read worse; whole-page blanking can drop context.
+- Page images travel through the worker's job directory, not stdout (ADR 0021), so the 16 MiB stdout cap does not limit PDF size; the job-directory limits (500 files, 256 MiB) do.
 - Deployments that want the model to see either the exact document or nothing must set the opt-out.

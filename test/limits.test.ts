@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { mockUpstream, startProxy, ATTACHMENT_TOOLS } from "./helpers.js";
-import { work, SANDBOX_AVAILABLE, WORKER_LIMITS, WORKER_OUTPUT_LIMIT, WORKER_WALL_CLOCK_MS, TOOL_ADDRESS_SPACE_LIMIT } from "../src/attachments.js";
+import { mkdtempSync, writeFileSync, symlinkSync, rmSync, readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { work, readJobFiles, SANDBOX_AVAILABLE, WORKER_LIMITS, WORKER_OUTPUT_LIMIT, WORKER_WALL_CLOCK_MS, TOOL_ADDRESS_SPACE_LIMIT } from "../src/attachments.js";
 
 const NEEDS_BWRAP = SANDBOX_AVAILABLE || process.env.CI ? {} : { skip: "bwrap cannot create namespaces here; CI runs this" };
 const ROWS = { as: "Max address space", data: "Max data size", cpu: "Max cpu time", fsize: "Max file size", nofile: "Max open files" } as const;
@@ -63,4 +66,40 @@ test("an attachment whose worker output exceeds the cap is refused with 422 and 
   assert.equal((await r.json()).error.code, "audit_inspection_failed");
   assert.equal(up.seen.length, before);
   p.close();
+});
+
+const noisePdf = () => spawnSync("python3", ["-c", `import sys,io,os
+from PIL import Image
+pages=[Image.frombytes("RGB",(935,1210),os.urandom(935*1210*3)) for _ in range(7)]
+b=io.BytesIO(); pages[0].save(b,format="PDF",resolution=110,save_all=True,append_images=pages[1:]); sys.stdout.buffer.write(b.getvalue())`], { maxBuffer: 256 * 1024 * 1024 }).stdout;
+
+for (const sandbox of ["bwrap", "disabled"] as const)
+  test(`${sandbox}: rendered pages beyond the 16 MiB stdout cap come back as job files, not stdout`, sandbox === "bwrap" ? { ...ATTACHMENT_TOOLS, ...NEEDS_BWRAP } : ATTACHMENT_TOOLS, async () => {
+    const r = await work({ op: "extract", mime: "application/pdf", raster: true }, undefined, sandbox, undefined, [{ name: "in", data: noisePdf() }]);
+    assert.equal(r.ok, true);
+    const pngs = (r.units as any[]).filter((u) => u.png).map((u) => Buffer.from(u.png, "base64"));
+    assert.equal(pngs.length, 7);
+    assert.ok(pngs.reduce((n, b) => n + b.length, 0) > WORKER_OUTPUT_LIMIT);
+    assert.ok(pngs.every((b) => b.subarray(1, 4).toString() === "PNG"));
+  });
+
+test("job files: only expected names, no traversal, no symlinks, byte and count limits", () => {
+  const dir = mkdtempSync(join(tmpdir(), "jf-"));
+  try {
+    writeFileSync(join(dir, "pg-1.png"), "abcd"); writeFileSync(join(dir, "out"), "xy"); writeFileSync(join(dir, "in"), "zz");
+    symlinkSync("/etc/hostname", join(dir, "pg-2.png"));
+    assert.equal(readJobFiles(dir, ["pg-1.png", "out"], new Set())?.get("out")?.toString(), "xy");
+    assert.equal(readJobFiles(dir, ["in"], new Set(["in"]))?.get("in")?.toString(), "zz");
+    for (const bad of [["in"], ["../etc/passwd"], ["/etc/passwd"], ["pg-2.png"], ["pg-9.png"], [7]]) assert.equal(readJobFiles(dir, bad, new Set()), undefined, String(bad));
+    assert.equal(readJobFiles(dir, ["pg-1.png", "out"], new Set(), { bytes: 5, files: 10 }), undefined);
+    assert.equal(readJobFiles(dir, ["pg-1.png", "out"], new Set(), { bytes: 100, files: 1 }), undefined);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("the job dir is removed after every run, success or failure", async () => {
+  const before = readdirSync(tmpdir()).filter((x) => x.startsWith("ai-audit-job-")).length;
+  await work({ op: "check" }, undefined, "disabled");
+  await work({ op: "check" }, 1, "disabled");
+  await work({ op: "check", stdoutBytes: WORKER_OUTPUT_LIMIT + 1 }, undefined, "disabled");
+  assert.equal(readdirSync(tmpdir()).filter((x) => x.startsWith("ai-audit-job-")).length, before);
 });
