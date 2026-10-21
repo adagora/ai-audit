@@ -94,9 +94,11 @@ test("client key: wrong -> 401; right -> upstream gets the upstream key, never t
 });
 
 test("metrics: counts by decision/status + latency, no content", async () => {
-  const m = await (await fetch(red.url + "/metrics")).json();
-  assert.ok(m.byDecision["forward-redacted"] >= 2 && m.byDecision.reject >= 4 && m.byStatus["422"] >= 4 && m.latencyMsSum > 0 && m.cache.hits >= 1);
-  assert.ok(!JSON.stringify(m).includes("AKIA"));
+  const m = await (await fetch(red.url + "/metrics")).text();
+  const sum = (re: RegExp) => m.split("\n").filter((l) => re.test(l)).reduce((a, l) => a + Number(l.split(" ").at(-1)), 0);
+  assert.ok(sum(/^ai_audit_requests_total\{.*decision="forward-redacted"/) >= 2 && sum(/^ai_audit_requests_total\{.*decision="reject"/) >= 4);
+  assert.ok(sum(/^ai_audit_requests_total\{.*status="422"/) >= 4 && sum(/^ai_audit_request_duration_seconds_sum /) > 0 && sum(/^ai_audit_attachment_cache_hits /) >= 1);
+  assert.ok(!m.includes("AKIA"));
 });
 
 test("anchor: whole-file swap and truncation detected", () => {

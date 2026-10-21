@@ -4,6 +4,7 @@ import { AuditLog, AuditLogUnavailable, sha256, stats } from "./audit.js";
 import { decide, hasDuplicateKeys, inspect, type Mode } from "./scan.js";
 import { toolResultSignals, type Signal } from "./injection.js";
 import { extract, type Api } from "./extract.js";
+import { Counter, Gauge, Histogram, OPENMETRICS_CONTENT_TYPE, exposition } from "./metrics.js";
 import { discover, inspectAttachment, cacheStats, TOOLS_OK } from "./attachments.js";
 import { timingSafeEqual } from "node:crypto";
 import { createInspectionProfile } from "./profile.js";
@@ -19,7 +20,22 @@ export interface ProxyOpts {
 }
 export interface VKey { name: string; sha256: string; models?: string[]; providers?: ("openai" | "anthropic")[]; logContent?: boolean }
 export interface Alias { model: string; upstream?: string }
-export const metrics = { requests: 0, byDecision: {} as Record<string, number>, byStatus: {} as Record<string, number>, latencyMsSum: 0, latencyMsMax: 0, attachments: 0, logUnavailable: 0, logWriteFailures: 0, cache: cacheStats };
+export const LATENCY_BUCKETS_SECONDS = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300] as const;
+export const metrics = {
+  requests: new Counter("ai_audit_requests", "Finished HTTP requests by route, decision and status."),
+  latency: new Histogram("ai_audit_request_duration_seconds", "Time from request arrival to response end, streaming included.", LATENCY_BUCKETS_SECONDS),
+  attachments: new Counter("ai_audit_attachments_inspected", "Attachments sent to inspection."),
+  logUnavailable: new Counter("ai_audit_log_unavailable", "Requests refused with 503 because the audit log could not take a record."),
+  logWriteFailures: new Counter("ai_audit_log_write_failures", "Records lost after the response was delivered (ADR 0016)."),
+  injectionSignals: new Counter("ai_audit_injection_signals", "Advisory prompt-injection signals by rule id (ADR 0010)."),
+  upstreamResponses: new Counter("ai_audit_upstream_responses", "Upstream responses by provider and status class."),
+  upstreamErrors: new Counter("ai_audit_upstream_errors", "Forwarded requests that got no upstream response, by provider and reason."),
+  unknownUsage: new Counter("ai_audit_unknown_usage", "Successful upstream calls without provider-reported usage, by field (ADR 0012)."),
+  cacheHits: new Gauge("ai_audit_attachment_cache_hits", "Attachment inspection cache hits since start.", () => cacheStats.hits),
+  cacheMisses: new Gauge("ai_audit_attachment_cache_misses", "Attachment inspection cache misses since start.", () => cacheStats.misses),
+};
+const METRIC_ROUTES = new Set(["/v1/chat/completions", "/v1/responses", "/v1/messages", "/v1/messages/count_tokens", "/v1/models", "/healthz", "/readyz", "/metrics", "/audit/stats"]);
+const routeLabel = (pathname: string) => METRIC_ROUTES.has(pathname) ? pathname : pathname.startsWith("/v1/models/") ? "/v1/models/:id" : "other";
 const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 const ROUTES: Record<string, Api | "count" | undefined> = {
   "/v1/chat/completions": "openai-chat", "/v1/responses": "openai-responses", "/v1/messages": "anthropic-messages", "/v1/messages/count_tokens": "count",
@@ -34,8 +50,9 @@ export function createProxy(o: ProxyOpts) {
     const rid = randomUUID(), t0 = Date.now(); res.setHeader("x-request-id", rid);
     let decisionTag = "none", routeTag = "";
     res.on("finish", () => {
-      const ms = Date.now() - t0; metrics.requests++; metrics.byDecision[decisionTag] = (metrics.byDecision[decisionTag] ?? 0) + 1;
-      metrics.byStatus[res.statusCode] = (metrics.byStatus[res.statusCode] ?? 0) + 1; metrics.latencyMsSum += ms; metrics.latencyMsMax = Math.max(metrics.latencyMsMax, ms);
+      const ms = Date.now() - t0;
+      metrics.requests.inc({ route: routeLabel(routeTag), decision: decisionTag, status: String(res.statusCode) });
+      metrics.latency.observe(ms / 1000);
       if (!o.quiet) process.stderr.write(JSON.stringify({ ts: new Date().toISOString(), event: "request", requestId: rid, route: routeTag, status: res.statusCode, decision: decisionTag, latencyMs: ms }) + "\n");
     });
     const fail = (status: number, code: string, findings?: string[]) => {
@@ -43,13 +60,13 @@ export function createProxy(o: ProxyOpts) {
       res.end(JSON.stringify({ type: "error", error: { type: "audit_proxy_error", code, message: code, ...(findings && { findings }) } }));
     };
     const event = (name: string, e: unknown) => o.quiet || process.stderr.write(JSON.stringify({ ts: new Date().toISOString(), event: name, requestId: rid, reason: e instanceof Error ? e.message : "unknown" }) + "\n");
-    const logUnavailable = (e: unknown) => { metrics.logUnavailable++; event("audit_log_unavailable", e); return fail(503, "audit_log_unavailable"); };
+    const logUnavailable = (e: unknown) => { metrics.logUnavailable.inc(); event("audit_log_unavailable", e); return fail(503, "audit_log_unavailable"); };
     try {
       const url = new URL(req.url ?? "/", "http://x"), route = ROUTES[url.pathname];
       routeTag = url.pathname;
       if (req.method === "GET" && url.pathname === "/healthz") return void res.end("ok");
       if (req.method === "GET" && url.pathname === "/readyz") return void (TOOLS_OK ? res.end("ready") : fail(503, "audit_tools_missing"));
-      if (req.method === "GET" && url.pathname === "/metrics") return void res.end(JSON.stringify(metrics));
+      if (req.method === "GET" && url.pathname === "/metrics") { res.setHeader("content-type", OPENMETRICS_CONTENT_TYPE); return void res.end(exposition(Object.values(metrics))); }
       if (req.method === "GET" && url.pathname === "/audit/stats") {
         const k = str(req.headers["x-admin-key"]) ?? "";
         if (!o.adminKeySha256 || !same(sha256(k), o.adminKeySha256)) return fail(401, "audit_admin_unauthorized");
@@ -114,7 +131,7 @@ export function createProxy(o: ProxyOpts) {
       const signals: Signal[] = toolResultSignals(body);
       const sanitize: (() => void)[] = [], rasterized: string[] = [];
       for (const a of atts) {
-        metrics.attachments++;
+        metrics.attachments.inc();
         const r = await inspectAttachment(a, a.path.join("."), profile);
         if (r.failed) return reject(r.failed === "unsupported" ? "audit_unsupported_attachment" : "audit_inspection_failed");
         r.findings.forEach((f) => findings.push({ ...f, unredactable: !r.sanitized }));
@@ -122,6 +139,7 @@ export function createProxy(o: ProxyOpts) {
         if (r.sanitized) sanitize.push(() => a.set(r.sanitized!));
         if (r.rasterized) rasterized.push(a.path.join("."));
       }
+      signals.forEach((x) => metrics.injectionSignals.inc({ rule: x.rule }));
       const d = decide(profile.mode, findings); decisionTag = d.action;
       res.setHeader("x-audit-finding-count", String(findings.length));
       if (signals.length) res.setHeader("x-audit-signal-count", String(signals.length));
@@ -137,8 +155,9 @@ export function createProxy(o: ProxyOpts) {
       if (route !== "count") try { o.log.ensureWritable(); } catch (e) { clearTimeout(timer); decisionTag = "log-unavailable"; return logUnavailable(e); }
       let up: Response;
       try { up = await fetch(target, { method: "POST", headers, body: fwd, signal: ac.signal }); }
-      catch { clearTimeout(timer); const code = ac.signal.aborted ? "audit_deadline_exceeded" : "audit_upstream_unreachable"; write({ upstreamStatus: null, error: code }); return fail(ac.signal.aborted ? 408 : 502, code); }
+      catch { clearTimeout(timer); metrics.upstreamErrors.inc({ provider: context.provider, reason: ac.signal.aborted ? "deadline" : "unreachable" }); const code = ac.signal.aborted ? "audit_deadline_exceeded" : "audit_upstream_unreachable"; write({ upstreamStatus: null, error: code }); return fail(ac.signal.aborted ? 408 : 502, code); }
       clearTimeout(timer);
+      metrics.upstreamResponses.inc({ provider: context.provider, class: `${Math.floor(up.status / 100)}xx` });
       const sse = (up.headers.get("content-type") ?? "").includes("text/event-stream");
       const captured = await pipe(up, res);
       const out = route === "count" ? undefined : extract(route, captured, sse);
@@ -146,12 +165,16 @@ export function createProxy(o: ProxyOpts) {
         const result = inspect(s, profile.carnet);
         return result.findings.some((f) => f.inKey || f.unredactable) ? "[REDACTED:unredactable-content]" : result.value as string;
       };
+      if (out && up.status >= 200 && up.status < 400) {
+        if (out.usage?.input == null) metrics.unknownUsage.inc({ provider: context.provider, field: "input" });
+        if (out.usage?.output == null) metrics.unknownUsage.inc({ provider: context.provider, field: "output" });
+      }
       const full = vkey?.logContent === true;
       write({ upstreamStatus: up.status, clientAborted: !res.writableFinished || undefined, responseModel: out?.model, usage: out?.usage, stop: out?.stop,
         ...(out && { content: full ? "redacted" : "hash", outputHash: sha256(out.text), ...(full && { output: red(out.text) }),
           toolCalls: out.toolCalls.map((t) => ({ name: t.name, argsHash: sha256(t.args), ...(full && { args: red(t.args) }) })) }) });
     } catch (e) {
-      if (e instanceof AuditLogUnavailable) { metrics.logWriteFailures++; event("audit_log_write_failed", e); }
+      if (e instanceof AuditLogUnavailable) { metrics.logWriteFailures.inc(); event("audit_log_write_failed", e); }
       if (!res.writableEnded) fail(500, "audit_internal_error");
     }
   });

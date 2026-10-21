@@ -54,7 +54,7 @@ test("torn last line: proxy fails closed with 503, upstream never called, proces
 test("append failing after the response was streamed: no write-after-end crash, failure counted", async () => {
   const p = join(mkdtempSync(join(tmpdir(), "audit-late-")), "log.jsonl");
   const log = new AuditLog(p); log.append = () => { throw new AuditLogUnavailable("disk full"); };
-  const up = await mockUpstream(), before = metrics.logWriteFailures;
+  const up = await mockUpstream(), before = metrics.logWriteFailures.total();
   const px = createProxy({ log, mode: "redact", upstreamOpenai: up.url, upstreamAnthropic: up.url, quiet: true }).listen(0);
   await new Promise((r) => px.once("listening", r));
   const crashed: unknown[] = []; const onErr = (e: unknown) => crashed.push(e); process.on("uncaughtException", onErr);
@@ -64,7 +64,7 @@ test("append failing after the response was streamed: no write-after-end crash, 
     assert.equal(r.status, 200); await r.text();
     await new Promise((r) => setTimeout(r, 50));
     assert.deepEqual(crashed, []);
-    assert.equal(metrics.logWriteFailures, before + 1);
+    assert.equal(metrics.logWriteFailures.total(), before + 1);
   } finally { process.off("uncaughtException", onErr); px.close(); up.close(); }
 });
 }
