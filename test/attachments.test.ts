@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, appendFileSync, mkdtempSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mockUpstream, startProxy, makePdf, AWS, AUTH, ATTACHMENT_TOOLS } from "./helpers.js";
-import { work, cacheStats, SANDBOX, inspectAttachment } from "../src/attachments.js";
+import { work, cacheStats, SANDBOX_AVAILABLE, inspectAttachment } from "../src/attachments.js";
 import { AuditLog, anchor, sha256, verifyAnchors } from "../src/audit.js";
 import { scanText } from "../src/scan.js";
 import { createInspectionProfile } from "../src/profile.js";
@@ -20,7 +20,7 @@ const post = (base: string, path: string, body: object, auth = AUTH) => fetch(ba
 const chat = (parts: unknown[]) => ({ model: "gpt-x", messages: [{ role: "user", content: parts }] });
 const ocrText = async (mime: string, b64: string) => ((await work({ op: "extract", mime, b64, raster: true })).units as any[]).map((u) => u.text).join(" ");
 const last = () => up.seen[up.seen.length - 1];
-console.log("sandbox:", SANDBOX);
+console.log("sandbox available:", SANDBOX_AVAILABLE);
 
 const pdfReq = { model: "gpt-x", input: [{ role: "user", content: [{ type: "input_file", filename: "offer.pdf", file_data: `data:application/pdf;base64,${PDF}` }] }] };
 for (const [name, p, code] of [["--no-page-redaction", () => np, "audit_unredactable_finding"], ["no-go", () => ng, "audit_findings_blocked"]] as const)

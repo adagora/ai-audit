@@ -87,6 +87,7 @@ try {
   const redact = await launch("redact", "redact", ["--config", config]);
   const nogo = await launch("nogo", "no-go");
   const advisory = await launch("advisory", "advisory");
+  const unsandboxed = await launch("unsandboxed", "redact", ["--unsafe-no-sandbox"]);
 
   await scenario("keys: wrong client key is 401 and never forwarded", async (sent) => {
     const r = await post(redact.url, "/v1/chat/completions", chat("hi"), { authorization: "Bearer wrong" });
@@ -145,6 +146,14 @@ try {
     const n = redact.records().length + 1; const r = await post(redact.url, "/v1/messages", { model: "claude-sonnet-4-5", max_tokens: 64, messages: [{ role: "user", content: [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: pdf } }, { type: "text", text: "summarise" }] }] }, { authorization: "", "x-api-key": CLIENT_KEY });
     expect(r.status === 200, `status ${r.status} ${r.text.slice(0, 200)}`); expect(!sent()[0].raw.includes(pdf), "original PDF forwarded");
     const rec = await redact.settled(n); expect(rec.decision.rasterized?.length > 0, "not logged as rasterized");
+  });
+  await scenario("sandbox: default proxy reports bwrap at startup; --unsafe-no-sandbox is loud and recorded", async () => {
+    expect(readFileSync(join(redact.dir, "serve.log"), "utf8").includes('"sandbox":"bwrap"'), "redact proxy is not sandboxed");
+    expect(readFileSync(join(unsandboxed.dir, "serve.log"), "utf8").includes("sandbox_disabled_unsafe"), "no startup warning");
+    const n = unsandboxed.records().length + 1;
+    await post(unsandboxed.url, "/v1/chat/completions", { model: "gpt-4o-mini", messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: "data:image/png;base64,iVBORw0KGgo=" } }] }] });
+    const rec = await unsandboxed.settled(n); expect(rec.decision.sandbox === "disabled", `decision ${JSON.stringify(rec.decision)}`);
+    const m = await fetch(`${unsandboxed.url}/metrics`).then((x) => x.text()); expect(/^ai_audit_sandbox_disabled 1$/m.test(m), "gauge not raised");
   });
   await scenario("context map: multi-turn session is linked and renders", async () => {
     const tools = [{ type: "function", function: { name: "read_file", description: "read", parameters: { type: "object", properties: {} } } }];

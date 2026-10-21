@@ -1,4 +1,6 @@
-import { spawn, execFileSync } from "node:child_process";
+import { spawn, execFileSync, spawnSync } from "node:child_process";
+import { existsSync, lstatSync, readlinkSync } from "node:fs";
+import { dirname } from "node:path";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { scanText, type Allowlist, type Finding } from "./scan.js";
@@ -6,8 +8,30 @@ import type { Unit, Word } from "./worker.js";
 import { signalsInText, type Signal } from "./injection.js";
 
 const WORKER = fileURLToPath(new URL("./worker.js", import.meta.url));
+const SANDBOX_WORKER = "/opt/ai-audit/worker.mjs";
 const has = (c: string) => { try { execFileSync("which", [c], { stdio: "ignore" }); return true; } catch { return false; } };
-export const SANDBOX = has("bwrap") ? "bwrap" : "none";
+const NODE_ROOT = dirname(dirname(process.execPath));
+
+export function sandboxMounts(): string[] {
+  const args = ["--ro-bind", "/usr", "/usr"];
+  for (const top of ["/bin", "/lib", "/lib64", "/sbin"]) {
+    if (!existsSync(top)) continue;
+    if (lstatSync(top).isSymbolicLink()) args.push("--symlink", readlinkSync(top), top);
+    else args.push("--ro-bind", top, top);
+  }
+  for (const etc of ["/etc/ld.so.cache", "/etc/fonts", "/etc/alternatives"]) if (existsSync(etc)) args.push("--ro-bind", etc, etc);
+  if (!NODE_ROOT.startsWith("/usr/")) args.push("--ro-bind", NODE_ROOT, NODE_ROOT);
+  return args;
+}
+const SANDBOX_ENV = ["--clearenv", "--setenv", "PATH", "/usr/bin:/bin", "--setenv", "HOME", "/tmp", "--setenv", "OMP_THREAD_LIMIT", "1"];
+const SANDBOX_ISOLATION = ["--unshare-all", "--die-with-parent", "--new-session", "--cap-drop", "ALL", "--tmpfs", "/tmp", "--proc", "/proc", "--dev", "/dev", "--chdir", "/tmp"];
+export function sandboxArgv(command: string[]): string[] {
+  return ["bwrap", ...sandboxMounts(), "--ro-bind", WORKER, SANDBOX_WORKER, ...SANDBOX_ISOLATION, ...SANDBOX_ENV, ...command];
+}
+const probeSandbox = () => has("bwrap") && spawnSync("bwrap", [...sandboxMounts(), ...SANDBOX_ISOLATION, ...SANDBOX_ENV, "/usr/bin/true"], { stdio: "ignore", timeout: 10_000 }).status === 0;
+export const SANDBOX_AVAILABLE = probeSandbox();
+export type SandboxState = "bwrap" | "unavailable" | "disabled";
+export const sandboxState = (available: boolean, unsafeNoSandbox: boolean): SandboxState => unsafeNoSandbox ? "disabled" : available ? "bwrap" : "unavailable";
 export const TOOLS_OK = ["tesseract", "pdftotext", "pdfinfo", "pdftoppm", "python3"].every(has);
 const SUPPORTED = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "application/pdf"]);
 
@@ -37,11 +61,9 @@ export function discover(body: unknown): { atts: Att[]; refs: string[] } {
   return { atts, refs };
 }
 
-export function work(jobIn: object, timeoutMs = 60_000): Promise<any> {
+export function work(jobIn: object, timeoutMs = 60_000, sandbox: "bwrap" | "disabled" = "bwrap"): Promise<any> {
   const prlimitArgs = ["prlimit", "--data=4294967296", "--cpu=60", "--fsize=268435456", "--"];
-  const argv = SANDBOX === "bwrap"
-    ? ["bwrap", "--ro-bind", "/", "/", "--tmpfs", "/tmp", "--proc", "/proc", "--dev", "/dev", "--unshare-all", "--die-with-parent", "--new-session", ...prlimitArgs, process.execPath, WORKER]
-    : [...prlimitArgs, process.execPath, WORKER];
+  const argv = sandbox === "bwrap" ? sandboxArgv([...prlimitArgs, process.execPath, SANDBOX_WORKER]) : [...prlimitArgs, process.execPath, WORKER];
   return new Promise((resolve) => {
     const p = spawn(argv[0], argv.slice(1), { stdio: ["pipe", "pipe", "ignore"], env: { PATH: "/usr/bin:/bin" } });
     const chunks: Buffer[] = []; const t = setTimeout(() => p.kill("SIGKILL"), timeoutMs);
@@ -59,7 +81,7 @@ function boxesFor(words: Word[], carnet?: Allowlist) {
   return { spans, boxes: words.filter((w, i) => spans.some((s) => s.start < at[i] + w.text.length && s.end > at[i])).map((w) => w.box) };
 }
 
-export interface Profile { carnet?: Allowlist; pageRedaction: boolean; id: string }
+export interface Profile { carnet?: Allowlist; pageRedaction: boolean; id: string; sandbox?: "bwrap" | "disabled" }
 const cache = new Map<string, AttResult>(); export const cacheStats = { hits: 0, misses: 0 };
 const MAX_CACHE = 1000;
 
@@ -68,7 +90,7 @@ export async function inspectAttachment(a: { mime: string; b64: string }, where:
   const hit = cache.get(key); if (hit) { cacheStats.hits++; return structuredClone(hit); }
   cacheStats.misses++;
   if (!SUPPORTED.has(a.mime)) return { findings: [], failed: "unsupported" };
-  const r = await work({ op: "extract", mime: a.mime, b64: a.b64, raster: true });
+  const r = await work({ op: "extract", mime: a.mime, b64: a.b64, raster: true }, undefined, p.sandbox);
   if (!r.ok) return { findings: [], failed: "inspection_failed" };
   const findings: Finding[] = [], signals: Signal[] = []; let unmappable = false;
   const pages: { b64: string; boxes: Word["box"][]; all: boolean }[] = [];
@@ -87,11 +109,11 @@ export async function inspectAttachment(a: { mime: string; b64: string }, where:
       else {
         const textPages = new Set(findings.map((f) => /#page(\d+)$/.exec(f.path)?.[1]).filter(Boolean).map(Number));
         pages.forEach((pg, i) => { if (textPages.has(i + 1) && !pg.boxes.length) pg.all = true; });
-        res.sanitized = (await work({ op: "blackout", format: "PDF", pages })).b64; res.rasterized = true;
+        res.sanitized = (await work({ op: "blackout", format: "PDF", pages }, undefined, p.sandbox)).b64; res.rasterized = true;
       }
     } else if (!unmappable) {
       const fmt = a.mime === "image/jpeg" ? "JPEG" : a.mime === "image/webp" ? "WEBP" : a.mime === "image/gif" ? "GIF" : "PNG";
-      res.sanitized = (await work({ op: "blackout", format: fmt, pages })).b64;
+      res.sanitized = (await work({ op: "blackout", format: fmt, pages }, undefined, p.sandbox)).b64;
     } else res.unmappable = true;
     if (res.sanitized) {
       const again = depth < 1 ? await inspectAttachment({ mime: a.mime, b64: res.sanitized }, where, p, depth + 1) : { findings: [{ rule: "x", path: where }] } as AttResult;

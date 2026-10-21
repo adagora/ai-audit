@@ -7,7 +7,7 @@ import { extract, type Api } from "./extract.js";
 import { conversationItems, loadOrCreateSessionKey, SessionIndex } from "./session.js";
 import { composeContext, contextBlocks, promptTokens, scaleToProvider } from "./context.js";
 import { Counter, Gauge, Histogram, OPENMETRICS_CONTENT_TYPE, exposition } from "./metrics.js";
-import { discover, inspectAttachment, cacheStats, TOOLS_OK } from "./attachments.js";
+import { discover, inspectAttachment, cacheStats, TOOLS_OK, SANDBOX_AVAILABLE, sandboxState } from "./attachments.js";
 import { timingSafeEqual } from "node:crypto";
 import { createInspectionProfile } from "./profile.js";
 
@@ -20,11 +20,16 @@ export interface ProxyOpts {
   aliases?: Record<string, Alias>;
   adminKeySha256?: string;
   quiet?: boolean;
+  unsafeNoSandbox?: boolean;
+  sandboxAvailable?: boolean;
 }
 export interface VKey { name: string; sha256: string; models?: string[]; providers?: ("openai" | "anthropic")[]; logContent?: boolean }
 export interface Alias { model: string; upstream?: string }
 export const LATENCY_BUCKETS_SECONDS = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300] as const;
+let unsandboxedProxies = 0;
 export const metrics = {
+  sandboxUnavailable: new Counter("ai_audit_sandbox_unavailable", "Requests with attachments refused with 422 because the worker sandbox is unavailable (ADR 0021)."),
+  sandboxDisabled: new Gauge("ai_audit_sandbox_disabled", "1 while a proxy runs attachment workers without a sandbox (--unsafe-no-sandbox, development only).", () => unsandboxedProxies ? 1 : 0),
   requests: new Counter("ai_audit_requests", "Finished HTTP requests by route, decision and status."),
   latency: new Histogram("ai_audit_request_duration_seconds", "Time from request arrival to response end, streaming included.", LATENCY_BUCKETS_SECONDS),
   attachments: new Counter("ai_audit_attachments_inspected", "Attachments sent to inspection."),
@@ -50,6 +55,10 @@ const RESP_DROP = new Set(["content-encoding", "content-length", "transfer-encod
 export function createProxy(o: ProxyOpts) {
   const max = o.maxBodyBytes ?? 32 * 1024 * 1024, timeoutMs = o.timeoutMs ?? 180_000;
   const profile = createInspectionProfile(o);
+  const sandbox = sandboxState(o.sandboxAvailable ?? SANDBOX_AVAILABLE, o.unsafeNoSandbox === true);
+  if (sandbox === "disabled") unsandboxedProxies++;
+  if (sandbox !== "bwrap") process.stderr.write(JSON.stringify({ ts: new Date().toISOString(), event: sandbox === "disabled" ? "sandbox_disabled_unsafe" : "sandbox_unavailable",
+    effect: sandbox === "disabled" ? "attachment workers run WITHOUT a sandbox; development only" : "requests with attachments are refused with 422 audit_sandbox_unavailable" }) + "\n");
   const sessions = new SessionIndex(o.sessionKey ?? loadOrCreateSessionKey(o.log.path + ".session-key"));
   try { sessions.rebuild(o.log.read()); } catch { metrics.sessionIndexRebuildFailures.inc(); }
   return http.createServer(async (req, res) => {
@@ -71,7 +80,7 @@ export function createProxy(o: ProxyOpts) {
       const url = new URL(req.url ?? "/", "http://x"), route = ROUTES[url.pathname];
       routeTag = url.pathname;
       if (req.method === "GET" && url.pathname === "/healthz") return void res.end("ok");
-      if (req.method === "GET" && url.pathname === "/readyz") return void (TOOLS_OK ? res.end("ready") : fail(503, "audit_tools_missing"));
+      if (req.method === "GET" && url.pathname === "/readyz") return void (!TOOLS_OK ? fail(503, "audit_tools_missing") : sandbox === "unavailable" ? fail(503, "audit_sandbox_unavailable") : res.end("ready"));
       if (req.method === "GET" && url.pathname === "/metrics") { res.setHeader("content-type", OPENMETRICS_CONTENT_TYPE); return void res.end(exposition(Object.values(metrics))); }
       if (req.method === "GET" && url.pathname === "/audit/stats") {
         const k = str(req.headers["x-admin-key"]) ?? "";
@@ -135,17 +144,18 @@ export function createProxy(o: ProxyOpts) {
       const reject = (code: string) => {
         clearTimeout(timer); decisionTag = "reject";
         if (route !== "count") o.log.append({ kind: "llm-call", id: rid, ts: new Date(t0).toISOString(), ...context,
-          decision: { mode: profile.mode, action: "reject", findings: findings.map((f) => ({ rule: f.rule, path: f.path })) },
+          decision: { mode: profile.mode, action: "reject", findings: findings.map((f) => ({ rule: f.rule, path: f.path })), ...(atts.length && { sandbox }) },
           ...(composition && { context: composition }), ...(session && { session }), upstreamStatus: null, error: code, latencyMs: Date.now() - t0 });
         return fail(422, code);
       };
       if (refs.length && profile.mode !== "advisory") return reject("audit_uninspectable_reference");
+      if (atts.length && sandbox === "unavailable") { metrics.sandboxUnavailable.inc(); return reject("audit_sandbox_unavailable"); }
       if (atts.length && !TOOLS_OK) return reject("audit_inspection_unavailable");
       const signals: Signal[] = toolResultSignals(body);
       const sanitize: (() => void)[] = [], rasterized: string[] = [];
       for (const a of atts) {
         metrics.attachments.inc();
-        const r = await inspectAttachment(a, a.path.join("."), profile);
+        const r = await inspectAttachment(a, a.path.join("."), { ...profile, sandbox: sandbox === "disabled" ? "disabled" : "bwrap" });
         if (r.failed) return reject(r.failed === "unsupported" ? "audit_unsupported_attachment" : "audit_inspection_failed");
         r.findings.forEach((f) => findings.push({ ...f, unredactable: !r.sanitized }));
         r.signals?.forEach((x) => signals.push(x));
@@ -160,7 +170,7 @@ export function createProxy(o: ProxyOpts) {
       const fwd = d.action === "forward-redacted" || alias ? Buffer.from(JSON.stringify(value)) : raw;
       const rec = {
         ...context, forwardedPromptDigest: sha256(fwd.toString("latin1")), ...(composition && { context: composition }), ...(session && { session }),
-        decision: { mode: profile.mode, action: d.action, findings: d.findings.map((f) => ({ rule: f.rule, path: f.path })), ...(signals.length && { signals }), ...(d.action === "forward-redacted" && rasterized.length && { rasterized }) },
+        decision: { mode: profile.mode, action: d.action, findings: d.findings.map((f) => ({ rule: f.rule, path: f.path })), ...(signals.length && { signals }), ...(d.action === "forward-redacted" && rasterized.length && { rasterized }), ...(atts.length && { sandbox }) },
       };
       const write = (extra: object) => { if (route !== "count") o.log.append({ kind: "llm-call", id: rid, ts: new Date(t0).toISOString(), ...rec, ...extra, latencyMs: Date.now() - t0 } as any); };
       if (d.action === "block") { clearTimeout(timer); write({ upstreamStatus: null }); return fail(d.status!, d.code!, d.findings.map((f) => f.rule)); }

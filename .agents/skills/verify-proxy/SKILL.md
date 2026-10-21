@@ -11,7 +11,7 @@ One command builds nothing, starts everything it needs, runs all scenarios and t
 npm run build && node .agents/skills/verify-proxy/drive.mjs              # all scenarios
 node .agents/skills/verify-proxy/drive.mjs stream metrics                 # only scenarios whose name starts with these words
 ```
-The driver starts an in-process mock upstream on a random port (OpenAI `/v1/chat/completions`, Anthropic `/v1/messages`, JSON and SSE). It then launches three real proxy processes with `node dist/src/cli.js serve` on random ports, in modes redact (with an alias config), no-go and advisory. Each has its own log dir. A proxy is ready when it prints `"event":"listening"` on stderr and `/healthz` returns 200. Keys are fixed fakes (`aia-verify-client-key`, `aia-verify-admin-key`, `sk-verify-upstream-FAKE`); the driver never reads real keys and never calls a real provider.
+The driver starts an in-process mock upstream on a random port (OpenAI `/v1/chat/completions`, Anthropic `/v1/messages`, JSON and SSE). It then launches four real proxy processes with `node dist/src/cli.js serve` on random ports: redact (with an alias config), no-go, advisory, and redact with `--unsafe-no-sandbox`. Each has its own log dir. A proxy is ready when it prints `"event":"listening"` on stderr and `/healthz` returns 200. Keys are fixed fakes (`aia-verify-client-key`, `aia-verify-admin-key`, `sk-verify-upstream-FAKE`); the driver never reads real keys and never calls a real provider.
 Instances are isolated by port and directory, so several runs can go side by side.
 
 ## Doctor
@@ -29,4 +29,4 @@ The driver kills only the proxies it spawned and closes its mock. It deletes `sc
 Never commit the evidence directory.
 
 ## Proven
-2026-10-21 at 16c0615: 16 scenarios, 15 pass, 1 skip (PDF, no tesseract on the box). A scratch break that made no-go forward findings (`src/scan.ts` decide) failed exactly `no-go: finding is 409 and never forwarded: status 200`; reverted.
+2026-10-21 at 16c0615: 16 scenarios, 15 pass, 1 skip (PDF, no tesseract on the box). Re-run at the ADR 0021 change: 17 scenarios, 16 pass, 1 skip. A scratch break that made no-go forward findings (`src/scan.ts` decide) failed exactly `no-go: finding is 409 and never forwarded: status 200`; reverted.

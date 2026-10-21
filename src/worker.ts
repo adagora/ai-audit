@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { accessSync, constants, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -36,6 +36,10 @@ function ocr(file: string): { text: string; words: Word[] } {
 
 function job(j: any): unknown {
   const dir = mkdtempSync(join(tmpdir(), "w-")), f = join(dir, "in");
+  if (j.op === "check") {
+    const readable = (path: string) => { try { accessSync(path, constants.R_OK); return true; } catch { return false; } };
+    return { env: Object.keys(process.env).sort(), readable: (j.paths ?? []).map(readable) };
+  }
   if (j.op === "blackout") {
     const pages = j.pages.map((p: any, i: number) => { const pf = join(dir, `p${i}`); writeFileSync(pf, Buffer.from(p.b64, "base64")); return { file: pf, boxes: p.boxes, all: p.all }; });
     const out = join(dir, "out"); run("python3", ["-c", PY_BLACK], Buffer.from(JSON.stringify({ pages, out, format: j.format })));
