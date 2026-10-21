@@ -1,0 +1,37 @@
+name: ai-audit-monitoring
+services:
+  mock-upstream:
+    image: node:26.10.0-slim
+    command: ["node", "/srv/mock-upstream.mjs"]
+    volumes: ["./mock-upstream.mjs:/srv/mock-upstream.mjs:ro"]
+  proxy:
+    build: { context: ../.., dockerfile: Dockerfile }
+    command: ["serve", "--host", "0.0.0.0", "--log", "/data/audit.jsonl", "--upstream-openai", "http://mock-upstream:9000", "--upstream-anthropic", "http://mock-upstream:9000"]
+    volumes: ["audit-data:/data"]
+    ports: ["127.0.0.1:8787:8787"]
+    depends_on: [mock-upstream]
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.154.1
+    command: ["-promscrape.config=/etc/vm/scrape.yml", "-retentionPeriod=30d", "-storageDataPath=/storage"]
+    volumes: ["./victoriametrics/scrape.yml:/etc/vm/scrape.yml:ro", "vm-data:/storage"]
+    ports: ["127.0.0.1:8428:8428"]
+    depends_on: [proxy]
+  ntfy:
+    image: binwiederhier/ntfy:v2.32.0
+    command: ["serve"]
+    environment: { NTFY_BASE_URL: "http://localhost:8080" }
+    ports: ["127.0.0.1:8080:80"]
+  grafana:
+    image: grafana/grafana:13.2.4
+    environment:
+      NTFY_TOPIC: ${NTFY_TOPIC:-ai-audit-alerts}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["127.0.0.1:3000:3000"]
+    depends_on: [victoriametrics, ntfy]
+volumes:
+  audit-data: {}
+  vm-data: {}

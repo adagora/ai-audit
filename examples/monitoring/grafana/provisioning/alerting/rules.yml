@@ -1,0 +1,111 @@
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: ai-audit
+    folder: ai-audit
+    interval: 1m
+    rules:
+      - uid: ai-audit-log-integrity
+        title: "Audit log cannot take records"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 1800, to: 0 }
+            datasourceUid: victoriametrics
+            model:
+              refId: A
+              instant: true
+              expr: "sum(increase(ai_audit_log_write_failures_total[5m])) + sum(increase(ai_audit_log_unavailable_total[5m]))"
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels:
+          severity: critical
+        annotations:
+          summary: "The audit log refused or lost records in the last 5 minutes. Requests are refused with 503 until the log is repaired (run ai-audit verify)."
+      - uid: ai-audit-injection-spike
+        title: "Prompt-injection signal spike"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 1800, to: 0 }
+            datasourceUid: victoriametrics
+            model:
+              refId: A
+              instant: true
+              expr: "sum(increase(ai_audit_injection_signals_total[10m]))"
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [5] }
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels:
+          severity: warning
+        annotations:
+          summary: "More than 5 advisory prompt-injection signals in 10 minutes. Check which rule ids fire and which keys send them."
+      - uid: ai-audit-upstream-5xx
+        title: "Upstream 5xx ratio above 5%"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 1800, to: 0 }
+            datasourceUid: victoriametrics
+            model:
+              refId: A
+              instant: true
+              expr: "sum(rate(ai_audit_upstream_responses_total{class=\"5xx\"}[5m])) / clamp_min(sum(rate(ai_audit_upstream_responses_total[5m])), 1e-9)"
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0.05] }
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "More than 5% of upstream responses are 5xx over 5 minutes."
+      - uid: ai-audit-unknown-usage
+        title: "Unknown token usage rising"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 1800, to: 0 }
+            datasourceUid: victoriametrics
+            model:
+              refId: A
+              instant: true
+              expr: "sum(increase(ai_audit_unknown_usage_total[30m])) / clamp_min(sum(increase(ai_audit_upstream_responses_total{class=\"2xx\"}[30m])), 1)"
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0.2] }
+        noDataState: OK
+        execErrState: Error
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "More than 20% of successful calls had no provider-reported usage over 30 minutes. Token totals are a lower bound (ADR 0012). Clients may need stream_options.include_usage."
