@@ -6,8 +6,20 @@ import { join } from "node:path";
 
 export interface Word { text: string; box: [number, number, number, number] }
 export interface Unit { where: string; text: string; words?: Word[]; png?: string }
+const TOOL_OUTPUT_LIMIT = 16 * 1024 * 1024;
+let toolAddressSpace = 0;
 const run = (cmd: string, args: string[], input?: Buffer) =>
-  execFileSync(cmd, args, { input, maxBuffer: 256 << 20, env: { PATH: "/usr/bin:/bin", OMP_THREAD_LIMIT: "1", HOME: "/tmp" }, stdio: ["pipe", "pipe", "ignore"] });
+  execFileSync("prlimit", [`--as=${toolAddressSpace}`, "--", cmd, ...args], { input, maxBuffer: TOOL_OUTPUT_LIMIT, env: { PATH: "/usr/bin:/bin", OMP_THREAD_LIMIT: "1", HOME: "/tmp" }, stdio: [input ? "pipe" : "ignore", "pipe", "ignore"] });
+type Limits = { data: number; cpu: number; fsize: number; nofile: number };
+const LIMIT_ROWS: [keyof Limits, string][] = [["data", "Max data size"], ["cpu", "Max cpu time"], ["fsize", "Max file size"], ["nofile", "Max open files"]];
+function limitsApplied(expected: Limits | undefined): boolean {
+  if (!expected) return false;
+  const table = readFileSync("/proc/self/limits", "utf8").split("\n");
+  return LIMIT_ROWS.every(([key, label]) => {
+    const cells = table.find((l) => l.startsWith(label))?.slice(label.length).trim().split(/\s+/) ?? [];
+    return Number(cells[0]) === expected[key] && Number(cells[1]) === expected[key];
+  });
+}
 const PY_META = `import sys,json
 from PIL import Image
 im=Image.open(sys.argv[1]); im.load()
@@ -38,7 +50,9 @@ function job(j: any): unknown {
   const dir = mkdtempSync(join(tmpdir(), "w-")), f = join(dir, "in");
   if (j.op === "check") {
     const readable = (path: string) => { try { accessSync(path, constants.R_OK); return true; } catch { return false; } };
-    return { env: Object.keys(process.env).sort(), readable: (j.paths ?? []).map(readable) };
+    const toolOutput = (bytes: number) => { try { return run("head", ["-c", String(bytes), "/dev/zero"]).length; } catch { return "output_limit"; } };
+    return { env: Object.keys(process.env).sort(), readable: (j.paths ?? []).map(readable), workerLimits: readFileSync("/proc/self/limits", "utf8"),
+      toolLimits: run("cat", ["/proc/self/limits"]).toString(), ...(j.toolOutputBytes !== undefined && { toolOutput: toolOutput(j.toolOutputBytes) }), ...(j.stdoutBytes && { filler: "x".repeat(j.stdoutBytes) }) };
   }
   if (j.op === "blackout") {
     const pages = j.pages.map((p: any, i: number) => { const pf = join(dir, `p${i}`); writeFileSync(pf, Buffer.from(p.b64, "base64")); return { file: pf, boxes: p.boxes, all: p.all }; });
@@ -70,6 +84,10 @@ function job(j: any): unknown {
 }
 
 let input = ""; process.stdin.on("data", (c) => (input += c)).on("end", () => {
-  try { process.stdout.write(JSON.stringify({ ok: true, ...(job(JSON.parse(input)) as object) })); }
+  let parsed: any;
+  try { parsed = JSON.parse(input); } catch { process.exit(1); }
+  if (!limitsApplied(parsed.limits) || !(parsed.toolAddressSpace > 0)) process.exit(1);
+  toolAddressSpace = parsed.toolAddressSpace;
+  try { process.stdout.write(JSON.stringify({ ok: true, ...(job(parsed) as object) })); }
   catch { process.stdout.write(JSON.stringify({ ok: false })); }
 });

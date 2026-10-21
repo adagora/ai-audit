@@ -29,3 +29,4 @@ Format: Nygard (Status, Context, Decision, Consequences), at most ~40 lines, fil
 - [19. /metrics is OpenMetrics text, unauthenticated, bound to localhost by default](0019-metrics-openmetrics.md)
 - [20. Context arena: block positions, ages and first changed offset](0020-context-arena-and-cache-busts.md)
 - [21. Attachment sandbox: fail closed, minimal mounts, explicit opt-out](0021-attachment-sandbox-hardening.md)
+- [22. Produkcyjnie obecny sandbox, Rust tylko z konkretnego powodu](0022-produkcyjnie-obecny-sandbox.md)

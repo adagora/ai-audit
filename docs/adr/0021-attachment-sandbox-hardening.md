@@ -28,7 +28,13 @@ preflight (ghuntley/preflight, eb13fc0) solves the same problem as follows:
   - `/etc/ld.so.cache`, `/etc/fonts` and `/etc/alternatives` when present;
   - the Node installation directory when it is outside `/usr`;
   - only `dist/src/worker.js`, bound to `/opt/ai-audit/worker.mjs`.
-  Nothing else is mounted: no `/home`, no repository, no log dir, no config, no `/etc/passwd`. Kept from before: `--unshare-all` (no network), `--die-with-parent`, `--new-session`, a fresh `/proc` in the new PID namespace, `/dev`, tmpfs `/tmp`, prlimit (4 GiB data, 60 s CPU, 256 MiB files) and the 60 s wall clock. Added: `--cap-drop ALL`, `--clearenv` with only `PATH`, `HOME=/tmp` and `OMP_THREAD_LIMIT`, and `--chdir /tmp`.
+  Nothing else is mounted: no `/home`, no repository, no log dir, no config, no `/etc/passwd`. Kept from before: `--unshare-all` (no network), `--die-with-parent`, `--new-session`, a fresh `/proc` in the new PID namespace, `/dev` and tmpfs `/tmp`.
+- Resource limits take preflight's values. Soft and hard limits are equal, as in its `setrlimit` calls:
+  - The worker gets RLIMIT_DATA 4 GiB, RLIMIT_CPU 90 s, RLIMIT_FSIZE 64 MiB and RLIMIT_NOFILE 128. The data limit stays instead of preflight's RLIMIT_AS (ADR 0003, ADR 0022). The native tools inherit these limits.
+  - Every native tool (tesseract, pdftotext, pdfinfo, pdftoppm, python3) also gets RLIMIT_AS 1.5 GiB.
+  - The parent enforces a 120 s wall clock, SIGKILL on timeout or on overflow, and a 16 MiB cap on worker stdout. Each tool's stdout is capped at 16 MiB.
+  - `OMP_THREAD_LIMIT=1`.
+  - Mechanism: Node has no `setrlimit` without a native dependency, so `prlimit` (util-linux) applies the limits before exec. preflight's worker sets them on itself. To keep its "exit if a limit cannot be set" behaviour, the worker reads `/proc/self/limits` at start and exits with status 1 and no output when any expected value is missing. The request then fails closed with 422 `audit_inspection_failed`. Added: `--cap-drop ALL`, `--clearenv` with only `PATH`, `HOME=/tmp` and `OMP_THREAD_LIMIT`, and `--chdir /tmp`.
 - No seccomp filter for now. bwrap takes a compiled BPF program (`--seccomp FD`), which needs a native build step or a hand-written filter, and zero runtime dependencies rule out libseccomp bindings. preflight does not use one either. Namespaces, the empty filesystem view and dropped capabilities remove most of what a filter would protect, but the kernel attack surface stays: a kernel bug reachable from an unprivileged process is not mitigated.
 ## Alternatives considered
 - **nsjail:** namespaces, seccomp-bpf (Kafel policy language), cgroups and rlimits in one tool, with a stronger default policy than bwrap. Costs: one more native binary that is less often packaged (Debian and Ubuntu have it, Alpine and Docker slim images do not), a config format to maintain, and root or setuid for cgroup limits. A good next step if seccomp becomes a requirement.

@@ -22,6 +22,7 @@ export interface ProxyOpts {
   quiet?: boolean;
   unsafeNoSandbox?: boolean;
   sandboxAvailable?: boolean;
+  workerOutputLimit?: number;
 }
 export interface VKey { name: string; sha256: string; models?: string[]; providers?: ("openai" | "anthropic")[]; logContent?: boolean }
 export interface Alias { model: string; upstream?: string }
@@ -155,7 +156,7 @@ export function createProxy(o: ProxyOpts) {
       const sanitize: (() => void)[] = [], rasterized: string[] = [];
       for (const a of atts) {
         metrics.attachments.inc();
-        const r = await inspectAttachment(a, a.path.join("."), { ...profile, sandbox: sandbox === "disabled" ? "disabled" : "bwrap" });
+        const r = await inspectAttachment(a, a.path.join("."), { ...profile, sandbox: sandbox === "disabled" ? "disabled" : "bwrap", outputLimit: o.workerOutputLimit });
         if (r.failed) return reject(r.failed === "unsupported" ? "audit_unsupported_attachment" : "audit_inspection_failed");
         r.findings.forEach((f) => findings.push({ ...f, unredactable: !r.sanitized }));
         r.signals?.forEach((x) => signals.push(x));

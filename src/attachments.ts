@@ -61,16 +61,28 @@ export function discover(body: unknown): { atts: Att[]; refs: string[] } {
   return { atts, refs };
 }
 
-export function work(jobIn: object, timeoutMs = 60_000, sandbox: "bwrap" | "disabled" = "bwrap"): Promise<any> {
-  const prlimitArgs = ["prlimit", "--data=4294967296", "--cpu=60", "--fsize=268435456", "--"];
-  const argv = sandbox === "bwrap" ? sandboxArgv([...prlimitArgs, process.execPath, SANDBOX_WORKER]) : [...prlimitArgs, process.execPath, WORKER];
+export const WORKER_LIMITS = { data: 4 * 1024 * 1024 * 1024, cpu: 90, fsize: 64 * 1024 * 1024, nofile: 128 } as const;
+export const TOOL_ADDRESS_SPACE_LIMIT = 1536 * 1024 * 1024;
+export const WORKER_WALL_CLOCK_MS = 120_000;
+export const WORKER_OUTPUT_LIMIT = 16 * 1024 * 1024;
+const PRLIMIT = ["prlimit", `--data=${WORKER_LIMITS.data}`, `--cpu=${WORKER_LIMITS.cpu}`, `--fsize=${WORKER_LIMITS.fsize}`, `--nofile=${WORKER_LIMITS.nofile}`, "--"];
+
+export function work(jobIn: object, timeoutMs = WORKER_WALL_CLOCK_MS, sandbox: "bwrap" | "disabled" = "bwrap", outputLimit = WORKER_OUTPUT_LIMIT): Promise<any> {
+  const argv = sandbox === "bwrap" ? sandboxArgv([...PRLIMIT, process.execPath, SANDBOX_WORKER]) : [...PRLIMIT, process.execPath, WORKER];
   return new Promise((resolve) => {
-    const p = spawn(argv[0], argv.slice(1), { stdio: ["pipe", "pipe", "ignore"], env: { PATH: "/usr/bin:/bin" } });
-    const chunks: Buffer[] = []; const t = setTimeout(() => p.kill("SIGKILL"), timeoutMs);
-    p.on("error", () => { clearTimeout(t); resolve({ ok: false }); });
-    p.stdout.on("data", (c) => chunks.push(c));
-    p.on("close", () => { clearTimeout(t); try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch { resolve({ ok: false }); } });
-    p.stdin.on("error", () => {}); p.stdin.end(JSON.stringify(jobIn));
+    const p = spawn(argv[0], argv.slice(1), { stdio: ["pipe", "pipe", "ignore"], env: { PATH: "/usr/bin:/bin", OMP_THREAD_LIMIT: "1" } });
+    const chunks: Buffer[] = []; let size = 0, failure: string | undefined;
+    const stop = (reason: string) => { failure ??= reason; p.kill("SIGKILL"); };
+    const t = setTimeout(() => stop("attachment_timeout"), timeoutMs);
+    p.on("error", () => { clearTimeout(t); resolve({ ok: false, error: "worker_unavailable" }); });
+    p.stdout.on("data", (c: Buffer) => { size += c.length; if (size > outputLimit) stop("worker_output_limit"); else chunks.push(c); });
+    p.on("close", (code) => {
+      clearTimeout(t);
+      if (failure) return resolve({ ok: false, error: failure });
+      if (code !== 0) return resolve({ ok: false, error: "attachment_inspection_incomplete" });
+      try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch { resolve({ ok: false, error: "attachment_inspection_incomplete" }); }
+    });
+    p.stdin.on("error", () => {}); p.stdin.end(JSON.stringify({ ...jobIn, limits: WORKER_LIMITS, toolAddressSpace: TOOL_ADDRESS_SPACE_LIMIT }));
   });
 }
 
@@ -81,7 +93,7 @@ function boxesFor(words: Word[], carnet?: Allowlist) {
   return { spans, boxes: words.filter((w, i) => spans.some((s) => s.start < at[i] + w.text.length && s.end > at[i])).map((w) => w.box) };
 }
 
-export interface Profile { carnet?: Allowlist; pageRedaction: boolean; id: string; sandbox?: "bwrap" | "disabled" }
+export interface Profile { carnet?: Allowlist; pageRedaction: boolean; id: string; sandbox?: "bwrap" | "disabled"; outputLimit?: number }
 const cache = new Map<string, AttResult>(); export const cacheStats = { hits: 0, misses: 0 };
 const MAX_CACHE = 1000;
 
@@ -90,7 +102,7 @@ export async function inspectAttachment(a: { mime: string; b64: string }, where:
   const hit = cache.get(key); if (hit) { cacheStats.hits++; return structuredClone(hit); }
   cacheStats.misses++;
   if (!SUPPORTED.has(a.mime)) return { findings: [], failed: "unsupported" };
-  const r = await work({ op: "extract", mime: a.mime, b64: a.b64, raster: true }, undefined, p.sandbox);
+  const r = await work({ op: "extract", mime: a.mime, b64: a.b64, raster: true }, undefined, p.sandbox, p.outputLimit);
   if (!r.ok) return { findings: [], failed: "inspection_failed" };
   const findings: Finding[] = [], signals: Signal[] = []; let unmappable = false;
   const pages: { b64: string; boxes: Word["box"][]; all: boolean }[] = [];
@@ -109,11 +121,11 @@ export async function inspectAttachment(a: { mime: string; b64: string }, where:
       else {
         const textPages = new Set(findings.map((f) => /#page(\d+)$/.exec(f.path)?.[1]).filter(Boolean).map(Number));
         pages.forEach((pg, i) => { if (textPages.has(i + 1) && !pg.boxes.length) pg.all = true; });
-        res.sanitized = (await work({ op: "blackout", format: "PDF", pages }, undefined, p.sandbox)).b64; res.rasterized = true;
+        res.sanitized = (await work({ op: "blackout", format: "PDF", pages }, undefined, p.sandbox, p.outputLimit)).b64; res.rasterized = true;
       }
     } else if (!unmappable) {
       const fmt = a.mime === "image/jpeg" ? "JPEG" : a.mime === "image/webp" ? "WEBP" : a.mime === "image/gif" ? "GIF" : "PNG";
-      res.sanitized = (await work({ op: "blackout", format: fmt, pages }, undefined, p.sandbox)).b64;
+      res.sanitized = (await work({ op: "blackout", format: fmt, pages }, undefined, p.sandbox, p.outputLimit)).b64;
     } else res.unmappable = true;
     if (res.sanitized) {
       const again = depth < 1 ? await inspectAttachment({ mime: a.mime, b64: res.sanitized }, where, p, depth + 1) : { findings: [{ rule: "x", path: where }] } as AttResult;
