@@ -6,7 +6,8 @@
     "test": "test"
   },
   "scripts": {
-    "build": "tsrs --skipLibCheck",
+    "build": "tsc",
+    "build:fast": "tsrs --skipLibCheck",
     "test": "npm run build && node --test dist/test/*.test.js",
     "demo": "npm run build && node dist/src/demo.js",
     "example:quote": "node examples/quineling-quote/run.mjs",

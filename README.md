@@ -19,7 +19,7 @@ Uninspectable attachment (corrupt, unsupported, remote URL, file id) → 422. A 
 Prompt-injection signal: a few deterministic rules flag suspicious instructions in tool results and attachment text. It is logged only (rule + path), never blocks, and is easy to bypass ([ADR 0010](docs/adr/0010-advisory-prompt-injection-signal.md)).
 
 ## Development
-Builds, tests, demos and benchmarks compile with the pinned experimental [tsrs](https://github.com/oxc-project/tsrs) Rust TypeScript compiler. `npm run check:tsc` keeps a full TypeScript 5.9 compatibility check available. tsrs uses `--skipLibCheck` because the current compiler reports TS5115 for circular types in Zod dependency declarations; project source is still type-checked.
+`npm run build` compiles with TypeScript (`tsc`); tests, demos and benchmarks use that output. `npm run build:fast` uses the pinned experimental [tsrs](https://github.com/oxc-project/tsrs) Rust compiler instead. It is about 15x faster, for local iteration. It needs `--skipLibCheck` because tsrs reports TS5115 for circular types in Zod dependency declarations.
 
 ## Log tools
 `ai-audit verify [--anchors a.jsonl]` checks the chain (with anchors it also catches a swapped or truncated file) · `ai-audit anchor --anchors a.jsonl` (run daily, keep the anchors file somewhere else) · `ai-audit report --from 2026-10-01 --to 2026-11-01`.
