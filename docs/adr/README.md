@@ -21,3 +21,5 @@ Format: Nygard (Status, Context, Decision, Consequences), at most ~40 lines, fil
 - [11. Response content is logged per key, off by default](0011-response-content-per-key.md)
 - [12. Unknown token usage is never counted as zero](0012-unknown-usage-never-zero.md)
 - [13. PDFs with findings are rasterized by default in redact mode](0013-rasterize-pdfs-by-default.md)
+- [14. Content-addressed inspection profiles](0014-versioned-inspection-profiles.md)
+- [15. Offline history scrubbing into separate exports](0015-offline-history-scrubbing.md)

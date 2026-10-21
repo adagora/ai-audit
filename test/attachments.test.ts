@@ -7,6 +7,7 @@ import { mockUpstream, startProxy, makePdf, AWS, AUTH } from "./helpers.js";
 import { work, cacheStats, SANDBOX, inspectAttachment } from "../src/attachments.js";
 import { AuditLog, anchor, sha256, verifyAnchors } from "../src/audit.js";
 import { scanText } from "../src/scan.js";
+import { createInspectionProfile } from "../src/profile.js";
 
 const up = await mockUpstream();
 const red = await startProxy(up.url, "redact"), np = await startProxy(up.url, "redact", { pageRedaction: false }), ng = await startProxy(up.url, "no-go");
@@ -111,4 +112,33 @@ test("anchor: whole-file swap and truncation detected", () => {
   writeFileSync(log.path, orig.toString().split("\n").slice(0, 2).join("\n") + "\n");
   assert.match(verifyAnchors(log, anc).reason!, /^truncated/);
   writeFileSync(log.path, orig); appendFileSync(log.path, ""); assert.equal(verifyAnchors(log, anc).ok, true);
+});
+
+test("attachment cache reuses only the same content-addressed inspection policy", async () => {
+  const carnet = new Set([sha256("synthetic-cache-profile-one")]);
+  const profile = createInspectionProfile({ mode: "redact", carnet });
+  const a = { mime: "image/png", b64: CLEAN_PNG };
+  const misses = cacheStats.misses, hits = cacheStats.hits;
+  assert.ok(!(await inspectAttachment(a, "profile-test", profile)).failed);
+  assert.equal(cacheStats.misses, misses + 1);
+  await inspectAttachment(a, "profile-test", createInspectionProfile({ mode: "redact", carnet: new Set([...carnet].reverse()) }));
+  assert.equal(cacheStats.hits, hits + 1);
+  carnet.add(sha256("synthetic-cache-profile-two"));
+  await inspectAttachment(a, "profile-test", createInspectionProfile({ mode: "redact", carnet }));
+  assert.equal(cacheStats.misses, misses + 2);
+  await inspectAttachment(a, "profile-test", createInspectionProfile({ mode: "no-go", carnet }));
+  assert.equal(cacheStats.misses, misses + 3);
+});
+
+test("a PDF containing an AWS secret-access assignment is sanitized by the shared scanner", async () => {
+  const secret = "B".repeat(40);
+  const pdf = makePdf(["AWS_SECRET_ACCESS_KEY=", secret]).toString("base64");
+  const r = await post(red.url, "/v1/messages", { model: "c", max_tokens: 5, messages: [{ role: "user", content: [
+    { type: "document", source: { type: "base64", media_type: "application/pdf", data: pdf } },
+  ] }] });
+  assert.equal(r.status, 200); await r.text();
+  const sent = JSON.parse(last().body.toString()).messages[0].content[0].source.data;
+  assert.notEqual(sent, pdf);
+  assert.ok(!(await ocrText("application/pdf", sent)).includes(secret));
+  assert.ok((red.log.read().at(-1)!.decision as any).findings.some((f: any) => f.rule === "aws-secret-access-key"));
 });

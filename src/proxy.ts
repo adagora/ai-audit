@@ -2,11 +2,12 @@
 import http from "node:http";
 import { randomUUID } from "node:crypto";
 import { AuditLog, sha256, stats } from "./audit.js";
-import { decide, hasDuplicateKeys, inspect, redactText, scanText, type Mode } from "./scan.js";
+import { decide, hasDuplicateKeys, inspect, type Mode } from "./scan.js";
 import { toolResultSignals, type Signal } from "./injection.js";
 import { extract, type Api } from "./extract.js";
 import { discover, inspectAttachment, cacheStats, TOOLS_OK } from "./attachments.js";
 import { timingSafeEqual } from "node:crypto";
+import { createInspectionProfile } from "./profile.js";
 
 export interface ProxyOpts {
   upstreamOpenai: string; upstreamAnthropic: string; mode: Mode; log: AuditLog; maxBodyBytes?: number; timeoutMs?: number; carnet?: Set<string>;
@@ -30,6 +31,7 @@ const RESP_DROP = new Set(["content-encoding", "content-length", "transfer-encod
 
 export function createProxy(o: ProxyOpts) {
   const max = o.maxBodyBytes ?? 32 * 1024 * 1024, timeoutMs = o.timeoutMs ?? 180_000;
+  const profile = createInspectionProfile(o);
   return http.createServer(async (req, res) => {
     const rid = randomUUID(), t0 = Date.now(); res.setHeader("x-request-id", rid);
     let decisionTag = "none", routeTag = "";
@@ -92,13 +94,23 @@ export function createProxy(o: ProxyOpts) {
       if (alias) { body.model = alias.model; if (alias.upstream) base = alias.upstream; }
       if (vkey?.models && !vkey.models.includes("*") && !vkey.models.includes(requestedModel ?? "") && !vkey.models.includes(body?.model)) { clearTimeout(timer); return fail(403, "audit_model_not_allowed"); }
       const target = base.replace(/\/$/, "") + url.pathname + url.search;
-      const { value, findings } = inspect(body, o.carnet) as { value: any; findings: any[] };
+      const { value, findings } = inspect(body, profile.carnet) as { value: any; findings: any[] };
       const { atts, refs } = discover(value);
-      const reject = (code: string) => { clearTimeout(timer); decisionTag = "reject"; return fail(422, code); };
-      if (refs.length && o.mode !== "advisory") return reject("audit_uninspectable_reference"); // remote URL / file id: fail closed
+      const context = {
+        provider: anthropic ? "anthropic" : "openai", api: route, endpoint: url.pathname, requestId: rid,
+        systemId: str(req.headers["x-audit-system-id"]), useCase: str(req.headers["x-audit-use-case"]),
+        ...who, model: typeof body.model === "string" ? body.model : undefined, requestedModel: alias ? requestedModel : undefined, stream: body.stream === true,
+        requestHash: sha256(raw.toString("latin1")), inspectionProfile: profile.receipt,
+      };
+      const reject = (code: string) => {
+        clearTimeout(timer); decisionTag = "reject";
+        if (route !== "count") o.log.append({ kind: "llm-call", id: rid, ts: new Date(t0).toISOString(), ...context,
+          decision: { mode: profile.mode, action: "reject", findings: findings.map((f) => ({ rule: f.rule, path: f.path })) },
+          upstreamStatus: null, error: code, latencyMs: Date.now() - t0 });
+        return fail(422, code);
+      };
+      if (refs.length && profile.mode !== "advisory") return reject("audit_uninspectable_reference"); // remote URL / file id: fail closed
       if (atts.length && !TOOLS_OK) return reject("audit_inspection_unavailable");
-      const pageRedaction = o.pageRedaction !== false;
-      const profile = { carnet: o.carnet, pageRedaction, id: `rules-v1|pr=${pageRedaction}|carnet=${sha256([...(o.carnet ?? [])].sort().join())}` };
       const signals: Signal[] = toolResultSignals(body); // advisory only, never affects the decision (ADR 0010)
       const sanitize: (() => void)[] = [], rasterized: string[] = [];
       for (const a of atts) {
@@ -110,17 +122,14 @@ export function createProxy(o: ProxyOpts) {
         if (r.sanitized) sanitize.push(() => a.set(r.sanitized!));
         if (r.rasterized) rasterized.push(a.path.join("."));
       }
-      const d = decide(o.mode, findings); decisionTag = d.action;
+      const d = decide(profile.mode, findings); decisionTag = d.action;
       res.setHeader("x-audit-finding-count", String(findings.length));
       if (signals.length) res.setHeader("x-audit-signal-count", String(signals.length));
       if (d.action === "forward-redacted") sanitize.forEach((f) => f());
       const fwd = d.action === "forward-redacted" || alias ? Buffer.from(JSON.stringify(value)) : raw; // clean + unaliased => original bytes
       const rec = {
-        provider: anthropic ? "anthropic" : "openai", api: route, endpoint: url.pathname, requestId: rid,
-        systemId: str(req.headers["x-audit-system-id"]), useCase: str(req.headers["x-audit-use-case"]),
-        ...who, model: typeof body.model === "string" ? body.model : undefined, requestedModel: alias ? requestedModel : undefined, stream: body.stream === true,
-        requestHash: sha256(raw.toString("latin1")), forwardedPromptDigest: sha256(fwd.toString("latin1")),
-        decision: { mode: o.mode, action: d.action, findings: d.findings.map((f) => ({ rule: f.rule, path: f.path })), ...(signals.length && { signals }), ...(d.action === "forward-redacted" && rasterized.length && { rasterized }) },
+        ...context, forwardedPromptDigest: sha256(fwd.toString("latin1")),
+        decision: { mode: profile.mode, action: d.action, findings: d.findings.map((f) => ({ rule: f.rule, path: f.path })), ...(signals.length && { signals }), ...(d.action === "forward-redacted" && rasterized.length && { rasterized }) },
       };
       const write = (extra: object) => { if (route !== "count") o.log.append({ kind: "llm-call", id: rid, ts: new Date(t0).toISOString(), ...rec, ...extra, latencyMs: Date.now() - t0 } as any); };
       if (d.action === "block") { clearTimeout(timer); write({ upstreamStatus: null }); return fail(d.status!, d.code!, d.findings.map((f) => f.rule)); }
@@ -133,7 +142,10 @@ export function createProxy(o: ProxyOpts) {
       const sse = (up.headers.get("content-type") ?? "").includes("text/event-stream");
       const captured = await pipe(up, res);
       const out = route === "count" ? undefined : extract(route, captured, sse);
-      const red = (s: string) => redactText(s, scanText(s, o.carnet)); // output may contain PII too
+      const red = (s: string) => { // keys and ambiguous nested JSON have no safe structural rewrite
+        const result = inspect(s, profile.carnet);
+        return result.findings.some((f) => f.inKey || f.unredactable) ? "[REDACTED:unredactable-content]" : result.value as string;
+      };
       const full = vkey?.logContent === true; // ADR 0011: content only for keys that opted in (agents/services)
       write({ upstreamStatus: up.status, clientAborted: !res.writableFinished || undefined, responseModel: out?.model, usage: out?.usage, stop: out?.stop,
         ...(out && { content: full ? "redacted" : "hash", outputHash: sha256(out.text), ...(full && { output: red(out.text) }),

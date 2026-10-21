@@ -6,15 +6,41 @@ import { randomBytes } from "node:crypto";
 import { SANDBOX, TOOLS_OK } from "./attachments.js";
 import { createProxy } from "./proxy.js";
 import type { Mode } from "./scan.js";
+import { scrubHistory } from "./history.js";
+import { createInspectionProfile } from "./profile.js";
 
 const [cmd, ...rest] = process.argv.slice(2);
 const { values: a } = parseArgs({ args: rest, options: {
   "upstream-openai": { type: "string", default: "https://api.openai.com" }, "upstream-anthropic": { type: "string", default: "https://api.anthropic.com" },
   mode: { type: "string", default: "redact" }, log: { type: "string", default: "./audit.jsonl" }, port: { type: "string", default: "8787" },
   host: { type: "string", default: "127.0.0.1" }, anchors: { type: "string" }, config: { type: "string" }, by: { type: "string", default: "model" }, name: { type: "string", default: "client" }, "no-page-redaction": { type: "boolean", default: false }, "log-content": { type: "boolean", default: false }, "allow-hashes": { type: "string" }, from: { type: "string", default: "1970-01-01" }, to: { type: "string", default: "9999-12-31" },
+  input: { type: "string" }, output: { type: "string" }, format: { type: "string" }, "max-record-bytes": { type: "string" },
 } });
 const log = new AuditLog(a.log!);
-if (cmd === "serve") {
+if (cmd === "scrub" || cmd === "profile") {
+  try {
+    let carnet: Set<string> | undefined;
+    if (a["allow-hashes"]) {
+      let hashes: unknown;
+      try { hashes = JSON.parse(readFileSync(a["allow-hashes"], "utf8")); } catch { throw new Error("audit_invalid_allowlist"); }
+      if (!Array.isArray(hashes) || hashes.some((h) => typeof h !== "string")) throw new Error("audit_invalid_allowlist");
+      carnet = new Set(hashes);
+    }
+    if (cmd === "scrub") {
+      console.log(JSON.stringify(await scrubHistory({ input: a.input!, output: a.output!, format: a.format as "json" | "jsonl" | undefined,
+        maxRecordBytes: a["max-record-bytes"] === undefined ? undefined : Number(a["max-record-bytes"]), carnet })));
+    } else {
+      if (!["redact", "no-go", "advisory"].includes(a.mode!)) throw new Error("audit_invalid_mode");
+      const cfg = a.config ? JSON.parse(readFileSync(a.config, "utf8")) : {};
+      console.log(JSON.stringify(createInspectionProfile({ mode: a.mode as Mode, carnet,
+        pageRedaction: !a["no-page-redaction"] && cfg.pageRedaction !== false }).receipt));
+    }
+  } catch (cause) {
+    const code = cause instanceof Error && /^(?:scrub_[a-z0-9_]+|audit_invalid_allowlist|audit_invalid_mode)$/.test(cause.message)
+      ? cause.message : "audit_command_failed";
+    console.error(code); process.exitCode = 2;
+  }
+} else if (cmd === "serve") {
   if (!["redact", "no-go", "advisory"].includes(a.mode!)) { console.error("--mode must be redact|no-go|advisory"); process.exit(2); }
   const carnet = a["allow-hashes"] ? new Set<string>(JSON.parse(readFileSync(a["allow-hashes"], "utf8"))) : undefined;
   const env = process.env, cfg = a.config ? JSON.parse(readFileSync(a.config, "utf8")) : {};
@@ -37,4 +63,4 @@ if (cmd === "serve") {
 } else if (cmd === "verify") {
   const v = log.verifyChain(); console.log(v.ok ? `OK: ${log.read().length} records, chain intact` : `BROKEN at line ${v.badLine}: ${v.reason}`); process.exit(v.ok ? 0 : 1);
 } else if (cmd === "report") console.log(report(log, a.from!, a.to!).md);
-else { console.error("usage: ai-audit serve|verify|anchor|report|stats|keygen [--config FILE] [--by key|model|hour] [--name N] [--log-content] [--anchors FILE] [--no-page-redaction] [--log ./audit.jsonl] [--mode redact|no-go|advisory] [--port 8787] [--from ISO --to ISO]"); process.exit(2); }
+else { console.error("usage: ai-audit serve|verify|anchor|report|stats|keygen|profile|scrub [--input FILE --output FILE --format json|jsonl --max-record-bytes N] [--allow-hashes FILE] [--config FILE] [--by key|model|hour] [--name N] [--log-content] [--anchors FILE] [--no-page-redaction] [--log ./audit.jsonl] [--mode redact|no-go|advisory] [--port 8787] [--from ISO --to ISO]"); process.exit(2); }

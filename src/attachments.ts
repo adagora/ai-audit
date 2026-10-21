@@ -2,7 +2,7 @@
 import { spawn, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { scanText, type Finding } from "./scan.js";
+import { scanText, type Allowlist, type Finding } from "./scan.js";
 import type { Unit, Word } from "./worker.js";
 import { signalsInText, type Signal } from "./injection.js";
 
@@ -49,6 +49,7 @@ export function work(jobIn: object, timeoutMs = 60_000): Promise<any> {
   return new Promise((resolve) => {
     const p = spawn(argv[0], argv.slice(1), { stdio: ["pipe", "pipe", "ignore"], env: { PATH: "/usr/bin:/bin" } });
     const chunks: Buffer[] = []; const t = setTimeout(() => p.kill("SIGKILL"), timeoutMs);
+    p.on("error", () => { clearTimeout(t); resolve({ ok: false }); });
     p.stdout.on("data", (c) => chunks.push(c));
     p.on("close", () => { clearTimeout(t); try { resolve(JSON.parse(Buffer.concat(chunks).toString())); } catch { resolve({ ok: false }); } });
     p.stdin.on("error", () => {}); p.stdin.end(JSON.stringify(jobIn));
@@ -56,14 +57,14 @@ export function work(jobIn: object, timeoutMs = 60_000): Promise<any> {
 }
 
 /** Map findings in OCR text back to word boxes. */
-function boxesFor(words: Word[], carnet?: Set<string>) {
+function boxesFor(words: Word[], carnet?: Allowlist) {
   let text = ""; const at: number[] = [];
   words.forEach((w, i) => { if (i) text += " "; at.push(text.length); text += w.text; });
   const spans = scanText(text, carnet);
   return { spans, boxes: words.filter((w, i) => spans.some((s) => s.start < at[i] + w.text.length && s.end > at[i])).map((w) => w.box) };
 }
 
-export interface Profile { carnet?: Set<string>; pageRedaction: boolean; id: string }
+export interface Profile { carnet?: Allowlist; pageRedaction: boolean; id: string }
 const cache = new Map<string, AttResult>(); export const cacheStats = { hits: 0, misses: 0 };
 const MAX_CACHE = 1000;
 
