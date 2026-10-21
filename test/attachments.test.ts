@@ -105,7 +105,6 @@ test("anchor: whole-file swap and truncation detected", () => {
   anchor(log, anc); log.record({ systemId: "s", useCase: "u", input: "i3", output: 3 }); anchor(log, anc);
   assert.deepEqual(verifyAnchors(log, anc), { ok: true, anchors: 2 });
   const orig = readFileSync(log.path);
-  // attacker rewrites history with a fully recomputed, internally valid chain
   writeFileSync(log.path, ""); for (let i = 0; i < 4; i++) log.record({ systemId: "s", useCase: "u", input: `i${i}`, output: i === 1 ? 999 : i });
   assert.equal(log.verifyChain().ok, true);
   assert.match(verifyAnchors(log, anc).reason!, /^swapped/);

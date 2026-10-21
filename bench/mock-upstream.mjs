@@ -1,4 +1,3 @@
-// Local mock provider (OpenAI + Anthropic shapes). Fixed tiny response, optional fixed delay. 127.0.0.1 only.
 import http from "node:http";
 const DELAY = Number(process.env.MOCK_DELAY_MS ?? 0);
 const OA = JSON.stringify({ id: "m", object: "chat.completion", model: "mock-1", choices: [{ index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" }], usage: { prompt_tokens: 50, completion_tokens: 1, total_tokens: 51 } });

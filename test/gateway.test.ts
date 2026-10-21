@@ -20,8 +20,8 @@ const an = { model: "claude-x", max_tokens: 5, messages: [{ role: "user", conten
 
 test("virtual keys: per-key provider/model allow-lists; real key injected; key + client logged", async () => {
   assert.equal((await call("vk-unknown", "/v1/chat/completions", oa("gpt-x"))).status, 401);
-  assert.equal((await call("vk-A", "/v1/chat/completions", oa("gpt-x"))).status, 403); // anthropic-only key
-  assert.equal((await call("vk-B", "/v1/chat/completions", oa("gpt-4o"))).status, 403); // model not allowed
+  assert.equal((await call("vk-A", "/v1/chat/completions", oa("gpt-x"))).status, 403);
+  assert.equal((await call("vk-B", "/v1/chat/completions", oa("gpt-4o"))).status, 403);
   const r = await call("vk-A", "/v1/messages", an, "claude-cli/2.1"); assert.equal(r.status, 200); await r.text();
   assert.equal(up.seen.at(-1)!.headers["x-api-key"], "sk-REAL-anthropic"); assert.equal(up.seen.at(-1)!.headers.authorization, undefined);
   const rec = p.log.read().at(-1) as any;

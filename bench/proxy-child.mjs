@@ -1,4 +1,3 @@
-// Proxy under test, in its own process (forked by memory.mjs with --expose-gc). Reports memory over IPC.
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

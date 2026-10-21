@@ -1,4 +1,3 @@
-// Attachment discovery, sandboxed extraction, content-addressed cache, OCR-box redaction.
 import { spawn, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -15,7 +14,6 @@ const SUPPORTED = new Set(["image/png", "image/jpeg", "image/webp", "image/gif",
 export interface Att { path: (string | number)[]; mime: string; b64: string; set: (b64: string) => void }
 export interface AttResult { findings: Finding[]; signals?: Signal[]; failed?: "unsupported" | "inspection_failed"; unmappable?: boolean; sanitized?: string; rasterized?: boolean }
 
-/** Find inline attachments (OpenAI data: URIs / file_data, Anthropic base64 sources) and external references we can't inspect. */
 export function discover(body: unknown): { atts: Att[]; refs: string[] } {
   const atts: Att[] = [], refs: string[] = [];
   const walk = (v: any, path: (string | number)[], parent?: any, key?: string | number) => {
@@ -28,7 +26,7 @@ export function discover(body: unknown): { atts: Att[]; refs: string[] } {
     if (!Array.isArray(v)) {
       if (v.type === "base64" && typeof v.data === "string" && typeof v.media_type === "string")
         return void atts.push({ path: [...path, "data"], mime: v.media_type, b64: v.data, set: (b) => (v.data = b) });
-      if ((v.type === "url" || v.type === "file") && (v.url || v.file_id)) refs.push(path.join(".")); // Anthropic url/file source
+      if ((v.type === "url" || v.type === "file") && (v.url || v.file_id)) refs.push(path.join("."));
       if (typeof v.file_id === "string") refs.push(path.join("."));
       const u = v.image_url?.url ?? v.image_url ?? v.file_url;
       if (typeof u === "string" && /^https?:/i.test(u)) refs.push(path.join("."));
@@ -39,13 +37,11 @@ export function discover(body: unknown): { atts: Att[]; refs: string[] } {
   return { atts, refs };
 }
 
-/** Run one worker job in a separate process: bwrap (no net, ro root, tmpfs /tmp) + prlimit, hard wall-clock kill. */
 export function work(jobIn: object, timeoutMs = 60_000): Promise<any> {
-  // RLIMIT_DATA, not RLIMIT_AS: pointer-compressed Node (node-caged) reserves a multi-GiB virtual cage and SIGTRAPs at start under --as<=8GiB.
-  const lim = ["prlimit", "--data=4294967296", "--cpu=60", "--fsize=268435456", "--"];
+  const prlimitArgs = ["prlimit", "--data=4294967296", "--cpu=60", "--fsize=268435456", "--"];
   const argv = SANDBOX === "bwrap"
-    ? ["bwrap", "--ro-bind", "/", "/", "--tmpfs", "/tmp", "--proc", "/proc", "--dev", "/dev", "--unshare-all", "--die-with-parent", "--new-session", ...lim, process.execPath, WORKER]
-    : [...lim, process.execPath, WORKER];
+    ? ["bwrap", "--ro-bind", "/", "/", "--tmpfs", "/tmp", "--proc", "/proc", "--dev", "/dev", "--unshare-all", "--die-with-parent", "--new-session", ...prlimitArgs, process.execPath, WORKER]
+    : [...prlimitArgs, process.execPath, WORKER];
   return new Promise((resolve) => {
     const p = spawn(argv[0], argv.slice(1), { stdio: ["pipe", "pipe", "ignore"], env: { PATH: "/usr/bin:/bin" } });
     const chunks: Buffer[] = []; const t = setTimeout(() => p.kill("SIGKILL"), timeoutMs);
@@ -56,7 +52,6 @@ export function work(jobIn: object, timeoutMs = 60_000): Promise<any> {
   });
 }
 
-/** Map findings in OCR text back to word boxes. */
 function boxesFor(words: Word[], carnet?: Allowlist) {
   let text = ""; const at: number[] = [];
   words.forEach((w, i) => { if (i) text += " "; at.push(text.length); text += w.text; });
@@ -68,7 +63,6 @@ export interface Profile { carnet?: Allowlist; pageRedaction: boolean; id: strin
 const cache = new Map<string, AttResult>(); export const cacheStats = { hits: 0, misses: 0 };
 const MAX_CACHE = 1000;
 
-/** Inspect one attachment (cached by sha256(bytes) + profile). Only complete results are cached. */
 export async function inspectAttachment(a: { mime: string; b64: string }, where: string, p: Profile, depth = 0): Promise<AttResult> {
   const key = createHash("sha256").update(p.id).update("\0").update(a.mime).update("\0").update(Buffer.from(a.b64, "base64")).digest("hex");
   const hit = cache.get(key); if (hit) { cacheStats.hits++; return structuredClone(hit); }
@@ -80,27 +74,26 @@ export async function inspectAttachment(a: { mime: string; b64: string }, where:
   const pages: { b64: string; boxes: Word["box"][]; all: boolean }[] = [];
   for (const u of r.units as Unit[]) {
     const spans = scanText(u.text, p.carnet); spans.forEach((s) => findings.push({ rule: s.rule, path: `${where}#${u.where}` }));
-    if (depth === 0) signalsInText(u.text, `${where}#${u.where}`, signals); // advisory only (ADR 0010)
+    if (depth === 0) signalsInText(u.text, `${where}#${u.where}`, signals);
     if (u.png) {
       const m = boxesFor(u.words ?? [], p.carnet);
       pages.push({ b64: u.png, boxes: m.boxes, all: false });
-    } else if (spans.length && a.mime !== "application/pdf") unmappable = unmappable || u.where !== "meta"; // image meta is dropped on re-encode
+    } else if (spans.length && a.mime !== "application/pdf") unmappable = unmappable || u.where !== "meta";
   }
   let res: AttResult = { findings, ...(signals.length && { signals }) };
   if (findings.length) {
     if (a.mime === "application/pdf") {
-      // text layer / metadata can't be edited safely: rebuild raster-only PDF unless opted out (ADR 0013), blanking pages we can't map precisely
       if (!p.pageRedaction) res.unmappable = true;
       else {
         const textPages = new Set(findings.map((f) => /#page(\d+)$/.exec(f.path)?.[1]).filter(Boolean).map(Number));
-        pages.forEach((pg, i) => { if (textPages.has(i + 1) && !pg.boxes.length) pg.all = true; }); // whole-page redaction
+        pages.forEach((pg, i) => { if (textPages.has(i + 1) && !pg.boxes.length) pg.all = true; });
         res.sanitized = (await work({ op: "blackout", format: "PDF", pages })).b64; res.rasterized = true;
       }
     } else if (!unmappable) {
       const fmt = a.mime === "image/jpeg" ? "JPEG" : a.mime === "image/webp" ? "WEBP" : a.mime === "image/gif" ? "GIF" : "PNG";
       res.sanitized = (await work({ op: "blackout", format: fmt, pages })).b64;
     } else res.unmappable = true;
-    if (res.sanitized) { // re-inspect the rebuilt artifact before approval
+    if (res.sanitized) {
       const again = depth < 1 ? await inspectAttachment({ mime: a.mime, b64: res.sanitized }, where, p, depth + 1) : { findings: [{ rule: "x", path: where }] } as AttResult;
       if (again.findings.length || again.failed) { res.sanitized = undefined; res.rasterized = undefined; res.unmappable = true; }
     }

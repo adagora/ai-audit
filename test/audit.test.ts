@@ -30,7 +30,6 @@ test("editing ANY line is detected at that line", () => {
     writeFileSync(log.path, t.join("\n") + "\n");
     const v = log.verifyChain(); assert.equal(v.ok, false); assert.equal(v.badLine, i + 1);
   }
-  // deleting a line breaks the chain too
   writeFileSync(log.path, lines.filter((_, i) => i !== 1).join("\n") + "\n");
   assert.equal(log.verifyChain().ok, false);
 });

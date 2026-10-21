@@ -1,6 +1,3 @@
-// Proxy overhead benchmark: same requests direct to a mock upstream vs through the proxy.
-// Usage: npm run bench:overhead -- [N=2000] [runs=3]   (run `npm run build` first; bench:overhead does it)
-// Three processes: client (this), mock upstream, proxy. Loopback only, no real keys, no live providers.
 import { fork } from "node:child_process";
 import { once } from "node:events";
 import { readFileSync } from "node:fs";
@@ -9,7 +6,7 @@ const N = Number(process.argv[2] ?? 2000), RUNS = Number(process.argv[3] ?? 3), 
 const start = async (file, env) => { const c = fork(new URL(file, import.meta.url), { env: { ...process.env, ...env } }); const [m] = await once(c, "message"); return [c, m]; };
 const [mock, { port: mp }] = await start("./mock-upstream.mjs");
 const [proxy, { port: pp, logPath }] = await start("./overhead-proxy.mjs", { BENCH_UPSTREAM: `http://127.0.0.1:${mp}` });
-const filler = "Quote request: milling aluminium 6061, tolerance 0.02 mm, 40 pcs. ".repeat(6); // ~400 B user text
+const filler = "Quote request: milling aluminium 6061, tolerance 0.02 mm, 40 pcs. ".repeat(6);
 const cases = {
   "openai-chat": { path: "/v1/chat/completions", hdr: { authorization: "Bearer vk-bench-local" },
     body: (i) => ({ model: "gpt-4o-mini", messages: [{ role: "system", content: "You quote machining jobs." }, { role: "user", content: `${filler} #${i}` }] }) },

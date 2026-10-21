@@ -6,9 +6,8 @@ import type { AddressInfo } from "node:net";
 import { AuditLog } from "../src/audit.js";
 import { createProxy } from "../src/proxy.js";
 import type { Mode } from "../src/scan.js";
-// Synthetic fixtures only.
 export const AWS = "AKIA" + "IOSFODNN7EXAMPLQ";
-export const PESEL = "44051401359"; // valid checksum
+export const PESEL = "44051401359";
 export const AUTH = "Bearer sk-test-SHOULD-NEVER-BE-LOGGED";
 
 type Seen = { path: string; body: Buffer; headers: http.IncomingHttpHeaders };
@@ -53,7 +52,6 @@ export async function startProxy(upstream: string, mode: Mode, extra: Partial<im
 }
 
 
-/** Minimal one-page text PDF (Helvetica), correct xref offsets. */
 export function makePdf(lines: string[]): Buffer {
   const content = `BT /F1 14 Tf 40 760 Td 18 TL ${lines.map((l) => `(${l.replace(/[()\\]/g, "\\$&")}) Tj T*`).join(" ")} ET`;
   const objs = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",

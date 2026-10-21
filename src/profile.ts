@@ -1,4 +1,3 @@
-// Immutable inspection identity shared by decisions, attachment caches and history exports.
 import { createHash } from "node:crypto";
 import { RULES_DIGEST, SCANNER_VERSION, type Allowlist, type Mode } from "./scan.js";
 
@@ -18,7 +17,6 @@ export interface InspectionOptions {
 
 const hash = (v: unknown) => createHash("sha256").update(JSON.stringify(v)).digest("hex");
 
-/** Snapshot the allowlist: caller mutations cannot change an admitted inspection's policy. */
 export function createInspectionProfile(options: InspectionOptions) {
   const hashes = [...(options.carnet ?? [])].map((h) => h.toLowerCase()).sort();
   if (hashes.some((h) => !/^[a-f0-9]{64}$/.test(h))) throw new Error("audit_invalid_allowlist");

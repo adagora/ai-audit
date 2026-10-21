@@ -28,7 +28,6 @@ test("QDL step: logged, replayed in a fresh session, tamper refused", { skip }, 
   console.log("replay:", JSON.stringify(r).slice(0, 200));
   assert.equal(r.reproduced, true); assert.deepEqual(r.output.slice(0, 2), [189, true]);
   assert.deepEqual(log.verifyChain(), { ok: true });
-  // edit the floor literal inside the stored quine (and fix up nothing else): fresh admission must refuse it
   const lines = readFileSync(log.path, "utf8").trim().split("\n"); const q = JSON.parse(lines[1]);
   q.qdl.source = q.qdl.source.replace("150", "1"); lines[1] = JSON.stringify(q); writeFileSync(log.path, lines.join("\n") + "\n");
   assert.equal(log.verifyChain().ok, false);

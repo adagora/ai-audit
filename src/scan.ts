@@ -1,11 +1,8 @@
-// Whole-request secret + PII inspection. Pure: no I/O.
-// Secret rule shapes are adapted from Gitleaks (MIT, (c) 2019 Zachary Rice); see THIRD_PARTY_NOTICES.md.
 import { createHash } from "node:crypto";
 
 export type Mode = "redact" | "no-go" | "advisory";
 export type Allowlist = Pick<ReadonlySet<string>, "has">;
 interface Rule { readonly id: string; readonly re: RegExp; readonly group?: number; readonly keywords?: readonly string[]; readonly valid?: (m: string) => boolean; readonly field?: RegExp }
-// Bump for changes to traversal, reconstruction or other scanner semantics.
 export const SCANNER_VERSION = "2";
 const END = String.raw`(?:[\x60'"\s;]|\\[nr]|$)`;
 
@@ -33,7 +30,6 @@ const definitions: Rule[] = [
   { id: "aws-access-token", re: /\b((?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7]{16})\b/g, group: 1, keywords: ["a3t", "akia", "asia", "abia", "acca"] },
   { id: "aws-secret-access-key", re: /\b(?:aws[_.-]?)?secret[_.-]?access[_.-]?key\b[\\"'\s]*[:=][\\"'\s]*([A-Za-z0-9/+=]{40})(?![A-Za-z0-9/+=])/gi, group: 1, field: /^(?:aws[_.-]?)?secret[_.-]?access[_.-]?key$/i },
   { id: "aws-session-token", re: /\b(?:aws[_.-]?)?session[_.-]?token\b[\\"'\s]*[:=][\\"'\s]*([A-Za-z0-9/+=]{16,})(?![A-Za-z0-9/+=])/gi, group: 1, field: /^(?:aws[_.-]?)?session[_.-]?token$/i },
-  // Scan a URI once, then check credentials; overlapping userinfo regexes can backtrack quadratically.
   { id: "database-credentials", re: /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|rediss?|mssql|sqlserver|cockroachdb):\/\/[^\s<>"'`]+/gi, valid: databaseCredentials },
   { id: "database-password", re: /\b(?:PGPASSWORD|MYSQL_PWD|(?:db|database)[_.-]?password)\b[\\"'\s]*[:=]\s*(["'])((?:\\.|(?!\1)[^\\\r\n])+)\1/gi, group: 2 },
   { id: "database-password", re: /\b(?:PGPASSWORD|MYSQL_PWD|(?:db|database)[_.-]?password)\b[\\"'\s]*[:=]\s*([^\s\\"'`;]+)(?:[\s;]|$)/gi, group: 1, field: /^(?:PGPASSWORD|MYSQL_PWD|(?:db|database)[_.-]?password)$/i },
@@ -51,7 +47,6 @@ const definitions: Rule[] = [
   { id: "slack-bot-token", re: /xoxb-[0-9]{10,13}-[0-9]{10,13}[a-zA-Z0-9-]*/g, keywords: ["xoxb"] },
   { id: "slack-user-token", re: /xox[pe](?:-[0-9]{10,13}){3}-[a-zA-Z0-9-]{28,34}/g, keywords: ["xoxp-", "xoxe-"] },
   { id: "slack-webhook-url", re: /(?:https?:\/\/)?hooks.slack.com\/(?:services|workflows|triggers)\/[A-Za-z0-9+/]{43,56}/g, keywords: ["hooks.slack.com"] },
-  // PII (ours). Checksums keep false positives down.
   { id: "pii-email", re: /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g, keywords: ["@"] },
   { id: "pii-iban", re: /\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,4})?\b/g, valid: mod97 },
   { id: "pii-iban", re: /(?<![\w-])\d{2}(?: ?\d{4}){6}(?![\w-])/g, valid: (m) => mod97("PL" + m.replace(/ /g, "")) },
@@ -62,7 +57,6 @@ const definitions: Rule[] = [
 export const RULES: readonly Rule[] = Object.freeze(definitions.map((r) => Object.freeze({ ...r,
   re: Object.freeze(r.re), field: r.field && Object.freeze(r.field), keywords: r.keywords && Object.freeze([...r.keywords]) })));
 
-/** Content identity of the ordered rule definitions and their validation functions. */
 export const RULES_DIGEST = createHash("sha256").update(JSON.stringify({
   version: SCANNER_VERSION, validators: [pesel.toString(), mod97.toString()],
   rules: RULES.map((r) => ({ id: r.id, source: r.re.source, flags: r.re.flags, group: r.group,
@@ -81,18 +75,17 @@ export function scanText(text: string, carnet?: Allowlist): Span[] {
       const [s, e] = m.indices![r.group ?? 0]!; const value = text.slice(s, e);
       if (/^\[REDACTED:[\w-]+\]$/.test(value)) continue;
       if (r.valid && !r.valid(value)) continue;
-      if (allowed(value, carnet)) continue; // exact-value allowlist
+      if (allowed(value, carnet)) continue;
       spans.push({ start: s, end: e, rule: r.id, value });
     }
   }
-  // wrapped JWTs: a token broken by newlines/indentation (mapped reconstruction); continuation chunks must be >= 8 chars
   if (lower.includes("ey")) for (const m of text.matchAll(/ey[\w\-\/\\.=]*(?:\s+[\w\-\/\\.=]{8,}(?![\w\-\/\\.=]))+/g)) {
     const at: number[] = []; let joined = "";
     [...m[0]].forEach((c, i) => { if (!/\s/.test(c)) { at.push(m.index! + i); joined += c; } });
     for (const j of joined.matchAll(/ey[a-zA-Z0-9]{17,}\.ey[a-zA-Z0-9\/\\_-]{17,}\.(?:[a-zA-Z0-9\/\\_-]{10,}={0,2})?/g))
       if (!allowed(j[0], carnet)) spans.push({ start: at[j.index!], end: at[j.index! + j[0].length - 1] + 1, rule: "jwt", value: j[0] });
   }
-  spans.sort((a, b) => a.start - b.start || b.end - a.end); // earliest, then longest wins
+  spans.sort((a, b) => a.start - b.start || b.end - a.end);
   const out: Span[] = [];
   for (const s of spans) {
     const prev = out.at(-1);
@@ -105,15 +98,13 @@ export function scanText(text: string, carnet?: Allowlist): Span[] {
 export const redactText = (text: string, spans: Span[]) =>
   spans.reduceRight((t, s) => t.slice(0, s.start) + `[REDACTED:${s.rule}]` + t.slice(s.end), text);
 
-/** Walk every string leaf (and key) of a parsed JSON value. Returns a redacted copy + findings (rule + JSON path only). */
 const isPayload = (s: string) => /^data:[\w.+-]+\/[\w.+-]+(?:;[^,]*)?;base64,/.test(s);
 export function inspect(v: unknown, carnet?: Allowlist, path = "$", findings: Finding[] = [], payload = false): { value: unknown; findings: Finding[] } {
   if (typeof v === "string") {
-    if (payload || isPayload(v)) return { value: v, findings }; // attachments are inspected by attachments.ts
-    // Tool arguments and tool results often carry JSON inside a JSON string.
+    if (payload || isPayload(v)) return { value: v, findings };
     if (/^\s*[\[{]/.test(v)) {
       let parsed: unknown;
-      try { parsed = JSON.parse(v); } catch { /* ordinary prose */ }
+      try { parsed = JSON.parse(v); } catch { }
       if (parsed && typeof parsed === "object") {
         if (hasDuplicateKeys(v)) {
           findings.push({ rule: "ambiguous-json", path, unredactable: true });
@@ -144,8 +135,6 @@ export function inspect(v: unknown, carnet?: Allowlist, path = "$", findings: Fi
   return { value: v, findings };
 }
 
-/** Ordered text parts ([{type:"text",text}...] or [string...]) are scanned joined; a secret split across parts
- *  is replaced in the first part and removed from the following ones. */
 function joinParts(arr: unknown[], carnet: Allowlist | undefined, path: string, findings: Finding[]): unknown[] {
   const idx: number[] = [], texts: string[] = [];
   arr.forEach((x: any, i) => { const t = typeof x === "string" ? x : x && typeof x === "object" && typeof x.text === "string" ? x.text : undefined; if (t !== undefined && !isPayload(t)) { idx.push(i); texts.push(t); } });
@@ -167,7 +156,6 @@ function joinParts(arr: unknown[], carnet: Allowlist | undefined, path: string, 
   return out;
 }
 
-/** JSON.parse silently keeps the last duplicate key; a scanner could see one value and the upstream another. Reject. */
 export function hasDuplicateKeys(t: string): boolean {
   const stack: { keys?: Set<string>; expectKey?: boolean }[] = [];
   for (let i = 0; i < t.length; i++) {
@@ -186,7 +174,6 @@ export function hasDuplicateKeys(t: string): boolean {
 }
 
 export type Decision = { action: "forward-original" | "forward-redacted" | "block"; findings: Finding[]; status?: number; code?: string };
-/** One request-wide decision. */
 export function decide(mode: Mode, findings: Finding[]): Decision {
   if (!findings.length || mode === "advisory") return { action: "forward-original", findings };
   if (mode === "no-go") return { action: "block", findings, status: 409, code: "audit_findings_blocked" };

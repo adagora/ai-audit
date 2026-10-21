@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { inspect, redactText, scanText } from "../src/scan.js";
 import { sha256 } from "../src/audit.js";
 
-// Invented credentials only; none of these fixtures authenticate anywhere.
 const secret = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789/+=A";
 const session = "FAKEsessionTokenForTesting".repeat(4) + "==";
 const pem = `-----BEGIN PRIVATE KEY-----\n${"A".repeat(96)}\n-----END PRIVATE KEY-----\n`;

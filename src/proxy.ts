@@ -1,4 +1,3 @@
-// Universal LLM audit proxy: OpenAI + Anthropic wire formats, node:http + fetch, no deps.
 import http from "node:http";
 import { randomUUID } from "node:crypto";
 import { AuditLog, AuditLogUnavailable, sha256, stats } from "./audit.js";
@@ -11,15 +10,14 @@ import { createInspectionProfile } from "./profile.js";
 
 export interface ProxyOpts {
   upstreamOpenai: string; upstreamAnthropic: string; mode: Mode; log: AuditLog; maxBodyBytes?: number; timeoutMs?: number; carnet?: Set<string>;
-  /** Rebuild PDFs with findings raster-only in redact mode (default true, ADR 0013); false restores 409. */
   pageRedaction?: boolean;
-  keys?: VKey[];                                        // virtual keys: if any, clients must present one (never a provider key)
-  upstreamKeys?: { openai?: string; anthropic?: string }; // real provider keys, proxy env only, injected upstream
-  aliases?: Record<string, Alias>;                      // client model name -> routed model (+ optional upstream)
-  adminKeySha256?: string;                              // protects GET /audit/stats
-  quiet?: boolean;                                      // no JSON log lines on stderr
+  keys?: VKey[];
+  upstreamKeys?: { openai?: string; anthropic?: string };
+  aliases?: Record<string, Alias>;
+  adminKeySha256?: string;
+  quiet?: boolean;
 }
-export interface VKey { name: string; sha256: string; models?: string[]; providers?: ("openai" | "anthropic")[]; logContent?: boolean } // logContent: log redacted output/tool args (agent keys); default hashes only (ADR 0011)
+export interface VKey { name: string; sha256: string; models?: string[]; providers?: ("openai" | "anthropic")[]; logContent?: boolean }
 export interface Alias { model: string; upstream?: string }
 export const metrics = { requests: 0, byDecision: {} as Record<string, number>, byStatus: {} as Record<string, number>, latencyMsSum: 0, latencyMsMax: 0, attachments: 0, logUnavailable: 0, logWriteFailures: 0, cache: cacheStats };
 const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
@@ -35,12 +33,12 @@ export function createProxy(o: ProxyOpts) {
   return http.createServer(async (req, res) => {
     const rid = randomUUID(), t0 = Date.now(); res.setHeader("x-request-id", rid);
     let decisionTag = "none", routeTag = "";
-    res.on("finish", () => { // structured, content-free
+    res.on("finish", () => {
       const ms = Date.now() - t0; metrics.requests++; metrics.byDecision[decisionTag] = (metrics.byDecision[decisionTag] ?? 0) + 1;
       metrics.byStatus[res.statusCode] = (metrics.byStatus[res.statusCode] ?? 0) + 1; metrics.latencyMsSum += ms; metrics.latencyMsMax = Math.max(metrics.latencyMsMax, ms);
       if (!o.quiet) process.stderr.write(JSON.stringify({ ts: new Date().toISOString(), event: "request", requestId: rid, route: routeTag, status: res.statusCode, decision: decisionTag, latencyMs: ms }) + "\n");
     });
-    const fail = (status: number, code: string, findings?: string[]) => { // static codes, never content
+    const fail = (status: number, code: string, findings?: string[]) => {
       if (!res.headersSent) res.writeHead(status, { "content-type": "application/json" });
       res.end(JSON.stringify({ type: "error", error: { type: "audit_proxy_error", code, message: code, ...(findings && { findings }) } }));
     };
@@ -64,7 +62,7 @@ export function createProxy(o: ProxyOpts) {
       const headers: Record<string, string> = {};
       for (const [k, v] of Object.entries(req.headers)) if (!HOP.has(k) && v != null) headers[k] = Array.isArray(v) ? v.join(", ") : v;
       let vkey: VKey | undefined;
-      if (o.keys?.length) { // virtual keys: verify by hash, strip, inject the real upstream key
+      if (o.keys?.length) {
         const got = headers["x-api-key"] ?? headers.authorization?.replace(/^Bearer /i, "") ?? "", h = sha256(got);
         vkey = o.keys.find((k) => same(h, k.sha256));
         if (!vkey) return fail(401, "audit_client_unauthorized");
@@ -75,7 +73,7 @@ export function createProxy(o: ProxyOpts) {
       }
       const who = { virtualKey: vkey?.name, client: str(req.headers["user-agent"]) };
       const ac = new AbortController(), timer = setTimeout(() => ac.abort(), timeoutMs);
-      res.on("close", () => { if (!res.writableFinished) ac.abort(); }); // client went away
+      res.on("close", () => { if (!res.writableFinished) ac.abort(); });
 
       if (req.method === "GET" && url.pathname === "/v1/models" || (req.method === "GET" && url.pathname.startsWith("/v1/models/"))) {
         const up = await fetch(base.replace(/\/$/, "") + url.pathname + url.search, { headers, signal: ac.signal }); clearTimeout(timer);
@@ -83,17 +81,14 @@ export function createProxy(o: ProxyOpts) {
       }
       if (req.method !== "POST" || !route) { clearTimeout(timer); return fail(404, "audit_unsupported_route"); }
 
-      // 1. whole body, bounded
       const chunks: Buffer[] = []; let n = 0;
       for await (const c of req) { n += c.length; if (n > max) { clearTimeout(timer); return fail(413, "audit_body_too_large"); } chunks.push(c); }
       const raw = Buffer.concat(chunks); let body: any;
       try { body = JSON.parse(raw.toString("utf8")); } catch { clearTimeout(timer); return fail(400, "audit_malformed_json"); }
       if (hasDuplicateKeys(raw.toString("utf8"))) { clearTimeout(timer); return fail(400, "audit_duplicate_keys"); }
 
-      // fail closed: a request whose decision cannot be recorded is never forwarded (ADR 0016)
       if (route !== "count") try { o.log.ensureWritable(); } catch (e) { clearTimeout(timer); decisionTag = "log-unavailable"; return logUnavailable(e); }
 
-      // 2. inspect everything, then one decision
       const requestedModel = typeof body?.model === "string" ? body.model : undefined;
       const alias = requestedModel ? o.aliases?.[requestedModel] : undefined;
       if (alias) { body.model = alias.model; if (alias.upstream) base = alias.upstream; }
@@ -114,9 +109,9 @@ export function createProxy(o: ProxyOpts) {
           upstreamStatus: null, error: code, latencyMs: Date.now() - t0 });
         return fail(422, code);
       };
-      if (refs.length && profile.mode !== "advisory") return reject("audit_uninspectable_reference"); // remote URL / file id: fail closed
+      if (refs.length && profile.mode !== "advisory") return reject("audit_uninspectable_reference");
       if (atts.length && !TOOLS_OK) return reject("audit_inspection_unavailable");
-      const signals: Signal[] = toolResultSignals(body); // advisory only, never affects the decision (ADR 0010)
+      const signals: Signal[] = toolResultSignals(body);
       const sanitize: (() => void)[] = [], rasterized: string[] = [];
       for (const a of atts) {
         metrics.attachments++;
@@ -131,7 +126,7 @@ export function createProxy(o: ProxyOpts) {
       res.setHeader("x-audit-finding-count", String(findings.length));
       if (signals.length) res.setHeader("x-audit-signal-count", String(signals.length));
       if (d.action === "forward-redacted") sanitize.forEach((f) => f());
-      const fwd = d.action === "forward-redacted" || alias ? Buffer.from(JSON.stringify(value)) : raw; // clean + unaliased => original bytes
+      const fwd = d.action === "forward-redacted" || alias ? Buffer.from(JSON.stringify(value)) : raw;
       const rec = {
         ...context, forwardedPromptDigest: sha256(fwd.toString("latin1")),
         decision: { mode: profile.mode, action: d.action, findings: d.findings.map((f) => ({ rule: f.rule, path: f.path })), ...(signals.length && { signals }), ...(d.action === "forward-redacted" && rasterized.length && { rasterized }) },
@@ -139,26 +134,25 @@ export function createProxy(o: ProxyOpts) {
       const write = (extra: object) => { if (route !== "count") o.log.append({ kind: "llm-call", id: rid, ts: new Date(t0).toISOString(), ...rec, ...extra, latencyMs: Date.now() - t0 } as any); };
       if (d.action === "block") { clearTimeout(timer); write({ upstreamStatus: null }); return fail(d.status!, d.code!, d.findings.map((f) => f.rule)); }
 
-      // 3. forward, stream back while capturing
       if (route !== "count") try { o.log.ensureWritable(); } catch (e) { clearTimeout(timer); decisionTag = "log-unavailable"; return logUnavailable(e); }
       let up: Response;
       try { up = await fetch(target, { method: "POST", headers, body: fwd, signal: ac.signal }); }
       catch { clearTimeout(timer); const code = ac.signal.aborted ? "audit_deadline_exceeded" : "audit_upstream_unreachable"; write({ upstreamStatus: null, error: code }); return fail(ac.signal.aborted ? 408 : 502, code); }
-      clearTimeout(timer); // deadline covers inspection + upstream headers
+      clearTimeout(timer);
       const sse = (up.headers.get("content-type") ?? "").includes("text/event-stream");
       const captured = await pipe(up, res);
       const out = route === "count" ? undefined : extract(route, captured, sse);
-      const red = (s: string) => { // keys and ambiguous nested JSON have no safe structural rewrite
+      const red = (s: string) => {
         const result = inspect(s, profile.carnet);
         return result.findings.some((f) => f.inKey || f.unredactable) ? "[REDACTED:unredactable-content]" : result.value as string;
       };
-      const full = vkey?.logContent === true; // ADR 0011: content only for keys that opted in (agents/services)
+      const full = vkey?.logContent === true;
       write({ upstreamStatus: up.status, clientAborted: !res.writableFinished || undefined, responseModel: out?.model, usage: out?.usage, stop: out?.stop,
         ...(out && { content: full ? "redacted" : "hash", outputHash: sha256(out.text), ...(full && { output: red(out.text) }),
           toolCalls: out.toolCalls.map((t) => ({ name: t.name, argsHash: sha256(t.args), ...(full && { args: red(t.args) }) })) }) });
     } catch (e) {
-      if (e instanceof AuditLogUnavailable) { metrics.logWriteFailures++; event("audit_log_write_failed", e); } // content-free
-      if (!res.writableEnded) fail(500, "audit_internal_error"); // never write after end (would crash the process)
+      if (e instanceof AuditLogUnavailable) { metrics.logWriteFailures++; event("audit_log_write_failed", e); }
+      if (!res.writableEnded) fail(500, "audit_internal_error");
     }
   });
 }
@@ -168,6 +162,6 @@ async function pipe(up: Response, res: http.ServerResponse): Promise<string> {
   const h: Record<string, string> = {}; up.headers.forEach((v, k) => { if (!RESP_DROP.has(k)) h[k] = v; });
   res.writeHead(up.status, h); res.flushHeaders();
   const dec = new TextDecoder(); let all = "";
-  try { if (up.body) for await (const c of up.body as any) { res.write(c); all += dec.decode(c, { stream: true }); } } catch { /* client/upstream abort */ }
+  try { if (up.body) for await (const c of up.body as any) { res.write(c); all += dec.decode(c, { stream: true }); } } catch { }
   res.end(); return all + dec.decode();
 }

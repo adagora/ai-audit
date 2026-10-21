@@ -1,4 +1,3 @@
-// Pull the audit-relevant bits (text, tool calls, usage, model) out of provider responses, JSON or SSE.
 export type Api = "openai-chat" | "openai-responses" | "anthropic-messages";
 export interface Usage { input?: number; output?: number; cached?: number; cacheWrite?: number }
 const au = (u: any): Usage => ({ input: u?.input_tokens, output: u?.output_tokens, cached: u?.cache_read_input_tokens, cacheWrite: u?.cache_creation_input_tokens });
@@ -37,7 +36,6 @@ export function extract(api: Api, body: string, sse: boolean): Out {
     } else {
       const blocks: Record<number, { type: string; name?: string; text: string }> = {};
       if (sse) for (const e of sseData(body)) {
-        // message_start output_tokens is a placeholder; only message_delta carries the final count (aborted stream => output unknown)
         if (e.type === "message_start") { o.model = e.message.model; o.usage = { ...au(e.message.usage), output: undefined }; }
         if (e.type === "content_block_start") blocks[e.index] = { type: e.content_block.type, name: e.content_block.name, text: e.content_block.text ?? "" };
         if (e.type === "content_block_delta") blocks[e.index].text += e.delta.text ?? e.delta.partial_json ?? "";
@@ -48,6 +46,6 @@ export function extract(api: Api, body: string, sse: boolean): Out {
       }
       for (const b of Object.values(blocks)) b.type === "text" ? (o.text += b.text) : b.type === "tool_use" && o.toolCalls.push({ name: b.name!, args: b.text });
     }
-  } catch { /* unparseable upstream body: log what we have, never fail the response */ }
+  } catch { }
   return o;
 }

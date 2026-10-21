@@ -1,4 +1,3 @@
-// Proxy under test in its own process: virtual key, audit log on, redact mode.
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

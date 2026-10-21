@@ -1,4 +1,3 @@
-// Offline text redaction of JSON/JSONL exports. Originals and audit chains are never rewritten.
 import { open, link, unlink, stat } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import { dirname, join, resolve, extname } from "node:path";
@@ -35,7 +34,6 @@ function containsAuditRecord(value: unknown): boolean {
   return Object.values(value).some(containsAuditRecord);
 }
 
-/** Bound records in bytes before decoding or JSON parsing; JSONL files can be arbitrarily large. */
 async function* records(file: FileHandle, format: "json" | "jsonl", max: number): AsyncGenerator<Buffer> {
   let parts: Buffer[] = [], size = 0;
   for await (const chunk of file.createReadStream({ highWaterMark: 64 * 1024, autoClose: false })) {
@@ -54,7 +52,6 @@ async function* records(file: FileHandle, format: "json" | "jsonl", max: number)
   if (size || format === "json") yield Buffer.concat(parts, size);
 }
 
-/** Publish only a fully sanitized file, exclusively and with owner-only permissions. */
 export async function scrubHistory(options: ScrubOptions): Promise<ScrubReceipt> {
   if (!options.input || !options.output) error("scrub_input_and_output_required");
   if (resolve(options.input) === resolve(options.output)) error("scrub_output_must_differ");
@@ -81,7 +78,6 @@ export async function scrubHistory(options: ScrubOptions): Promise<ScrubReceipt>
       let value: unknown;
       try { value = JSON.parse(text!); } catch { error("scrub_malformed_json"); }
       if (hasDuplicateKeys(text!)) error("scrub_duplicate_keys");
-      // A chained audit record must remain intact. Scrubbing one would manufacture a broken ledger.
       if (containsAuditRecord(value)) error("scrub_audit_log_forbidden");
       const result = inspect(value, profile.carnet);
       if (result.findings.some((f) => f.inKey || f.unredactable)) error("scrub_unredactable_content");
@@ -98,14 +94,13 @@ export async function scrubHistory(options: ScrubOptions): Promise<ScrubReceipt>
       s.mtimeNs !== before.mtimeNs || s.ctimeNs !== before.ctimeNs)) error("scrub_source_changed");
     await output.sync();
     await output.close(); output = undefined;
-    // A hard link is an atomic, no-replace publication on the same filesystem (the temp is adjacent).
     await link(temp, options.output);
     receipt.outputDigest = digest.digest("hex");
     return receipt;
   } catch (cause) {
     const code = cause instanceof Error && /^(?:scrub_[a-z0-9_]+|audit_invalid_allowlist)$/.test(cause.message)
       ? cause.message : (cause as NodeJS.ErrnoException)?.code === "EEXIST" ? "scrub_output_exists" : "scrub_io_error";
-    throw new Error(code); // OS errors and parser diagnostics can contain source content or filenames.
+    throw new Error(code);
   } finally {
     await output?.close().catch(() => {});
     await input?.close().catch(() => {});

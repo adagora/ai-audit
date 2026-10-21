@@ -1,12 +1,9 @@
-// Reproducible memory/latency benchmark. Usage (inside either image):
-//   node bench/memory.mjs [textRequests=3000] [uniqueImages=100]
-// Mock upstream runs here; the proxy runs in a forked child so only its memory is measured. No network beyond 127.0.0.1.
 import http from "node:http";
 import { fork } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { once } from "node:events";
 const N = Number(process.argv[2] ?? 3000), IMGS = Number(process.argv[3] ?? 100), CONC = 16;
-const AWS = "AKIA" + "IOSFODNN7EXAMPLQ", PESEL = "44051401359"; // synthetic
+const AWS = "AKIA" + "IOSFODNN7EXAMPLQ", PESEL = "44051401359";
 const up = http.createServer(async (req, res) => {
   for await (const _ of req);
   res.setHeader("content-type", "application/json");
@@ -25,7 +22,7 @@ const textReq = (i) => ({ model: ["gpt-4o-mini", "gpt-4o", "claude-x"][i % 3], m
   { role: "tool", tool_call_id: "t1", content: JSON.stringify({ rows: Array.from({ length: 30 }, (_, k) => ({ part: `P-${i}-${k}`, qty: k, price: k * 1.5 })) }) }] });
 const png = readFileSync(new URL("../test/fixtures/clean.png", import.meta.url));
 const imgReq = (i) => ({ model: "gpt-4o-mini", messages: [{ role: "user", content: [{ type: "text", text: "what is this" },
-  { type: "image_url", image_url: { url: "data:image/png;base64," + Buffer.concat([png, Buffer.from(`#${i}`)]).toString("base64") } }] }] }); // unique bytes after IEND -> unique cache key
+  { type: "image_url", image_url: { url: "data:image/png;base64," + Buffer.concat([png, Buffer.from(`#${i}`)]).toString("base64") } }] }] });
 
 const m0 = await mem();
 const lat = []; let bad = 0;
@@ -35,7 +32,7 @@ const t0 = performance.now();
 await run(N, textReq);
 const textSec = (performance.now() - t0) / 1000;
 await run(IMGS, imgReq);
-await run(IMGS, imgReq); // second pass: cache hits
+await run(IMGS, imgReq);
 const st = await fetch(`${base}/audit/stats?by=model`, { headers: { "x-admin-key": "bench-admin" } }).then((r) => r.status);
 const m1 = await mem();
 lat.sort((a, b) => a - b);

@@ -50,7 +50,7 @@ if (cmd === "scrub" || cmd === "profile") {
     aliases: cfg.aliases, adminKeySha256: env.AI_AUDIT_ADMIN_KEY ? sha256(env.AI_AUDIT_ADMIN_KEY) : cfg.adminKeySha256,
     upstreamKeys: { openai: env.AI_AUDIT_UPSTREAM_OPENAI_KEY, anthropic: env.AI_AUDIT_UPSTREAM_ANTHROPIC_KEY } })
     .listen(Number(a.port), a.host, () => console.error(JSON.stringify({ event: "listening", url: `http://${a.host}:${a.port}`, mode: a.mode, log: a.log, sandbox: SANDBOX, attachmentTools: TOOLS_OK, virtualKeys: keys.length, contentLoggingKeys: keys.filter((k: any) => k.logContent === true).length, aliases: Object.keys(cfg.aliases ?? {}) })));
-} else if (cmd === "keygen") { // prints the key ONCE; only its hash goes into the config
+} else if (cmd === "keygen") {
   const key = "aia-" + randomBytes(24).toString("base64url");
   console.log(`key (give to the client, not stored): ${key}\nconfig entry: ${JSON.stringify({ name: a.name, sha256: sha256(key), models: ["*"], logContent: a["log-content"] })}`);
 } else if (cmd === "stats") {

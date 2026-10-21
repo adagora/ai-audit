@@ -33,10 +33,10 @@ test("stats and report: unknown usage counted separately, sums exclude it, total
   const log = new AuditLog(join(mkdtempSync(join(tmpdir(), "usage-")), "log.jsonl"));
   const call = (usage: object | undefined, extra: object = {}) => log.append({ kind: "llm-call", id: "x", ts: "2026-10-20T10:00:00Z", provider: "openai", model: "m", virtualKey: "k", upstreamStatus: 200, decision: { action: "forward", findings: [] }, usage, ...extra } as any);
   call({ input: 10, output: 5 });
-  call(undefined);                                   // stream without include_usage
-  call({ input: 4 });                                // aborted anthropic: output unknown
-  call(undefined, { upstreamStatus: 500 });          // failed upstream: not billed, not unknown
-  call(undefined, { decision: { action: "block", findings: [] }, upstreamStatus: undefined }); // never forwarded
+  call(undefined);
+  call({ input: 4 });
+  call(undefined, { upstreamStatus: 500 });
+  call(undefined, { decision: { action: "block", findings: [] }, upstreamStatus: undefined });
   const [s] = stats(log, "key");
   assert.equal(s.inputTokens, 14); assert.equal(s.outputTokens, 5);
   assert.equal(s.unknownInputUsage, 1); assert.equal(s.unknownOutputUsage, 2); assert.equal(s.unknownUsage, 2); assert.equal(s.tokensComplete, false);

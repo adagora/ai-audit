@@ -73,7 +73,6 @@ for (const [name, path, body] of [
   if (stream) assert.match(t, /^(event|data):/); else assert.match(t, /Hello world/);
   const rec = proxies.redact.log.read().at(-1) as any;
   assert.equal(rec.upstreamStatus, 200); assert.ok(rec.usage.output >= 2);
-  // no virtual key => default content mode "hash": output text never in the log (ADR 0011)
   assert.equal(rec.content, "hash"); assert.equal(rec.output, undefined);
   assert.equal(rec.outputHash, sha256(name === "openai chat" && stream ? "Hello world, mail me at jan@firma.pl" : "Hello world"));
   for (const t of rec.toolCalls) { assert.equal(t.args, undefined); assert.match(t.argsHash, /^[0-9a-f]{64}$/); }
@@ -95,7 +94,7 @@ test("report summarises proxy calls", () => {
 });
 
 test("scanner: checksums avoid false positives, keys detected", () => {
-  assert.equal(scanText("order 12345678901 ok").length, 0); // invalid PESEL checksum
+  assert.equal(scanText("order 12345678901 ok").length, 0);
   assert.deepEqual(scanText("IBAN PL61 1090 1014 0000 0712 1981 2874, tel +48 601 234 567").map((s) => s.rule), ["pii-iban", "pii-phone"]);
   assert.equal(scanText("ver 1.2.3 build 2026-10-20 cost 123 456 789.00").length, 0);
   assert.ok(hasDuplicateKeys('{"a":{"b":1,"\\u0062":2}}')); assert.ok(!hasDuplicateKeys('{"a":{"b":1},"c":{"b":2}}'));

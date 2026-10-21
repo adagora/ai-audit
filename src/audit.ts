@@ -1,4 +1,3 @@
-// Append-only, hash-chained JSONL decision log. No network, no deps.
 import { createHash, randomUUID } from "node:crypto";
 import { accessSync, appendFileSync, closeSync, constants, existsSync, fstatSync, openSync, readFileSync, readSync, statSync, unlinkSync, writeSync } from "node:fs";
 import { dirname } from "node:path";
@@ -8,14 +7,13 @@ export const sha256 = (s: string) => createHash("sha256").update(s).digest("hex"
 const GENESIS = "0".repeat(64);
 const LOCK_STALE_MS = 10_000, LOCK_WAIT_MS = 5_000;
 const pause = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-/** Raised when the log cannot take a record; callers must fail closed (ADR 0016). */
 export class AuditLogUnavailable extends Error { constructor(reason: string) { super(`audit_log_unavailable: ${reason}`); } }
 
-export interface Step { source: string; input: unknown; output: unknown } // deterministic step
+export interface Step { source: string; input: unknown; output: unknown }
 export interface Review { reviewer: string; decision: "approved" | "overridden" | "rejected"; note?: string; at: string }
 export interface Entry {
   systemId: string; useCase: string;
-  input: string; storeRedactedInput?: boolean;          // raw input never stored (RODO)
+  input: string; storeRedactedInput?: boolean;
   sources?: { doc: string; page?: number }[];
   model?: { name: string; version: string };
   prompt?: { templateId: string; template: string };
@@ -30,7 +28,7 @@ export interface Rec {
   prompt?: { templateId: string; hash: string }; params?: Record<string, unknown>; output?: unknown;
   step?: { sourceHash: string; input: unknown; outputHash: string };
   review?: Review; prevHash: string; hash: string;
-  [extra: string]: unknown; // e.g. kind "llm-call" records written by the proxy
+  [extra: string]: unknown;
 }
 
 export function redact(s: string): string {
@@ -43,15 +41,13 @@ const canon = (o: unknown): string => JSON.stringify(o, (_k, v) =>
   v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort()) : v);
 
 export class AuditLog {
-  steps = new Map<string, string>(); // sourceHash -> source (step registry; persist alongside log in real use)
+  steps = new Map<string, string>();
   constructor(public path: string, private now = () => new Date().toISOString()) {}
 
   read(): Rec[] {
     if (!existsSync(this.path)) return [];
     return readFileSync(this.path, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
   }
-  /** Hash of the last line, read from the file tail (O(record)). Only consistent while the caller holds the
-   *  cross-process lock (withLock): a second writer process (CLI approve, a replica) could append in between. */
   private lastHash(): string {
     if (!existsSync(this.path)) return GENESIS;
     const fd = openSync(this.path, "r");
@@ -66,7 +62,6 @@ export class AuditLog {
       return GENESIS;
     } finally { closeSync(fd); }
   }
-  /** Exclusive O_EXCL lock file around read-tail + write, so appends from several processes stay one chain. */
   private withLock<T>(fn: () => T): T {
     const lock = this.path + ".lock", deadline = Date.now() + LOCK_WAIT_MS;
     for (;;) {
@@ -78,9 +73,8 @@ export class AuditLog {
         pause(2);
       }
     }
-    try { return fn(); } finally { try { unlinkSync(lock); } catch { /* already gone */ } }
+    try { return fn(); } finally { try { unlinkSync(lock); } catch { } }
   }
-  /** Throws AuditLogUnavailable unless the next append would succeed (writable, intact tail). Call before forwarding. */
   ensureWritable(): void {
     try { accessSync(existsSync(this.path) ? this.path : dirname(this.path), constants.W_OK); }
     catch { throw new AuditLogUnavailable("not writable"); }
@@ -134,8 +128,6 @@ export class AuditLog {
   }
 }
 
-/** Re-run a deterministic step in an isolated vm context with a time limit and a step budget.
- *  Step source must be a function expression `(input, tick) => ...`; it must call tick() in loops. */
 export function replay(log: AuditLog, recId: string, opts = { timeoutMs: 200, maxSteps: 10_000 }) {
   const r = log.read().find((x) => x.id === recId);
   if (!r?.step) throw new Error("no deterministic step on record");
@@ -145,15 +137,13 @@ export function replay(log: AuditLog, recId: string, opts = { timeoutMs: 200, ma
   const tick = () => { if (++n > opts.maxSteps) throw new Error(`step budget exceeded (${opts.maxSteps})`); };
   const fn = vm.runInNewContext(`(${source})`, Object.create(null), { timeout: opts.timeoutMs });
   const out = vm.runInNewContext("fn(input, tick)", { fn, input: structuredClone(r.step.input), tick }, { timeout: opts.timeoutMs });
-  const output = JSON.parse(JSON.stringify(out)); // detach from vm realm
+  const output = JSON.parse(JSON.stringify(out));
   const outputHash = sha256(canon(output));
   return { output, reproduced: outputHash === r.step.outputHash, steps: n };
 }
 
-/** Calls that reached the provider successfully, so they consumed tokens. */
 const billed = (c: any) => c.kind === "llm-call" && c.decision?.action !== "block" && c.upstreamStatus >= 200 && c.upstreamStatus < 400;
 const known = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
-/** ADR 0012: a missing usage field is unknown, never zero. Sums cover known values only; totals are a lower bound when anything is unknown. */
 export function tokenTotals(calls: any[]) {
   const t = { inputTokens: 0, outputTokens: 0, unknownInputUsage: 0, unknownOutputUsage: 0 };
   for (const c of calls) { if (!billed(c)) continue;
@@ -200,12 +190,10 @@ export function report(log: AuditLog, from: string, to: string) {
   return { md, stats, llm };
 }
 
-/** External anchor: append {ts, count, head} to a separate append-only file (keep it elsewhere: other disk, WORM bucket, git, email). */
 export function anchor(log: AuditLog, anchorsPath: string, now = new Date().toISOString()) {
   const recs = log.read(), a = { ts: now, count: recs.length, head: recs.length ? recs[recs.length - 1].hash : GENESIS };
   appendFileSync(anchorsPath, JSON.stringify(a) + "\n"); return a;
 }
-/** Detects a whole-file swap (recomputed chain) or truncation: every anchored head must still be at its position. */
 export function verifyAnchors(log: AuditLog, anchorsPath: string): { ok: boolean; anchors: number; reason?: string } {
   const chain = log.verifyChain(); if (!chain.ok) return { ok: false, anchors: 0, reason: `chain broken at line ${chain.badLine}: ${chain.reason}` };
   const recs = log.read(), as = readFileSync(anchorsPath, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
@@ -217,7 +205,6 @@ export function verifyAnchors(log: AuditLog, anchorsPath: string): { ok: boolean
   return { ok: true, anchors: as.length };
 }
 
-/** Usage time series over proxy calls, grouped by virtual key, model or hour (UTC). */
 export function stats(log: AuditLog, by: "key" | "model" | "hour", from = "", to = "~") {
   const g = new Map<string, { requests: number; errors: number; blocked: number; calls: any[]; cached: number; cacheWrite: number; injection: number; latencyMs: number[] }>();
   for (const c of log.read() as any[]) {

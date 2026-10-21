@@ -1,11 +1,9 @@
-// DANE PRZYKŁADOWE / EXAMPLE DATA — wszystkie osoby, dokumenty i ceny są fikcyjne.
 import { rmSync, writeFileSync } from "node:fs";
 import { AuditLog, replay, report } from "./audit.js";
 
 const path = "demo-log.jsonl"; rmSync(path, { force: true });
 const log = new AuditLog(path);
 
-// 1) RAG answer citing a PDF page (EXAMPLE)
 const rag = log.record({
   systemId: "rag-dokumentacja", useCase: "Q&A dokumentacja techniczna (PRZYKŁAD)",
   input: "Jan Kowalski (jan.kowalski@example.com): jaki moment dokręcania śrub M8 w bramie X-100?",
@@ -18,7 +16,6 @@ const rag = log.record({
 });
 log.approve(rag.id, "inż. A. Nowak (PRZYKŁAD)", "approved");
 
-// 2) CAD quote with replayable deterministic price step (EXAMPLE)
 const priceStep = `(input, tick) => {
   let minutes = 0;
   for (const op of input.ops) { tick(); minutes += op.volumeCm3 / op.removalRateCm3PerMin; }
