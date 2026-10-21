@@ -1,0 +1,13 @@
+stateDiagram-v2
+  [*] --> Idle
+  Idle --> Waiting: append() / open(log.lock, "wx") EEXIST
+  Waiting --> Waiting: pause 2 ms (stale lock > 10 s is removed)
+  Waiting --> Unavailable: 5 s timeout -> AuditLogUnavailable
+  Idle --> Locked: lock acquired
+  Waiting --> Locked: lock acquired
+  Locked --> Unavailable: lastHash() finds torn last line
+  Locked --> Written: appendFileSync(rec, prevHash = tail)
+  Written --> Idle: unlink lock
+  Idle --> AnchorRead: anchor() / read() count+head
+  AnchorRead --> Anchored: append {count, head} to .anchors
+  Anchored --> Idle

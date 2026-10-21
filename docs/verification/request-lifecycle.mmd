@@ -1,0 +1,17 @@
+stateDiagram-v2
+  [*] --> Check1: body read (413/400 return before any decision, unlogged by design)
+  Check1 --> Refused: ensureWritable() fails
+  Check1 --> Inspect: log ok
+  Refused --> [*]: 503 audit_log_unavailable, nothing forwarded
+  Inspect --> Logged: reject() / block -> write(upstreamStatus null)
+  Inspect --> Check2: forward-original / forward-redacted
+  Check2 --> Refused: ensureWritable() fails
+  Check2 --> Fetch: log ok
+  Fetch --> Logged: fetch throws (deadline or unreachable) -> write(error)
+  Fetch --> Streaming: headers received, clearTimeout
+  Streaming --> Streaming: chunk / usage chunk
+  Streaming --> Write: upstream end or client close (pipe swallows abort)
+  Write --> Logged: append ok, usage undefined unless seen (ADR 0012)
+  Write --> Counted: append throws (log broke after Check2)
+  Counted --> [*]: logWriteFailures++, stderr event, no write after end
+  Logged --> [*]: exactly one record (ADR 0009)

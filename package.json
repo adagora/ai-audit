@@ -11,7 +11,8 @@
     "demo": "npm run build && node dist/src/demo.js",
     "example:quote": "node examples/quineling-quote/run.mjs",
     "bench:overhead": "npm run build && node bench/overhead.mjs",
-    "check:tsc": "tsc --noEmit"
+    "check:tsc": "tsc --noEmit",
+    "verify:formal": "bash spec/run.sh && npm run build && node --test dist/test/logsafety.test.js dist/test/audit.test.js"
   },
   "keywords": [
     "ai-act",
