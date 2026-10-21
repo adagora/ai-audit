@@ -24,3 +24,4 @@ Format: Nygard (Status, Context, Decision, Consequences), at most ~40 lines, fil
 - [14. Content-addressed inspection profiles](0014-versioned-inspection-profiles.md)
 - [15. Offline history scrubbing into separate exports](0015-offline-history-scrubbing.md)
 - [16. Fail closed when the audit log cannot take a record](0016-fail-closed-when-log-unavailable.md)
+- [17. Context composition is logged as sizes, never content](0017-context-composition-metadata.md)

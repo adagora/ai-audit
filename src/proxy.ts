@@ -4,6 +4,7 @@ import { AuditLog, AuditLogUnavailable, sha256, stats } from "./audit.js";
 import { decide, hasDuplicateKeys, inspect, type Mode } from "./scan.js";
 import { toolResultSignals, type Signal } from "./injection.js";
 import { extract, type Api } from "./extract.js";
+import { composeContext, promptTokens, scaleToProvider } from "./context.js";
 import { Counter, Gauge, Histogram, OPENMETRICS_CONTENT_TYPE, exposition } from "./metrics.js";
 import { discover, inspectAttachment, cacheStats, TOOLS_OK } from "./attachments.js";
 import { timingSafeEqual } from "node:crypto";
@@ -119,11 +120,12 @@ export function createProxy(o: ProxyOpts) {
         ...who, model: typeof body.model === "string" ? body.model : undefined, requestedModel: alias ? requestedModel : undefined, stream: body.stream === true,
         requestHash: sha256(raw.toString("latin1")), inspectionProfile: profile.receipt,
       };
+      const composition = route === "count" ? undefined : composeContext(route, body, raw.length);
       const reject = (code: string) => {
         clearTimeout(timer); decisionTag = "reject";
         if (route !== "count") o.log.append({ kind: "llm-call", id: rid, ts: new Date(t0).toISOString(), ...context,
           decision: { mode: profile.mode, action: "reject", findings: findings.map((f) => ({ rule: f.rule, path: f.path })) },
-          upstreamStatus: null, error: code, latencyMs: Date.now() - t0 });
+          ...(composition && { context: composition }), upstreamStatus: null, error: code, latencyMs: Date.now() - t0 });
         return fail(422, code);
       };
       if (refs.length && profile.mode !== "advisory") return reject("audit_uninspectable_reference");
@@ -146,7 +148,7 @@ export function createProxy(o: ProxyOpts) {
       if (d.action === "forward-redacted") sanitize.forEach((f) => f());
       const fwd = d.action === "forward-redacted" || alias ? Buffer.from(JSON.stringify(value)) : raw;
       const rec = {
-        ...context, forwardedPromptDigest: sha256(fwd.toString("latin1")),
+        ...context, forwardedPromptDigest: sha256(fwd.toString("latin1")), ...(composition && { context: composition }),
         decision: { mode: profile.mode, action: d.action, findings: d.findings.map((f) => ({ rule: f.rule, path: f.path })), ...(signals.length && { signals }), ...(d.action === "forward-redacted" && rasterized.length && { rasterized }) },
       };
       const write = (extra: object) => { if (route !== "count") o.log.append({ kind: "llm-call", id: rid, ts: new Date(t0).toISOString(), ...rec, ...extra, latencyMs: Date.now() - t0 } as any); };
@@ -170,7 +172,7 @@ export function createProxy(o: ProxyOpts) {
         if (out.usage?.output == null) metrics.unknownUsage.inc({ provider: context.provider, field: "output" });
       }
       const full = vkey?.logContent === true;
-      write({ upstreamStatus: up.status, clientAborted: !res.writableFinished || undefined, responseModel: out?.model, usage: out?.usage, stop: out?.stop,
+      write({ ...(composition && { context: scaleToProvider(composition, up.status < 400 ? promptTokens(route as Api, out?.usage) : undefined) }), upstreamStatus: up.status, clientAborted: !res.writableFinished || undefined, responseModel: out?.model, usage: out?.usage, stop: out?.stop,
         ...(out && { content: full ? "redacted" : "hash", outputHash: sha256(out.text), ...(full && { output: red(out.text) }),
           toolCalls: out.toolCalls.map((t) => ({ name: t.name, argsHash: sha256(t.args), ...(full && { args: red(t.args) }) })) }) });
     } catch (e) {
