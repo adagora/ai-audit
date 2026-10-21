@@ -80,3 +80,46 @@ test("proxy links turns in the log with hashes only and survives a restart", asy
     assert.ok(!text.includes("part A") && !text.includes("terse"));
   } finally { up.close(); }
 });
+
+const blocksOf = (items: { role: string; content: string }[], tools = ["search", "price"]) => [
+  ...tools.map((t) => ({ kind: "tools" as const, bytes: 100, value: { name: t } })),
+  ...items.map((m) => ({ kind: (m.role === "system" ? "system" : m.role) as "system" | "user" | "assistant", bytes: Buffer.byteLength(m.content), value: m.content })),
+];
+const arenaStep = (idx: SessionIndex, items: { role: string; content: string }[], tools?: string[]) => {
+  const link = idx.link(items)!, arena = idx.arena(link, blocksOf(items, tools)); idx.remember({ ...link, firstChanged: arena.firstChanged }); return { link, arena };
+};
+
+test("arena: appends keep ages and have no first change; ages count turns survived", () => {
+  const idx = new SessionIndex(KEY);
+  arenaStep(idx, [sys, u1]);
+  const t2 = arenaStep(idx, [sys, u1, a1, u2]);
+  assert.equal(t2.arena.firstChanged, null);
+  assert.deepEqual(t2.arena.blocks, [["t", 200, 1], ["s", 14, 1], ["u", 16, 1], ["a", 6, 2], ["u", 11, 2]]);
+});
+
+test("arena: a tool definition inserted near the front is the first changed block; everything behind it is new", () => {
+  const idx = new SessionIndex(KEY);
+  arenaStep(idx, [sys, u1]); arenaStep(idx, [sys, u1, a1, u2]);
+  const t3 = arenaStep(idx, [sys, u1, a1, u2, a2, u3], ["search", "skill", "price"]);
+  assert.deepEqual(t3.arena.firstChanged, { block: 1, offset: 100 });
+  assert.equal(t3.arena.blocks[0][2], 1);
+  assert.ok(t3.arena.blocks.slice(1).every((b) => b[2] === 3));
+});
+
+test("arena: retry has no change and keeps ages; edited branch marks the edit offset against the parent", () => {
+  const idx = new SessionIndex(KEY);
+  arenaStep(idx, [sys, u1]); const t2 = arenaStep(idx, [sys, u1, a1, u2]);
+  const retry = arenaStep(idx, [sys, u1, a1, u2]);
+  assert.equal(retry.arena.firstChanged, null); assert.deepEqual(retry.arena.blocks, t2.arena.blocks);
+  arenaStep(idx, [sys, u1, a1, u2, a2, u3]);
+  const regenerated = arenaStep(idx, [sys, u1, a1, u2, { role: "assistant", content: "16 PLN" }, u3]);
+  assert.equal(regenerated.link.parent, t2.link.digest); assert.equal(regenerated.arena.firstChanged, null);
+});
+
+test("arena: without parent state (after a restart) ages are unknown (0), not guessed", () => {
+  const idx = new SessionIndex(KEY);
+  arenaStep(idx, [sys, u1]);
+  const fresh = new SessionIndex(KEY); fresh.remember(idx.link([sys, u1])!);
+  const t2 = arenaStep(fresh, [sys, u1, a1, u2]);
+  assert.equal(t2.arena.tracked, false); assert.ok(t2.arena.blocks.every((b) => b[2] === 0)); assert.equal(t2.arena.firstChanged, null);
+});

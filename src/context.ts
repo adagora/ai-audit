@@ -8,6 +8,7 @@ export interface ContextComposition {
   totalBytes: number;
   tokens?: Record<Segment, number>;
   tokenBasis: "provider-scaled" | "unknown";
+  blocks?: ArenaBlock[];
 }
 
 const byteLength = (v: unknown) => v === undefined ? 0 : Buffer.byteLength(typeof v === "string" ? v : JSON.stringify(v), "utf8");
@@ -59,6 +60,47 @@ function anthropicMessages(body: any, acc: SegmentBytes) {
   acc.tools += byteLength(body.tools);
   addContent(acc, "system", body.system);
   for (const m of Array.isArray(body.messages) ? body.messages : []) addContent(acc, roleSegment(m?.role), m?.content);
+}
+
+export interface ContextBlock { kind: Segment; bytes: number; value: unknown }
+export type ArenaBlock = [kind: string, bytes: number, age: number];
+export const KIND_CODES: Record<Segment, string> = { system: "s", tools: "t", user: "u", assistant: "a", toolResults: "r", attachments: "f", other: "o" };
+export const KIND_BY_CODE = Object.fromEntries(Object.entries(KIND_CODES).map(([k, v]) => [v, k])) as Record<string, Segment>;
+
+function pushParts(out: ContextBlock[], segment: Segment, content: unknown) {
+  if (content === undefined || content === null) return;
+  if (!Array.isArray(content)) { out.push({ kind: segment, bytes: byteLength(content), value: content }); return; }
+  for (const part of content) {
+    const type = part && typeof part === "object" ? (part as { type?: unknown }).type : undefined;
+    if (typeof type === "string" && ATTACHMENT_PART_TYPES.has(type)) out.push({ kind: "attachments", bytes: byteLength(part), value: part });
+    else if (type === "tool_result") pushParts(out, "toolResults", (part as { content?: unknown }).content);
+    else if (type === "tool_use" || type === "function_call") out.push({ kind: "assistant", bytes: byteLength(part), value: part });
+    else out.push({ kind: segment, bytes: byteLength(part), value: part });
+  }
+}
+
+export function contextBlocks(api: Api, body: any): ContextBlock[] {
+  const out: ContextBlock[] = [];
+  if (!body || typeof body !== "object") return out;
+  const tools = api === "openai-chat" ? [body.tools, body.functions].filter((t) => t !== undefined) : body.tools !== undefined ? [body.tools] : [];
+  for (const t of tools) for (const def of Array.isArray(t) ? t : [t]) out.push({ kind: "tools", bytes: byteLength(def), value: def });
+  if (api === "anthropic-messages") pushParts(out, "system", body.system);
+  if (api === "openai-responses") {
+    pushParts(out, "system", body.instructions);
+    if (typeof body.input === "string") out.push({ kind: "user", bytes: byteLength(body.input), value: body.input });
+    for (const item of Array.isArray(body.input) ? body.input : []) {
+      if (item?.type === "function_call_output") out.push({ kind: "toolResults", bytes: byteLength(item.output), value: item });
+      else if (item?.type === "function_call") out.push({ kind: "assistant", bytes: byteLength(item), value: item });
+      else pushParts(out, roleSegment(item?.role), item?.content);
+    }
+    return out;
+  }
+  for (const m of Array.isArray(body.messages) ? body.messages : []) {
+    pushParts(out, roleSegment(m?.role), m?.content);
+    if (m?.tool_calls !== undefined) out.push({ kind: "assistant", bytes: byteLength(m.tool_calls), value: m.tool_calls });
+    if (m?.function_call !== undefined) out.push({ kind: "assistant", bytes: byteLength(m.function_call), value: m.function_call });
+  }
+  return out;
 }
 
 export function composeContext(api: Api, body: unknown, rawBytes: number): ContextComposition {

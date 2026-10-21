@@ -27,3 +27,4 @@ Format: Nygard (Status, Context, Decision, Consequences), at most ~40 lines, fil
 - [17. Context composition is logged as sizes, never content](0017-context-composition-metadata.md)
 - [18. Sessions are linked by keyed prefix digests of the message list](0018-keyed-session-linking.md)
 - [19. /metrics is OpenMetrics text, unauthenticated, bound to localhost by default](0019-metrics-openmetrics.md)
+- [20. Context arena: block positions, ages and first changed offset](0020-context-arena-and-cache-busts.md)

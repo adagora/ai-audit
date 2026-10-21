@@ -5,7 +5,7 @@ import { decide, hasDuplicateKeys, inspect, type Mode } from "./scan.js";
 import { toolResultSignals, type Signal } from "./injection.js";
 import { extract, type Api } from "./extract.js";
 import { conversationItems, loadOrCreateSessionKey, SessionIndex } from "./session.js";
-import { composeContext, promptTokens, scaleToProvider } from "./context.js";
+import { composeContext, contextBlocks, promptTokens, scaleToProvider } from "./context.js";
 import { Counter, Gauge, Histogram, OPENMETRICS_CONTENT_TYPE, exposition } from "./metrics.js";
 import { discover, inspectAttachment, cacheStats, TOOLS_OK } from "./attachments.js";
 import { timingSafeEqual } from "node:crypto";
@@ -127,8 +127,11 @@ export function createProxy(o: ProxyOpts) {
       };
       const composition = route === "count" ? undefined : composeContext(route, body, raw.length);
       const items = route === "count" ? undefined : conversationItems(route, body);
-      const session = items && sessions.link(items);
+      const linked = items && sessions.link(items);
+      const arena = linked && route !== "count" ? sessions.arena(linked, contextBlocks(route, body)) : undefined;
+      const session = linked && { ...linked, firstChanged: arena!.firstChanged, arena: arena!.tracked ? "tracked" as const : "untracked" as const };
       if (session) sessions.remember(session);
+      if (composition && arena) composition.blocks = arena.blocks;
       const reject = (code: string) => {
         clearTimeout(timer); decisionTag = "reject";
         if (route !== "count") o.log.append({ kind: "llm-call", id: rid, ts: new Date(t0).toISOString(), ...context,
