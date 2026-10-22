@@ -104,3 +104,8 @@ test("a contextual credential split across text parts is fully removed", () => {
   assert.ok(!JSON.stringify(result.value).includes(secret));
   assert.deepEqual((result.value as any[]).map((v) => v.text), ["AWS_SECRET_ACCESS_KEY=[REDACTED:aws-secret-access-key]", ""]);
 });
+
+test("a decimal fraction is not a phone number; international numbers still are", () => {
+  for (const text of ["0.0012444963678717614", '{"bend":[-0.18,0.0012444963678717614]}', "ratio 1.00485551234567"]) assert.deepEqual(scanText(text), [], text);
+  for (const text of ["tel +48 601 234 567", "call 0048 601 234 567", "0048601234567"]) assert.deepEqual(scanText(text).map((s) => s.rule), ["pii-phone"], text);
+});

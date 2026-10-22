@@ -51,7 +51,7 @@ const definitions: Rule[] = [
   { id: "pii-iban", re: /\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,4})?\b/g, valid: mod97 },
   { id: "pii-iban", re: /(?<![\w-])\d{2}(?: ?\d{4}){6}(?![\w-])/g, valid: (m) => mod97("PL" + m.replace(/ /g, "")) },
   { id: "pii-pesel", re: /(?<!\d)\d{11}(?!\d)/g, valid: pesel },
-  { id: "pii-phone", re: /(?<![\w+])(?:\+|00)\d{2,3}[ -]?\d{2,4}(?:[ -]?\d{2,4}){2,3}(?![\w])/g },
+  { id: "pii-phone", re: /(?<![\w+.])(?:\+|00)\d{2,3}[ -]?\d{2,4}(?:[ -]?\d{2,4}){2,3}(?![\w])/g },
   { id: "pii-phone", re: /(?<![\w.,-])\d{3}[ -]\d{3}[ -]\d{3}(?![\w.,-])/g },
 ];
 export const RULES: readonly Rule[] = Object.freeze(definitions.map((r) => Object.freeze({ ...r,
