@@ -19,6 +19,8 @@ const mod97 = (iban: string) => {
   let m = 0; for (const ch of digits) m = (m * 10 + Number(ch)) % 97;
   return m === 1;
 };
+const NAMED = String.raw`(?:pass(?:word|wd|phrase)|secret|private[_.-]?key|api[_.-]?key|access[_.-]?key|(?<!(?:page|next|cursor|continuation|sync)[_.-]?)token)`;
+const literal = (v: string) => v.length >= 6 && !/\s/.test(v) && !/^[$<{]|[([]/.test(v) && !/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/.test(v);
 const databaseCredentials = (uri: string) => {
   const authority = uri.slice(uri.indexOf("://") + 3).split(/[/?#]/, 1)[0];
   const at = authority.lastIndexOf("@");
@@ -37,7 +39,7 @@ const definitions: Rule[] = [
   { id: "presigned-url-credential", re: /[?&]X-Amz-Security-Token=([A-Za-z0-9%+/=_.~-]{16,})/gi, group: 1, keywords: ["x-amz-security-token"] },
   { id: "presigned-url-credential", re: /[?&]X-(?:Amz|Goog)-Signature=([0-9a-f]{16,})/gi, group: 1, keywords: ["x-amz-signature", "x-goog-signature"] },
   { id: "database-credentials", re: /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|rediss?|mssql|sqlserver|cockroachdb):\/\/[^\s<>"'`]+/gi, valid: databaseCredentials },
-  { id: "database-credentials", re: /(?<![\w.-])[\w.-]+:[^\s@/"'`]+@(?:tcp|unix)\([^)\s]*\)/g, keywords: ["@tcp(", "@unix("] },
+  { id: "database-credentials", re: /(?<![\w.-])[\w.-]+:[^\s@/"'`;[\]]+@(?:tcp|unix)\([^)\s]*\)/g, keywords: ["@tcp(", "@unix("] },
   { id: "database-password", re: /(?<![A-Za-z0-9])(?:PGPASSWORD|MYSQL_PWD|(?:db|database)[_.-]?password)\b[\\"'\s]*[:=]\s*(["'])((?:\\.|(?!\1)[^\\\r\n])+)\1/gi, group: 2 },
   { id: "database-password", re: /(?<![A-Za-z0-9])(?:PGPASSWORD|MYSQL_PWD|(?:db|database)[_.-]?password)\b[\\"'\s]*[:=]\s*([^\s\\"'`;]+)/gi, group: 1, field: /^(?:PGPASSWORD|MYSQL_PWD|(?:db|database)[_.-]?password)$/i },
   { id: "credential-client-secret", re: /(?<![A-Za-z0-9])client[_.-]?secret\b[\\"'\s]*[:=][\\"'\s]*([A-Za-z0-9_./+~=-]{8,})/gi, group: 1, field: /^client[_.-]?secret$/i },
@@ -66,12 +68,14 @@ const definitions: Rule[] = [
   { id: "pii-pesel", re: /(?<!\d)\d{11}(?!\d)/g, valid: pesel },
   { id: "pii-phone", re: /(?<![\w+.])(?:\+|00)\d{2,3}[ -]?\d{2,4}(?:[ -]?\d{2,4}){2,3}(?![\w])/g },
   { id: "pii-phone", re: /(?<![\w.,-])\d{3}[ -]\d{3}[ -]\d{3}(?![\w.,-])/g },
+  { id: "named-credential", re: new RegExp(String.raw`(?<![A-Za-z0-9_])(?:[A-Za-z][\w.-]*?)?${NAMED}["']?\s*[:=]\s*(["'])((?:(?!\1)[^\\\r\n]){6,})\1`, "gi"), group: 2, valid: literal, field: new RegExp(String.raw`${NAMED}$`, "i") },
+  { id: "named-credential", re: new RegExp(String.raw`(?<![A-Za-z0-9_])(?:[A-Za-z][\w.-]*?)?${NAMED}["']?\s*[:=]\s*([^\s"'\x60;,&<>]{8,})`, "gi"), group: 1, valid: (v) => literal(v) && /\d/.test(v) },
 ];
 export const RULES: readonly Rule[] = Object.freeze(definitions.map((r) => Object.freeze({ ...r,
   re: Object.freeze(r.re), field: r.field && Object.freeze(r.field), keywords: r.keywords && Object.freeze([...r.keywords]) })));
 
 export const RULES_DIGEST = createHash("sha256").update(JSON.stringify({
-  version: SCANNER_VERSION, validators: [pesel.toString(), mod97.toString()], ibanLengths: IBAN_LENGTHS,
+  version: SCANNER_VERSION, validators: [pesel.toString(), mod97.toString(), literal.toString()], ibanLengths: IBAN_LENGTHS,
   rules: RULES.map((r) => ({ id: r.id, source: r.re.source, flags: r.re.flags, group: r.group,
     keywords: r.keywords, valid: r.valid?.toString(), field: r.field && [r.field.source, r.field.flags] })),
 })).digest("hex");
@@ -156,7 +160,7 @@ export function inspect(v: unknown, carnet?: Allowlist, path = "$", findings: Fi
       keySpans.forEach((s) => findings.push({ rule: s.rule, path: `${path}.<key>`, inKey: true }));
       const binary = k === "data" && (v as any).type === "base64";
       const field = typeof x === "string" && x.length && !binary && !isPayload(x) && !/^\[REDACTED:[\w-]+\]$/.test(x) && !allowed(x, carnet)
-        ? RULES.find((r) => r.field?.test(k)) : undefined;
+        ? RULES.find((r) => r.field?.test(k) && (!r.valid || r.valid(x))) : undefined;
       if (field) findings.push({ rule: field.id, path: nextPath });
       const value = field ? `[REDACTED:${field.id}]` : inspect(x, carnet, nextPath, findings, binary).value;
       Object.defineProperty(o, k, { value, enumerable: true, writable: true, configurable: true });

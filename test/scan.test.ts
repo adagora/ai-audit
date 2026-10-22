@@ -112,6 +112,9 @@ test("leaks found by the laws stay fixed: key endings, PGPASSWORD before a quote
   const parts = inspect([{ type: "text", text: "config: client_secret" }, { type: "text", text: `=${value} done` }]);
   assert.ok(!JSON.stringify(parts.value).includes(value));
   assert.deepEqual(parts.findings, [{ rule: "credential-client-secret", path: "$[0..1]" }]);
+  const masked = inspect(["DB_", "PASSWORD=CK02m6zqnLyD9C;root:hW887PEbGT3HZw@tcp(db.example.invalid:4000) x"]).value;
+  assert.deepEqual(masked, ["DB_", "PASSWORD=[REDACTED:database-password];[REDACTED:database-credentials] x"]);
+  assert.deepEqual(inspect(masked).findings, []);
 });
 
 test("clean JSON inside a string is not rewritten; numbers outside its strings are still scanned", () => {
@@ -126,6 +129,24 @@ test("an IBAN is found before a currency, BIC or year, and two adjacent IBANs ar
   const pair = "PL34376072511540854462682912 PL72 9100 7388 8561 9351 6865 5169 BIC WBKPPLPP";
   assert.deepEqual(scanText(pair).map((s) => s.value), ["PL34376072511540854462682912", "PL72 9100 7388 8561 9351 6865 5169"]);
   assert.deepEqual(scanText("kod AB12 CDEF GHIJ KLMN"), []);
+});
+
+test("credentials without a shape are found by their name (ADR 0028)", () => {
+  for (const [text, value] of [["TIDB_CLOUD_PRIVATE_KEY=a9F3kLm2Qx7Rt4Vw", "a9F3kLm2Qx7Rt4Vw"], ["X-Api-Key: 7f3c9a1e5b2d", "7f3c9a1e5b2d"],
+    ["UPDATE users SET password = 'Tr0ub4dor' WHERE id = 7;", "Tr0ub4dor"], ["const webhookSecret = \"whsec-fake-value\";", "whsec-fake-value"]] as const) {
+    assert.ok(scanText(text).some((s) => s.rule === "named-credential"), text);
+    assert.ok(!redactText(text, scanText(text)).includes(value), text);
+  }
+  const state = inspect({ resources: [{ instances: [{ attributes: { username: "admin", password: "SuperSecretPassword" } }] }], server: { salt_secret: "fake-salt-value" } });
+  assert.deepEqual(state.findings.map((f) => f.path), ["$.resources[0].instances[0].attributes.password", "$.server.salt_secret"]);
+});
+
+test("names alone do not flag code, types, references, labels or pagination tokens (ADR 0028)", () => {
+  for (const text of ["cachedToken: CachedToken", "apiKey: undefined,", "this.authToken = authToken;", "token: string):", "const apiKey = process.env.OPENAI_API_KEY;",
+    "secret = getSecret(name)", 'confirmPassword: "Confirm password"', "max_tokens: 4096", "export NPM_TOKEN=$NPM_TOKEN", "GRAFANA_ADMIN_PASSWORD=change-me",
+    'apiKey: "${OPENAI_API_KEY_2}"', "token = getToken(42)", "API_TOKEN=<TOKEN_FROM_VAULT_1>"])
+    assert.deepEqual(scanText(text), [], text);
+  assert.deepEqual(inspect({ nextPageToken: "CgAQ1A2B3C", page_token: "abc123def", password: "short", tokens: "123456789", db_secret: "{{vault_secret_1}}" }).findings, []);
 });
 
 test("a decimal fraction is not a phone number; international numbers still are", () => {

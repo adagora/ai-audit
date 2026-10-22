@@ -52,7 +52,10 @@ const SECRETS: ((g: Gen) => Planted)[] = [
   (g) => { const [prefix, rule] = g.pick([["ghu_", "github-app-token"], ["ghs_", "github-app-token"], ["gho_", "github-oauth"], ["ghr_", "github-refresh-token"]] as const), c = g.chars(36, ALNUM); return planted(rule, prefix + c, c); },
   (g) => { const c = g.chars(64, "0123456789abcdef"); return planted("openrouter-api-key", "sk-or-v1-" + c, c); },
   (g) => { const c = g.chars(80, ALNUM); return planted("xai-api-key", "xai-" + c, c); },
+  (g) => { const c = g.chars(14, ALNUM) + g.chars(2, DIGITS); return planted("named-credential", `${g.pick(["TIDB_CLOUD_PRIVATE_KEY", "ELEVENLABS_API_KEY", "SERVER_SALT_SECRET", "NPM_TOKEN", "X-Api-Key"])}${g.pick(["=", ": "])}${c}`, c); },
+  (g) => { const c = g.chars(12, ALNUM); return planted("named-credential", `UPDATE users SET password = '${c}' WHERE id = 7`, c); },
 ];
+const SECRET_FIELDS = ["password", "apiKey", "salt_secret", "access_token", "webhookSecret"];
 const SEPARATORS = [" ", "\n", "\t", '"', "'", ";"];
 const PUNCTUATION = [".", ",", ")", ":", "!", "?", "]", "}", ">", "*", "|"];
 const KEYS = ["note", "body", "args", "items", "meta", "query"];
@@ -72,6 +75,7 @@ function object(g: Gen, ps: Planted[], density: number, depth: number) {
   for (let i = 1 + g.int(3); i > 0; i--) {
     const p = g.int(100) < density / 6 ? { ...g.pick(SECRETS)(g), inKey: true } : undefined;
     if (p) ps.push(p);
+    if (!p && g.int(100) < density / 6) { const c = g.chars(14, ALNUM); ps.push(planted("named-credential", c)); o[g.pick(SECRET_FIELDS)] = c; continue; }
     o[p ? p.text : g.pick(KEYS) + i] = value(g, ps, density, depth + 1);
   }
   return o;
