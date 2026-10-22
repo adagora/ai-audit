@@ -20,7 +20,7 @@ const { values: a } = parseArgs({ args: rest, options: {
   policy: { type: "string" }, inputs: { type: "string" }, "system-id": { type: "string" }, "use-case": { type: "string" }, "llm-call": { type: "string" },
   decision: { type: "string" }, reviewer: { type: "string" }, verdict: { type: "string" }, note: { type: "string" },
 } });
-const NOT_REPRODUCED = new Set(["audit_qdl_source_invalid", "audit_qdl_source_mismatch", "audit_qdl_intent_mismatch"]);
+const NOT_REPRODUCED = new Set(["audit_qdl_source_missing", "audit_qdl_source_invalid", "audit_qdl_source_mismatch", "audit_qdl_intent_mismatch"]);
 const log = new AuditLog(a.log!);
 const allowlist = () => {
   if (!a["allow-hashes"]) return undefined;

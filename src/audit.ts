@@ -22,7 +22,7 @@ export interface Entry {
   step?: Step;
 }
 export interface Rec {
-  kind: "decision" | "review" | "llm-call"; id: string; ts: string; refId?: string;
+  kind: "decision" | "review" | "llm-call" | "program"; id: string; ts: string; refId?: string;
   systemId?: string; useCase?: string; llmCallId?: string; inputHash?: string; redactedInput?: string;
   sources?: { doc: string; page?: number }[]; model?: { name: string; version: string };
   prompt?: { templateId: string; hash: string }; params?: Record<string, unknown>; output?: unknown;

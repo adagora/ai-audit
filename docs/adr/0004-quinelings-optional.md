@@ -1,5 +1,5 @@
 # 4. Quinelings/QDL is an optional adapter, not core
-Status: Accepted (2026-10-20); decision path extended by [0023](0023-decision-records-cli-and-outcomes.md)
+Status: Accepted (2026-10-20); decision path extended by [0023](0023-decision-records-cli-and-outcomes.md); full source per record superseded by [0026](0026-store-each-program-once.md)
 ## Context
 Quinelings gives bounded, deterministic programs with exact source, so a decision step can be reproduced. It needs Node 22 and its SDK is very young. It gives no logs, retention, integrity chain, oversight or reports.
 ## Decision

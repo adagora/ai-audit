@@ -37,7 +37,7 @@ test("decide, approve and replay from the CLI, linked to a proxied LLM call, in 
   const replay = run("replay", "--decision", d.out.decision);
   assert.equal(replay.code, 0, replay.err); assert.deepEqual([replay.out.reproduced, replay.out.status], [true, "completed"]);
   assert.deepEqual(px.log.verifyChain(), { ok: true });
-  assert.deepEqual(px.log.read().map((r) => r.kind), ["llm-call", "decision", "decision", "review"]);
+  assert.deepEqual(px.log.read().map((r) => r.kind), ["llm-call", "program", "decision", "decision", "review"]);
 });
 
 test("a refusal is recorded and replays as a refusal; usage errors write nothing; a tampered log does not reproduce", { skip }, async () => {
@@ -68,7 +68,9 @@ test("a refusal is recorded and replays as a refusal; usage errors write nothing
   const tampered = join(dir, "tampered.jsonl"); writeFileSync(tampered, lines.join("\n") + "\n");
   const t = cliRun(tampered, "replay", "--decision", edited.refId);
   assert.equal(t.code, 1); assert.equal(t.out.reproduced, false);
-  const source = JSON.parse(lines[i]); source.qdl.inputs.rate = 4.5; source.qdl.source = source.qdl.source.replace("150", "1"); lines[i] = JSON.stringify(source);
+  const restored = JSON.parse(lines[i]); restored.qdl.inputs.rate = 4.5; lines[i] = JSON.stringify(restored);
+  const p = lines.findIndex((l) => l.includes('"kind":"program"')), program = JSON.parse(lines[p]);
+  program.source = program.source.replace("150", "1"); lines[p] = JSON.stringify(program);
   writeFileSync(tampered, lines.join("\n") + "\n");
   const s = cliRun(tampered, "replay", "--decision", edited.refId);
   assert.equal(s.code, 1); assert.equal(s.err, "audit_qdl_source_invalid");

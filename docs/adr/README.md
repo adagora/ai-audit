@@ -33,3 +33,4 @@ Format: Nygard (Status, Context, Decision, Consequences), at most ~40 lines, fil
 - [23. Decision records: CLI decide, approve and replay; every QDL outcome is recorded](0023-decision-records-cli-and-outcomes.md)
 - [24. Quinelings activity in LLM traffic is observed as identity hashes](0024-observe-quinelings-in-traffic.md)
 - [25. Decision inputs and programs are scanned before they are stored](0025-scan-decision-inputs.md)
+- [26. Each QDL program is stored once per log](0026-store-each-program-once.md)

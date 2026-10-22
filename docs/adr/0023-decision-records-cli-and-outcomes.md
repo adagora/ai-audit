@@ -1,5 +1,5 @@
 # 23. Decision records: CLI decide, approve and replay; every QDL outcome is recorded
-Status: Accepted (2026-10-22). Extends [0004](0004-quinelings-optional.md); input scanning added by [0025](0025-scan-decision-inputs.md).
+Status: Accepted (2026-10-22). Extends [0004](0004-quinelings-optional.md); input scanning added by [0025](0025-scan-decision-inputs.md); program storage changed by [0026](0026-store-each-program-once.md).
 ## Context
 ADR 0004 made Quinelings/QDL an optional path for deterministic decision steps: an LLM proposes, a QDL program decides, a person reviews, and replay reproduces the result from the log alone. In practice the path was reachable only from JavaScript (`recordQdl`, `AuditLog.approve`, `replayQdl`). ADR 0002 and `spec/AuditChain.tla` already assumed a CLI `approve` that did not exist.
 `recordQdl` threw on a refused or failed evaluation and wrote nothing, so the log lost exactly the cases an auditor looks for (AI Act Art. 12: situations that may present a risk). The link to the proxied LLM call that produced the proposal could only go into free-form `params`. `report` counted the `:qdl` companion record as a second decision, and `approve` accepted it as a review target.

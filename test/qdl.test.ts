@@ -34,8 +34,8 @@ test("QDL step: logged, replayed in a fresh session, tamper refused", { skip }, 
   const r = await replayQdl(log, step.id);
   assert.equal(r.reproduced, true); assert.deepEqual(r.output!.slice(0, 2), [189, true]);
   assert.deepEqual(log.verifyChain(), { ok: true });
-  const lines = readFileSync(log.path, "utf8").trim().split("\n"); const q = JSON.parse(lines[1]);
-  q.qdl.source = q.qdl.source.replace("150", "1"); lines[1] = JSON.stringify(q); writeFileSync(log.path, lines.join("\n") + "\n");
+  const lines = readFileSync(log.path, "utf8").trim().split("\n"); const p = JSON.parse(lines[0]);
+  assert.equal(p.kind, "program"); p.source = p.source.replace("150", "1"); lines[0] = JSON.stringify(p); writeFileSync(log.path, lines.join("\n") + "\n");
   assert.equal(log.verifyChain().ok, false);
   await assert.rejects(replayQdl(log, step.id), (e: any) => e.message === "audit_qdl_source_invalid" && e.code === "identity");
 });
@@ -98,5 +98,25 @@ test("secrets and personal data in inputs, program or params are refused before 
   const allowed = await recordQdl(log, entry, { intent: echo }, { contact: email }, new Set([sha256(email)]));
   assert.equal(allowed.step.qdl.status, "completed"); assert.deepEqual(allowed.decision.output, [email]);
   assert.equal((await replayQdl(log, allowed.decision.id)).reproduced, true);
+  assert.deepEqual(log.verifyChain(), { ok: true });
+});
+
+test("each program is stored once per log; decisions reference it by hash, and older inline-source records still replay", { skip }, async () => {
+  const { recordQdl, replayQdl } = await import("../src/qdl.js");
+  const log = fresh();
+  const first = await recordQdl(log, entry, { intent: quoteIntent }, quote);
+  const second = await recordQdl(log, entry, { intent: quoteIntent }, { ...quote, minutes: 60 });
+  await recordQdl(new AuditLog(log.path), entry, { intent: quoteIntent }, quote);
+  const lines = readFileSync(log.path, "utf8").trim().split("\n"), recs = lines.map((l) => JSON.parse(l));
+  assert.deepEqual(recs.map((r) => r.kind), ["program", "decision", "decision", "decision", "decision", "decision", "decision"]);
+  assert.equal(recs[0].id, first.step.qdl.sourceHash); assert.equal(first.step.qdl.source, undefined);
+  assert.ok(Buffer.byteLength(lines[2]) < 1024, `step is ${Buffer.byteLength(lines[2])} bytes`);
+  for (const x of [first, second]) assert.equal((await replayQdl(log, x.decision.id)).reproduced, true);
+  await recordQdl(log, entry, { intent: perPiece }, { total: 100, pieces: 4 });
+  assert.equal(log.read().filter((r) => r.kind === "program").length, 2);
+  const legacy = log.append({ kind: "decision", id: "legacy-1", ts: first.decision.ts, refId: "legacy-0", qdl: { ...first.step.qdl, source: recs[0].source } });
+  assert.equal((await replayQdl(log, legacy.id)).reproduced, true);
+  const withoutProgram = new AuditLog(log.path + ".no-program"); writeFileSync(withoutProgram.path, lines.slice(1).join("\n") + "\n");
+  await assert.rejects(replayQdl(withoutProgram, first.decision.id), /audit_qdl_source_missing/);
   assert.deepEqual(log.verifyChain(), { ok: true });
 });

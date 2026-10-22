@@ -182,13 +182,14 @@ const [price, llmAgrees, autoApprove] = decision.output;
 log.approve(decision.id, "A. Nowak", "approved", `LLM proposed ${proposal.price} PLN, policy says ${price} PLN`);
 console.log({ llmPrice: proposal.price, price, llmAgrees, autoApprove, reproduced: (await replayQdl(log, decision.id)).reproduced });
 ```
-The model never sees the shop rate, so its price is a guess. When it proposes 274 PLN, the script prints `{ llmPrice: 274, price: 394, llmAgrees: false, autoApprove: false, reproduced: true }`: the policy's 394 PLN (42 × 4.50 + 120 + 85) is more than 5% away from 274, so the quote goes to review and a person approves 394. On a fresh log, `node dist/src/cli.js verify --log audit.jsonl` then reports `OK: 4 records, chain intact`:
+The model never sees the shop rate, so its price is a guess. When it proposes 274 PLN, the script prints `{ llmPrice: 274, price: 394, llmAgrees: false, autoApprove: false, reproduced: true }`: the policy's 394 PLN (42 × 4.50 + 120 + 85) is more than 5% away from 274, so the quote goes to review and a person approves 394. On a fresh log, `node dist/src/cli.js verify --log audit.jsonl` then reports `OK: 5 records, chain intact`:
 
 | record | written by | holds |
 |---|---|---|
 | `llm-call` | proxy | findings as rule + path, tool call names, output hash, usage; no prompt text |
 | `decision` | `recordQdl` or `decide` | `llmCallId`, a hash of `input`, the policy outputs (only when completed) |
-| `decision` (id `…:qdl`) | `recordQdl` or `decide` | `status` (completed, refused or failed), the error code and path unless completed, the program source (or the refused intent), its inputs, `inputHash`, `outputsHash` |
+| `program` | `recordQdl` or `decide`, once per program | the program source; its id is the `sourceHash` |
+| `decision` (id `…:qdl`) | `recordQdl` or `decide` | `status` (completed, refused or failed), the error code and path unless completed, the program's `sourceHash` (or the refused intent), its inputs, `inputHash`, `outputsHash` |
 | `review` | `log.approve` or `approve` | reviewer, approved/overridden/rejected, note |
 
 `replayQdl(log, id)` takes the decision id or its `:qdl` id, rebuilds the program from the log in a fresh session and returns `reproduced: true` when the outcome matches, refusals and failures included. Edit a logged input and `verify` reports a broken chain; replaying the edited record gives `reproduced: false`. `npm run example:quote` runs the same policy offline (add `-- --live` for one real gpt-4o-mini call).
@@ -222,7 +223,7 @@ When an agent uses the Quinelings MCP server (tools `quineling_v1_*`, often pref
 `where: "call"` is the model asking for a tool; a compile call carries `intentHash`, the same hash `decide` stores for a refused intent. `where: "result"` is the tool's answer in the next request, logged once rather than on every later turn: a program's `sourceHash`, a run's `status`, or an error `code` and `path`. Program source, intents, input values, input hashes and messages are never stored, and only values in the expected format (`ql_` plus 64 hex characters, short lowercase codes) are kept, so a tool result cannot write text into the log. `sourceHash` is the same value `decide` records, so you can tell which programs agents ran on their own. `ai_audit_quineling_events_total{where,op}` counts the events and `report` lists them. Detection relies on the SDK 1.0.0 tool names and result shapes. With the official MCP TypeScript client 1.32 a Quinelings error reaches the model as `MCP error -32602` text and is logged as `mcp-32602`, without the QDL code.
 
 Limits today:
-- Every decision stores the whole program again (about 21 KB for the 14-step policy above) and its inputs exactly as given, after the check above. Policies should take hashed or tokenised identifiers rather than raw personal data.
+- Each distinct program is stored once per log file as a `program` record (about 20 KB for the 14-step policy above); each decision then adds about 1.2 KB ([ADR 0026](docs/adr/0026-store-each-program-once.md)). `replay` needs that record in the same log file, so tooling that splits or rotates logs must keep it. Inputs are stored exactly as given, after the check above; policies should take hashed or tokenised identifiers rather than raw personal data.
 - `replay` covers QDL decisions. JavaScript steps recorded with `log.record({ step })` replay only through `replay()` in the process that recorded them, because their source registry is in memory.
 - The SDK is a 1.0.0 tarball that is not published to npm, and it pulls in about 100 packages (zod, the MCP and A2A SDKs, express). It is an optional dependency: the proxy runs without it, and `decide` and `replay` then exit 2 with `audit_qdl_unavailable` ([ADR 0004](docs/adr/0004-quinelings-optional.md)).
 
