@@ -37,7 +37,7 @@ export function redact(s: string): string {
     .replace(/\b\d{11}\b/g, "[PESEL]");
 }
 
-const canon = (o: unknown): string => JSON.stringify(o, (_k, v) =>
+export const canon = (o: unknown): string => JSON.stringify(o, (_k, v) =>
   v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort()) : v);
 
 export class AuditLog {
@@ -172,7 +172,7 @@ export function report(log: AuditLog, from: string, to: string) {
   const calls = all.filter((r) => r.kind === "llm-call" && inRange(r.ts)) as any[];
   const llm = { calls: calls.length, blocked: calls.filter((c) => c.decision.action === "block").length,
     redacted: calls.filter((c) => c.decision.action === "forward-redacted").length,
-    withFindings: calls.filter((c) => c.decision.findings.length).length, withInjectionSignals: calls.filter((c) => c.decision.signals?.length).length, contentLogged: calls.filter((c) => c.content === "redacted").length, upstreamErrors: calls.filter((c) => c.upstreamStatus >= 400).length,
+    withFindings: calls.filter((c) => c.decision.findings.length).length, withInjectionSignals: calls.filter((c) => c.decision.signals?.length).length, withQuinelings: calls.filter((c) => c.quinelings?.length).length, contentLogged: calls.filter((c) => c.content === "redacted").length, upstreamErrors: calls.filter((c) => c.upstreamStatus >= 400).length,
     ...tokenTotals(calls) };
   const count = (xs: string[]) => [...xs.reduce((m, x) => m.set(x, (m.get(x) ?? 0) + 1), new Map<string, number>())].map(([k, x]) => `- ${k}: ${x}`);
   const md = [
@@ -189,6 +189,7 @@ export function report(log: AuditLog, from: string, to: string) {
     "### Według dostawcy / modelu / systemu", ...count(calls.map((c) => `${c.provider} / ${c.model ?? "?"} / ${c.systemId ?? "-"}`)), "",
     "### Wykryte reguły (tylko ID)", ...(calls.length ? count(calls.flatMap((c) => c.decision.findings.map((f: any) => f.rule))) : []), "",
     "### Sygnały prompt injection (advisory, tylko ID)", ...count(calls.flatMap((c) => (c.decision.signals ?? []).map((f: any) => f.rule))), "",
+    ...(llm.withQuinelings ? ["### Quinelings w ruchu (tylko hashe, ADR 0024)", ...count(calls.flatMap((c) => (c.quinelings ?? []).map((e: any) => `${e.where} ${e.op}${e.status ? ` ${e.status}` : ""}${e.error ? ` error ${e.error.code}` : ""}`))), ""] : []),
     "_Raport generowany automatycznie z dziennika. Nie stanowi porady prawnej._",
   ].join("\n");
   return { md, stats, llm, qdl };

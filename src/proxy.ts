@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { AuditLog, AuditLogUnavailable, sha256, stats } from "./audit.js";
 import { decide, hasDuplicateKeys, inspect, type Mode } from "./scan.js";
 import { toolResultSignals, type Signal } from "./injection.js";
+import { quinelingCalls, quinelingResults, type QuinelingEvent } from "./quinelings.js";
 import { extract, type Api } from "./extract.js";
 import { conversationItems, loadOrCreateSessionKey, SessionIndex } from "./session.js";
 import { composeContext, contextBlocks, promptTokens, scaleToProvider } from "./context.js";
@@ -37,6 +38,7 @@ export const metrics = {
   logUnavailable: new Counter("ai_audit_log_unavailable", "Requests refused with 503 because the audit log could not take a record."),
   logWriteFailures: new Counter("ai_audit_log_write_failures", "Records lost after the response was delivered (ADR 0016)."),
   injectionSignals: new Counter("ai_audit_injection_signals", "Advisory prompt-injection signals by rule id (ADR 0010)."),
+  quinelingEvents: new Counter("ai_audit_quineling_events", "Quinelings tool calls and results seen in LLM traffic, by where and op (ADR 0024)."),
   upstreamResponses: new Counter("ai_audit_upstream_responses", "Upstream responses by provider and status class."),
   upstreamErrors: new Counter("ai_audit_upstream_errors", "Forwarded requests that got no upstream response, by provider and reason."),
   unknownUsage: new Counter("ai_audit_unknown_usage", "Successful upstream calls without provider-reported usage, by field (ADR 0012)."),
@@ -142,11 +144,13 @@ export function createProxy(o: ProxyOpts) {
       const session = linked && { ...linked, firstChanged: arena!.firstChanged, arena: arena!.tracked ? "tracked" as const : "untracked" as const };
       if (session) sessions.remember(session);
       if (composition && arena) composition.blocks = arena.blocks;
+      const traced = route === "count" ? [] : quinelingResults(route, body);
+      const observe = (events: QuinelingEvent[]) => { events.forEach((e) => metrics.quinelingEvents.inc({ where: e.where, op: e.op })); return events.length ? { quinelings: events } : {}; };
       const reject = (code: string) => {
         clearTimeout(timer); decisionTag = "reject";
         if (route !== "count") o.log.append({ kind: "llm-call", id: rid, ts: new Date(t0).toISOString(), ...context,
           decision: { mode: profile.mode, action: "reject", findings: findings.map((f) => ({ rule: f.rule, path: f.path })), ...(atts.length && { sandbox }) },
-          ...(composition && { context: composition }), ...(session && { session }), upstreamStatus: null, error: code, latencyMs: Date.now() - t0 });
+          ...(composition && { context: composition }), ...(session && { session }), ...observe(traced), upstreamStatus: null, error: code, latencyMs: Date.now() - t0 });
         return fail(422, code);
       };
       if (refs.length && profile.mode !== "advisory") return reject("audit_uninspectable_reference");
@@ -174,12 +178,12 @@ export function createProxy(o: ProxyOpts) {
         decision: { mode: profile.mode, action: d.action, findings: d.findings.map((f) => ({ rule: f.rule, path: f.path })), ...(signals.length && { signals }), ...(d.action === "forward-redacted" && rasterized.length && { rasterized }), ...(atts.length && { sandbox }) },
       };
       const write = (extra: object) => { if (route !== "count") o.log.append({ kind: "llm-call", id: rid, ts: new Date(t0).toISOString(), ...rec, ...extra, latencyMs: Date.now() - t0 } as any); };
-      if (d.action === "block") { clearTimeout(timer); write({ upstreamStatus: null }); return fail(d.status!, d.code!, d.findings.map((f) => f.rule)); }
+      if (d.action === "block") { clearTimeout(timer); write({ upstreamStatus: null, ...observe(traced) }); return fail(d.status!, d.code!, d.findings.map((f) => f.rule)); }
 
       if (route !== "count") try { o.log.ensureWritable(); } catch (e) { clearTimeout(timer); decisionTag = "log-unavailable"; return logUnavailable(e); }
       let up: Response;
       try { up = await fetch(target, { method: "POST", headers, body: fwd, signal: ac.signal }); }
-      catch { clearTimeout(timer); metrics.upstreamErrors.inc({ provider: context.provider, reason: ac.signal.aborted ? "deadline" : "unreachable" }); const code = ac.signal.aborted ? "audit_deadline_exceeded" : "audit_upstream_unreachable"; write({ upstreamStatus: null, error: code }); return fail(ac.signal.aborted ? 408 : 502, code); }
+      catch { clearTimeout(timer); metrics.upstreamErrors.inc({ provider: context.provider, reason: ac.signal.aborted ? "deadline" : "unreachable" }); const code = ac.signal.aborted ? "audit_deadline_exceeded" : "audit_upstream_unreachable"; write({ upstreamStatus: null, error: code, ...observe(traced) }); return fail(ac.signal.aborted ? 408 : 502, code); }
       clearTimeout(timer);
       metrics.upstreamResponses.inc({ provider: context.provider, class: `${Math.floor(up.status / 100)}xx` });
       const sse = (up.headers.get("content-type") ?? "").includes("text/event-stream");
@@ -196,7 +200,8 @@ export function createProxy(o: ProxyOpts) {
       const full = vkey?.logContent === true;
       write({ ...(composition && { context: scaleToProvider(composition, up.status < 400 ? promptTokens(route as Api, out?.usage) : undefined) }), upstreamStatus: up.status, clientAborted: !res.writableFinished || undefined, responseModel: out?.model, usage: out?.usage, stop: out?.stop,
         ...(out && { content: full ? "redacted" : "hash", outputHash: sha256(out.text), ...(full && { output: red(out.text) }),
-          toolCalls: out.toolCalls.map((t) => ({ name: t.name, argsHash: sha256(t.args), ...(full && { args: red(t.args) }) })) }) });
+          toolCalls: out.toolCalls.map((t) => ({ name: t.name, argsHash: sha256(t.args), ...(full && { args: red(t.args) }) })) }),
+        ...observe([...traced, ...(out ? quinelingCalls(out.toolCalls) : [])]) });
     } catch (e) {
       if (e instanceof AuditLogUnavailable) { metrics.logWriteFailures.inc(); event("audit_log_write_failed", e); }
       if (!res.writableEnded) fail(500, "audit_internal_error");

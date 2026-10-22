@@ -1,4 +1,4 @@
-import { AuditLog, sha256, type Entry, type Rec } from "./audit.js";
+import { AuditLog, canon, sha256, type Entry, type Rec } from "./audit.js";
 
 export type QdlStatus = "completed" | "refused" | "failed";
 export interface QdlFault { code: string; path: string; nodeId?: string }
@@ -11,7 +11,6 @@ export type QdlRec = Rec & { qdl: QdlStep };
 export interface Program { intent?: unknown; source?: string }
 interface Outcome { status: QdlStatus; outputs?: unknown[]; inputHash?: string; error?: QdlFault }
 
-const canon = (o: unknown) => JSON.stringify(o, (_k, v) => v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort()) : v);
 const fault = (e: any): QdlFault => ({ code: String(e?.code ?? "failed"), path: String(e?.path ?? "$"), ...(e?.nodeId != null && { nodeId: String(e.nodeId) }) });
 const sameFault = (a?: QdlFault, b?: QdlFault) => a?.code === b?.code && a?.path === b?.path;
 

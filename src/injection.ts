@@ -18,7 +18,7 @@ export function signalsInText(text: string, path: string, out: Signal[] = []): S
   return out;
 }
 
-function texts(v: unknown, path: string, out: [string, string][] = []): [string, string][] {
+export function texts(v: unknown, path: string, out: [string, string][] = []): [string, string][] {
   if (typeof v === "string") out.push([v, path]);
   else if (Array.isArray(v)) v.forEach((x, i) => texts(x, `${path}[${i}]`, out));
   else if (v && typeof v === "object") {
