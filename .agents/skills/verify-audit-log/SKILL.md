@@ -17,13 +17,13 @@ description: Formal check (TLA+/TLC + regression tests) of the audit log hash ch
 
 Bounds: AuditChain 3 writer processes x 2 appends + 2 anchors (~37k distinct states). RequestLifecycle: one request with client close, timeout, usage chunk and the log breaking at any step (48 distinct states). Not covered: the stale-lock takeover race (>10 s stall), network filesystems, attachments, routing, stats math.
 
-## Coverage record (sync commit: 15b9985)
+## Coverage record (sync commit: 55329f0)
 - `src/audit.ts`: `AuditLog.withLock`, `AuditLog.lastHash`, `AuditLog.ensureWritable`, `AuditLog.append`, `anchor`, `AuditLogUnavailable`
 - `src/proxy.ts`: `createProxy` handler: `ensureWritable` checks before step 2 and step 3, `reject`, `write`, the final `write(...)` after `pipe`, the outer `catch` (`res.writableEnded` guard), `logUnavailable`
 - `src/extract.ts`: `extract` usage fields (only set when reported)
 - Tests tied to the models: `test/logsafety.test.ts`, `test/audit.test.ts`
 
-Does my change touch this? Run `git diff 15b9985 -- src/audit.ts src/proxy.ts src/extract.ts`. If any listed function changed, run the check and re-read the matching model actions.
+Does my change touch this? Run `git diff 55329f0 -- src/audit.ts src/proxy.ts src/extract.ts`. If any listed function changed, run the check and re-read the matching model actions.
 
 ## Run
 `npm run verify:formal` (needs Java 11+ on PATH or `JAVA=/path/to/java`; downloads tla2tools v1.8.0 to `~/.cache` on first run, or set `TLA2TOOLS_JAR`). About 15 s.
