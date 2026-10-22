@@ -47,7 +47,7 @@ export function programChanges(before: any, after: any): PolicyChange[] {
   return out;
 }
 
-export async function withChanges(histories: PolicyHistory[], records: any[]): Promise<PolicyHistory[]> {
+export async function programPayloads(records: any[]): Promise<(hash: string) => any> {
   const m = await import("@quinelings/agent-sdk/v1").catch(() => { throw new Error("audit_qdl_unavailable"); });
   const sources = new Map<string, string>();
   for (const r of records) {
@@ -55,7 +55,7 @@ export async function withChanges(histories: PolicyHistory[], records: any[]): P
     if (typeof r?.qdl?.sourceHash === "string" && typeof r.qdl.source === "string" && !sources.has(r.qdl.sourceHash)) sources.set(r.qdl.sourceHash, r.qdl.source);
   }
   const payloads = new Map<string, unknown>();
-  const payload = (hash: string) => {
+  return (hash: string) => {
     if (!payloads.has(hash)) {
       let p: unknown = null;
       const source = sources.get(hash);
@@ -64,6 +64,10 @@ export async function withChanges(histories: PolicyHistory[], records: any[]): P
     }
     return payloads.get(hash);
   };
+}
+
+export async function withChanges(histories: PolicyHistory[], records: any[]): Promise<PolicyHistory[]> {
+  const payload = await programPayloads(records);
   return histories.map((h) => ({ ...h, versions: h.versions.map((v, i) => {
     if (i === 0) return v;
     const before = payload(h.versions[i - 1].sourceHash), after = payload(v.sourceHash);

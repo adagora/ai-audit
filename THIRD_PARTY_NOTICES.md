@@ -2,7 +2,7 @@
 
 - **ghuntley/preflight** — MIT License, https://github.com/ghuntley/preflight. Inspection design, modes, error model and the default detection profile were adapted (ported to TypeScript, no code copied verbatim). Attachment worker resource limits in `src/attachments.ts` and `src/worker.ts` use preflight's values (`src/bin/preflight-worker.rs`, `src/attachments.rs` at eb13fc0): CPU 90 s, file size 64 MiB, 128 open files, address space 1.5 GiB (native tools only), 120 s wall clock, 16 MiB output caps, `OMP_THREAD_LIMIT=1`, and the worker exits if its limits are not in place.
 - **Gitleaks** — MIT License, Copyright (c) 2019 Zachary Rice, https://github.com/gitleaks/gitleaks. Secret-detection regex patterns in `src/scan.ts` are derived from Gitleaks rules (via preflight).
-- **Quinelings** (`@quinelings/agent-sdk`) — Apache License 2.0, https://github.com/CharlesHoskinson/quinelings. An unmodified package tarball is redistributed in `vendor/` as an optional dependency; the full license text is in `vendor/QUINELINGS-LICENSE`.
+- **Quinelings** (`@quinelings/agent-sdk`) — Apache License 2.0, https://github.com/CharlesHoskinson/quinelings. An unmodified package tarball is redistributed in `vendor/` as an optional dependency; the full license text is in `vendor/QUINELINGS-LICENSE`. `vendor/quinelings-qdl-v1-library.js` is an unmodified copy of `qdl-v1-library.js` (the QDL 1 recipe library behind the project's website examples) from commit d657d7784a54428cf7e1004098ea8c1e01ee9db5, SHA-256 82073caab835fdf8c9a11c6ef4e15ef0350565a28b160665c45a3672690cd225, used only by `examples/quinelings-library`; same license.
 
 The MIT license text applying to preflight and Gitleaks:
 

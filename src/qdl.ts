@@ -62,8 +62,7 @@ export async function recordQdl(log: AuditLog, e: Omit<Entry, "output" | "step">
   return { decision, step };
 }
 
-export async function replayQdl(log: AuditLog, id: string) {
-  const recs = log.read();
+export async function replayQdl(log: AuditLog, id: string, recs: Rec[] = log.read()) {
   const r = (recs.find((x) => x.id === id && x.qdl) ?? recs.find((x) => x.refId === id && x.qdl)) as QdlRec | undefined;
   if (!r) throw new Error("audit_no_qdl_step");
   const q = r.qdl, logged = q.status ?? "completed";
