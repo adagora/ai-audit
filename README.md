@@ -100,7 +100,7 @@ Proxy overhead, measured (`npm run bench:overhead`, loopback mock, Node 22, 3 ru
 **TL;DR: where Quinelings helps this project**
 - **Proves why a decision was made, long after.** The log carries the decision program itself. `ai-audit replay` rebuilds it from the log alone and recomputes the result, and `ai-audit policies` shows which policy version decided and what changed since. The proxy proves what the AI said; the Quineling proves what was decided ([DESIGN.md](DESIGN.md), AI Act Art. 12 and 14).
 - **Catches LLM mistakes in numbers and rules.** The LLM proposes, a fixed policy decides, a person approves. In the example below the LLM quotes 274 PLN, the policy computes 394 PLN, and the quote goes to review.
-- **Runs logic an LLM wrote, safely.** A program always stops, cannot read files or the network, and is refused if it invents an operation or mixes up units. The built-in `replay()` runs JavaScript in `node:vm`, which is only safe for trusted code.
+- **Runs logic an LLM wrote, safely.** A program always stops, cannot read files or the network, and is refused if it invents an operation or mixes up units (`npm run example:llm-policy` shows a model's draft being refused and fixed). The built-in `replay()` runs JavaScript in `node:vm`, which is only safe for trusted code.
 - **Keeps secrets out of the evidence.** Inputs and programs are checked with the proxy's rules before anything runs; a customer e-mail or an API key stops the decision instead of landing in the log.
 - **Keeps the hard cases and shows real use.** Refused and failed evaluations are recorded too, each decision links to the proxied LLM call (`llmCallId` is the proxy's `x-request-id`), and when agents run Quinelings on their own through MCP, the proxy logs which programs they compiled and ran, as hashes only.
 - **Not for** the proxy's request path (one run takes ~20 ms against the proxy's ~0.6 ms), finding secrets or PII, making the LLM itself reproducible, or real actions (they are only simulated).
@@ -223,6 +223,18 @@ Change a policy and its program gets a new `sourceHash`. `ai-audit policies [--s
               {"path":"nodes.tolerance.params.value","from":0.05,"to":0.03}]}]}
 ```
 Going back to v1 does not create a v3: v1 is `current` again and its `lastUsed` moves. Versions belong to a use case, not to a file name or the policy's `name`. `report` lists them as well, without the changes; `policies` rebuilds the programs to compute `changes`, so it needs the SDK.
+
+### The LLM writes the policy
+`npm run example:llm-policy` asks a model, through the proxy, to turn a written pricing rule into a Quinelings program, then records and checks what it wrote. Offline it uses a scripted model whose first draft makes a typical mistake:
+```
+attempt 1 (scripted-llm): refused before running, unit-type at $.node.inputs (the units of a step's inputs do not agree); recorded as decision 6e791353…
+attempt 2 (scripted-llm): program ql_4e06973f3a6e… compiled and ran, price 394 PLN; the rule says 394 PLN, approved
+proxy saw 2 LLM calls; Quinelings events: call compile intentHash 46876904…; result compile error unit-type; call compile intentHash 29eee1af…
+attempt 1's refused program has the intentHash the proxy logged for that LLM call: yes
+replay from the log: reproduced=true
+policy versions for cad-quote / llm-written-quote: v1 ql_4e06973f3a6e… decisions 1 current
+```
+The first draft added minutes to PLN. Quinelings refused it before it ran, the refusal went into the log as a decision, and its error code went back to the model, which fixed the program. Units and the fixed set of operations make a program safe and well-typed, not right, so the example also checks the result against a test case the rule implies (42 min × 4.50 + 120 + 85 = 394 PLN) and records that as a review: approved here, rejected and sent back to the model when the numbers disagree. The model's tool is named `quineling_v1_compile`, like the SDK's MCP tool, so the proxy logs each draft's `intentHash` (ADR 0024) and a refused draft can be matched to the LLM call that wrote it. `npm run example:llm-policy -- --live` asks gpt-4o-mini instead (it needs `OPENAI_API_KEY`); a real model may need a different number of attempts, at most 3.
 
 ### Agents running Quinelings themselves
 When an agent uses the Quinelings MCP server (tools `quineling_v1_*`, often prefixed by the client, such as `mcp__quinelings__quineling_v1_run`), its tool calls and the tool results pass through the proxy. The `llm-call` record then lists what happened, as hashes and statuses only ([ADR 0024](docs/adr/0024-observe-quinelings-in-traffic.md)). From a real agent run, the request that carried the compile result and asked for a run:
