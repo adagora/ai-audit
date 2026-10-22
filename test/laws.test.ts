@@ -74,16 +74,18 @@ function value(g: Gen, ps: Planted[], density: number, depth: number): unknown {
   return cuts.slice(1).map((c, i) => t.slice(cuts[i], c)).map((x) => (g.int(2) ? x : { type: "text", text: x }));
 }
 const API_BY_PATH: Record<string, Api> = { "/v1/chat/completions": "openai-chat", "/v1/messages": "anthropic-messages", "/v1/responses": "openai-responses" };
+const QUINELING_TOOLS = ["quineling_v1_compile", "quineling_v1_run", "mcp__quinelings__quineling_inspect"];
 function request(g: Gen, ps: Planted[], density: number, attachments = false): [string, object] {
-  const s = () => sentence(g, ps, density), args = () => object(g, ps, density, 2);
+  const s = () => sentence(g, ps, density), args = () => object(g, ps, density, 2), tool = g.int(3) ? "lookup" : g.pick(QUINELING_TOOLS);
+  const result = () => (tool !== "lookup" && g.int(2) ? JSON.stringify({ result: { result: { format: "qdl-run", sourceHash: "ql_" + g.chars(64, "0123456789abcdef"), status: "completed" } }, note: s() }) : s());
   const image = () => (attachments && g.int(2) ? [{ type: "image_url", image_url: { url: "data:image/png;base64," + g.chars(8, ALNUM) } }] : []);
   switch (g.int(3)) {
-    case 0: return ["/v1/chat/completions", { model: "m", tools: [{ type: "function", function: { name: "lookup", description: s(), parameters: {} } }], messages: [{ role: "system", content: s() }, { role: "user", content: [{ type: "text", text: s() }, ...image()] },
-      { role: "assistant", content: null, tool_calls: [{ id: "c1", type: "function", function: { name: "lookup", arguments: JSON.stringify(args()) } }] }, { role: "tool", tool_call_id: "c1", content: s() }] }];
-    case 1: return ["/v1/messages", { model: "c", max_tokens: 5, system: s(), tools: [{ name: "lookup", description: s(), input_schema: {} }], messages: [{ role: "user", content: [{ type: "text", text: s() }] },
-      { role: "assistant", content: [{ type: "tool_use", id: "u1", name: "lookup", input: args() }] }, { role: "user", content: [{ type: "tool_result", tool_use_id: "u1", content: s() }] }] }];
-    default: return ["/v1/responses", { model: "m", instructions: s(), tools: [{ type: "function", name: "lookup", description: s(), parameters: {} }], input: [{ role: "user", content: [{ type: "input_text", text: s() }] },
-      { type: "function_call", call_id: "c1", name: "lookup", arguments: JSON.stringify(args()) }, { type: "function_call_output", call_id: "c1", output: s() }] }];
+    case 0: return ["/v1/chat/completions", { model: "m", tools: [{ type: "function", function: { name: tool, description: s(), parameters: {} } }], messages: [{ role: "system", content: s() }, { role: "user", content: [{ type: "text", text: s() }, ...image()] },
+      { role: "assistant", content: null, tool_calls: [{ id: "c1", type: "function", function: { name: tool, arguments: JSON.stringify(args()) } }] }, { role: "tool", tool_call_id: "c1", content: result() }] }];
+    case 1: return ["/v1/messages", { model: "c", max_tokens: 5, system: s(), tools: [{ name: tool, description: s(), input_schema: {} }], messages: [{ role: "user", content: [{ type: "text", text: s() }] },
+      { role: "assistant", content: [{ type: "tool_use", id: "u1", name: tool, input: args() }] }, { role: "user", content: [{ type: "tool_result", tool_use_id: "u1", content: result() }] }] }];
+    default: return ["/v1/responses", { model: "m", instructions: s(), tools: [{ type: "function", name: tool, description: s(), parameters: {} }], input: [{ role: "user", content: [{ type: "input_text", text: s() }] },
+      { type: "function_call", call_id: "c1", name: tool, arguments: JSON.stringify(args()) }, { type: "function_call_output", call_id: "c1", output: result() }] }];
   }
 }
 
@@ -130,15 +132,17 @@ async function throughProxy(modes: Mode[], seed: number, check: (mode: Mode, ps:
   } finally { up.close(); modes.forEach((m) => px[m].close()); }
 }
 
-test("law: through the proxy no planted secret reaches the log in any mode, no-go never forwards a request with a finding, advisory forwards the original bytes, one record per request (ADR 0007, 0009)", async () => {
-  let blocked = 0;
+test("law: through the proxy no planted secret reaches the log in any mode, no-go never forwards a request with a finding, advisory forwards the original bytes, one record per request, also with Quinelings traffic (ADR 0007, 0009, 0024)", async () => {
+  let blocked = 0, observed = 0;
   await throughProxy(["redact", "no-go", "advisory"], 4, (mode, ps, body, sent, record, added) => {
     assert.equal(added, 1);
     assert.deepEqual(leaks(JSON.stringify(record), ps), [], mode);
+    if ("quinelings" in record) observed++;
     if (mode === "no-go") { assert.equal(sent === undefined, ps.length > 0); if (ps.length) blocked++; }
     if (mode === "advisory") assert.equal(sent, JSON.stringify(body));
   });
   assert.ok(blocked >= 10, `only ${blocked} blocked requests`);
+  assert.ok(observed >= 10, `only ${observed} records with Quinelings events`);
 });
 
 test("law: through the proxy in redact mode no planted secret reaches upstream (ADR 0009)", async () => {

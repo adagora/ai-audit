@@ -14,7 +14,7 @@
     "example:llm-policy": "node examples/quineling-quote/llm-policy.mjs",
     "bench:overhead": "npm run build && node bench/overhead.mjs",
     "check:tsc": "tsc --noEmit",
-    "verify:formal": "bash spec/run.sh && npm run build && node --test dist/test/logsafety.test.js dist/test/audit.test.js"
+    "verify:formal": "bash spec/run.sh && npm run build && node --test dist/test/logsafety.test.js dist/test/audit.test.js dist/test/qdl.test.js dist/test/laws.test.js"
   },
   "keywords": [
     "ai-act",

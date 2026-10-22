@@ -1,6 +1,6 @@
 ---
 name: verify-audit-log
-description: Formal check (TLA+/TLC + regression tests) of the audit log hash chain under several writer processes and of the proxy request lifecycle (one record per request, fail closed when the log is unavailable, no write-after-end crash, unknown usage never zero). Use before merging any change to AuditLog append/lastHash/anchor or to the createProxy request handler, and when a test or report shows a forked chain, a missing record or a proxy crash.
+description: Formal check (TLA+/TLC + regression tests) of the audit log hash chain under several writer processes and of the proxy request lifecycle (one record per request, fail closed when the log is unavailable, no write-after-end crash, unknown usage never zero). Use before merging any change to AuditLog append/lastHash/anchor, to the createProxy request handler, or to code that writes log records (src/qdl.ts, CLI decide/approve), and when a test or report shows a forked chain, a missing record or a proxy crash.
 ---
 
 # Verify the audit log and request lifecycle
@@ -15,25 +15,32 @@ description: Formal check (TLA+/TLC + regression tests) of the audit log hash ch
 | NoCrash, NeverSilent | A failed append never crashes the process; every request ends logged or counted as a failure. | Proxy dies (all clients drop); records lost without trace. |
 | NoForwardWithoutLog (residual cfg, expected to FAIL) | Strict: anything delivered is also logged. Not guaranteed: the log can break after the last check (ADR 0016). | Known, counted by `metrics.logWriteFailures`. |
 
-Bounds: AuditChain 3 writer processes x 2 appends + 2 anchors (~37k distinct states). RequestLifecycle: one request with client close, timeout, usage chunk and the log breaking at any step (48 distinct states). Not covered: the stale-lock takeover race (>10 s stall), network filesystems, attachments, routing, stats math.
+Bounds: AuditChain 3 writer processes x 2 appends + 2 anchors (~37k distinct states). RequestLifecycle: one request with client close, timeout, usage chunk and the log breaking at any step (48 distinct states). The laws in `test/laws.test.ts` add 90 generated requests through the proxy (three APIs, all modes, some with Quinelings tool calls and results) and 300 tampered logs.
 
-## Coverage record (sync commit: 55329f0)
+Assumption: in RequestLifecycle only the append can fail. Building the record must not throw, above all in the final `write(...)` after delivery, where the outer `catch` counts only `AuditLogUnavailable`; any other error there would lose the record without a count. At 9a3188e the code in that window cannot throw: `scaleToProvider`, `promptTokens`, `sha256`, `red`, and `quinelingCalls`, whose `JSON.parse` is guarded. Re-check this when adding code to a `write(...)` argument.
+
+Not covered: the stale-lock takeover race (>10 s stall), network filesystems, attachments, routing, stats math, and the order of a QDL decision's `program`, decision and `:qdl` records relative to other writers (each append is atomic; the group is not, which ADR 0026 accepts).
+
+## Coverage record (sync commit: 9a3188e)
 - `src/audit.ts`: `AuditLog.withLock`, `AuditLog.lastHash`, `AuditLog.ensureWritable`, `AuditLog.append`, `anchor`, `AuditLogUnavailable`
-- `src/proxy.ts`: `createProxy` handler: `ensureWritable` checks before step 2 and step 3, `reject`, `write`, the final `write(...)` after `pipe`, the outer `catch` (`res.writableEnded` guard), `logUnavailable`
+- `src/proxy.ts`: `createProxy` handler: `ensureWritable` checks before step 2 and step 3, `reject`, `write`, the final `write(...)` after `pipe`, the outer `catch` (`res.writableEnded` guard), `logUnavailable`, and `observe(...)`, which adds Quinelings events to each of those records (ADR 0024)
 - `src/extract.ts`: `extract` usage fields (only set when reported)
-- Tests tied to the models: `test/logsafety.test.ts`, `test/audit.test.ts`
+- Other writers of the chain, each a writer process in AuditChain, all through `AuditLog.append`: `src/qdl.ts` (`program`, decision and `:qdl` step records, ADR 0023 and 0026) and the CLI `decide` and `approve`
+- Tests tied to the models: `test/logsafety.test.ts`, `test/audit.test.ts`, `test/qdl.test.ts` (new writers keep the chain), `test/laws.test.ts` (one record per request, also with Quinelings traffic; no planted secret in the log; any tampering fails verification)
 
-Does my change touch this? Run `git diff 55329f0 -- src/audit.ts src/proxy.ts src/extract.ts`. If any listed function changed, run the check and re-read the matching model actions.
+Does my change touch this? Run `git diff 9a3188e -- src/audit.ts src/proxy.ts src/extract.ts src/qdl.ts src/cli.ts`. If any listed function changed, or new code calls `append`/`record`/`approve`, run the check and re-read the matching model actions.
 
 ## Run
 `npm run verify:formal` (needs Java 11+ on PATH or `JAVA=/path/to/java`; downloads tla2tools v1.8.0 to `~/.cache` on first run, or set `TLA2TOOLS_JAR`). About 15 s.
-Expected: six `ok` lines from `spec/run.sh` (2 pass configs, 4 configs that must FAIL: `AuditChain_nolock`, `RequestLifecycle_noguard`, `RequestLifecycle_noprecheck`, `RequestLifecycle_residual`), then the node tests all passing.
+Expected: six `ok` lines from `spec/run.sh` (2 pass configs, 4 configs that must FAIL: `AuditChain_nolock`, `RequestLifecycle_noguard`, `RequestLifecycle_noprecheck`, `RequestLifecycle_residual`), then 24 node tests passing (the QDL tests skip below Node 22).
+
+Proof that the tied tests still bite, checked at 9a3188e: a break where `observe(...)` writes an extra record per request fails the proxy law in `test/laws.test.ts`; a break where `src/qdl.ts` writes its `program` record around `append` fails `test/qdl.test.ts`. Neither break was caught by the tied tests before 9a3188e.
 
 ## Reading a failure
 - `FAIL spec/...cfg: expected pass, got fail`: TLC prints a trace. Map each step to the code: `ReadTail` = lock + `lastHash()`, `Write` = `appendFileSync` + unlock, `Check` = `ensureWritable()`, `DoWrite` = `o.log.append` in `write`, `LogGoesBad` = torn line/disk full. If the trace can happen in the code, it is a bug: write a failing test in `test/logsafety.test.ts` before fixing.
 - `expected fail, got pass` on a mutant cfg: the model lost its teeth (an action changed so the bad variant no longer differs). Fix the model, not the cfg.
 - `got error`: TLA+ syntax or a type error in the model. Modeling error, not a product bug.
-- A node test failing: real-code regression; the model can still pass because it only abstracts the code.
+- A node test failing: real-code regression; the model can still pass because it only abstracts the code. A law in `test/laws.test.ts` prints the generated counterexample (the request or log it used); the generators are seeded, so the same case comes back on every run.
 
 ## When the change is intended
 Update the model action that mirrors the changed code (keep one model step = one indivisible step in the code: within one Node process each `append` is synchronous; across processes only the lock makes read+write atomic). Keep the mutant cfgs failing. Rerun, then move the sync commit above to the new HEAD only after you have checked that every listed function still matches its model action.
