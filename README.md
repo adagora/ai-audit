@@ -18,6 +18,43 @@ Clients: `ANTHROPIC_BASE_URL=http://127.0.0.1:8787 claude` · `OPENAI_BASE_URL=h
 Uninspectable attachment (corrupt, unsupported, remote URL, file id) → 422. A rebuilt PDF or image is inspected again; if a finding survives or a box cannot be mapped → 409. A rasterized PDF reaches the model as page images only (no text layer, more tokens, OCR-quality answers). Detects: Gitleaks key shapes (AWS, GitHub, OpenAI, Anthropic, GCP, Stripe, Slack, JWT incl. wrapped, private keys), e-mail, phone, PESEL, IBAN; also catches secrets split across text parts, OCR text, PDF text and metadata. Contextual rules cover AWS secret-access keys and session tokens, database URLs containing credentials (the whole URL is masked), `PGPASSWORD`/`MYSQL_PWD`/`db_password`, OAuth client secrets/refresh tokens, and structured credential fields including GCP service-account `private_key`. JSON inside tool arguments/results is inspected recursively; nested duplicate keys cannot be safely rewritten and block enforcing modes.
 Prompt-injection signal: a few deterministic rules flag suspicious instructions in tool results and attachment text. It is logged only (rule + path), never blocks, and is easy to bypass ([ADR 0010](docs/adr/0010-advisory-prompt-injection-signal.md)).
 
+## Request flow
+One request through the proxy, in the order `src/proxy.ts` handles it:
+
+```mermaid
+stateDiagram-v2
+  [*] --> Received
+  Received --> Answered: GET /healthz /readyz /metrics, or /audit/stats with the admin key
+  Received --> KeyCheck: everything else
+  KeyCheck --> Refused: unknown virtual key 401, provider not allowed 403
+  KeyCheck --> Refused: unsupported route 404
+  KeyCheck --> Answered: GET /v1/models, passed through
+  KeyCheck --> BodyCheck: POST chat/completions, responses, messages, count_tokens
+  BodyCheck --> Refused: over 32 MiB 413, bad JSON or duplicate keys 400
+  BodyCheck --> LogCheck: parsed
+  LogCheck --> Refused: log torn or unwritable 503
+  LogCheck --> Refused: model not allowed for this key 403
+  LogCheck --> Inspecting: alias applied, every string, key and nested JSON scanned
+  Inspecting --> Rejected: file id or remote URL (enforcing modes), no sandbox, missing tools, attachment not inspectable 422
+  Inspecting --> Deciding: attachments OCR'd and scanned, injection signals noted
+  Deciding --> Blocked: no-go finding, or a finding that cannot be masked 409
+  Deciding --> LogRecheck: clean or advisory sends the original bytes, redact sends a masked copy
+  LogRecheck --> Refused: log broke in the meantime 503
+  LogRecheck --> Upstream: forwarded
+  Upstream --> Recorded: deadline 408 or unreachable 502
+  Upstream --> Streaming: response headers
+  Streaming --> Recorded: response delivered unchanged
+  Streaming --> Lost: append fails after delivery
+  Rejected --> Recorded
+  Blocked --> Recorded
+  Recorded --> [*]
+  Refused --> [*]
+  Answered --> [*]
+  Lost --> [*]
+```
+
+`Recorded` appends exactly one hash-chained `llm-call` record (ADR 0009); `count_tokens` is inspected the same way but skips both log checks and is never logged. `Refused` writes no record and forwards nothing. `Lost` is the residual window from ADR 0016: the client already has the response, so the failure is counted in `ai_audit_log_write_failures_total` and reported on stderr. The append lock and anchors are drawn in [docs/verification](docs/verification/README.md).
+
 ## Development
 `npm run build` compiles with TypeScript (`tsc`); tests, demos and benchmarks use that output. `npm run build:fast` uses the pinned experimental [tsrs](https://github.com/oxc-project/tsrs) Rust compiler instead. It is about 15x faster, for local iteration. It needs `--skipLibCheck` because tsrs reports TS5115 for circular types in Zod dependency declarations.
 
@@ -59,8 +96,120 @@ Pointer compression, measured (`node bench/memory.mjs`, 5 runs each): JS heap �
 
 Proxy overhead, measured (`npm run bench:overhead`, loopback mock, Node 22, 3 runs): **+0.6–0.7 ms p50, ~+1.1 ms p95** per request at concurrency 1 (redaction included); at concurrency 16 one process caps at ~2000 req/s. Details: [docs/performance/2026-10-20](docs/performance/2026-10-20/README.md).
 
-## Quinelings example (Node ≥ 22)
-`npm run example:quote` (add `-- --live` for one gpt-4o-mini call): the LLM proposes a machining quote, a QDL program computes the price and approval, the log stores the program hash and inputs, a replay reproduces the result, a tampered rate is caught, and a wrong LLM price is overridden and flagged for review.
+## Deterministic decisions with Quinelings (optional, Node ≥ 22)
+[Quinelings](https://github.com/CharlesHoskinson/quinelings) (`@quinelings/agent-sdk`, Apache-2.0, vendored in `vendor/`) runs small calculation programs written in QDL, a JSON format: typed inputs with units, steps from a fixed set of about 30 operations (`arithmetic`, `compareValues`, `budget`, `allocate`, `action`, …) and outputs. The SDK compiles a program into self-contained source whose hash is its identity (`ql_…`), checks types and units before anything runs, and can rebuild and rerun it anywhere from that source alone. A program is data, not JavaScript: it cannot read files or the network, and `action` steps are only simulated.
+
+Why it is here: an LLM is good at reading a part description and proposing numbers, but it gets arithmetic wrong and its answers cannot be reproduced. With QDL the LLM proposes, a fixed policy decides and a person approves, and every step lands in the same hash-chained log as the LLM call ([DESIGN.md](DESIGN.md), AI Act Art. 12 and 14). The built-in `replay()` does this for JavaScript step functions, but `node:vm` is only safe for trusted code; a QDL program is safe to run even when an LLM wrote it.
+
+### The SDK on its own
+Save as `qdl-hello.mjs` in the repo root and run `node qdl-hello.mjs`:
+```js
+import { Session } from "@quinelings/agent-sdk/v1";
+
+const session = new Session();
+const program = session.compile({
+  format: "qdl-intent", version: 1, name: "Quote with a floor",
+  thought: "price = max(machining minutes × shop rate, 150 PLN)",
+  inputs: [
+    { id: "minutes", name: "minutes", type: { kind: "number", unit: "min", min: 0 } },
+    { id: "rate", name: "rate", type: { kind: "number", unit: "PLN*min^-1", min: 0 } },
+    { id: "floor", value: 150, type: { kind: "number", unit: "PLN", min: 0 } },
+  ],
+  steps: [
+    { id: "machining", op: "arithmetic", inputs: ["minutes", "rate"], params: { kind: "mul" } },
+    { id: "price", op: "arithmetic", inputs: ["machining", "floor"], params: { kind: "max" } },
+  ],
+  outputs: ["price"],
+});
+const run = session.run({ artifactId: program.id, requestId: "quote-1", inputs: { minutes: 42, rate: 4.5 } });
+console.log(run.result.occurrences[0].outputs);
+console.log(new Session().recover({ source: program.source }).id === program.id);
+```
+It prints `[ 189 ]`, then `true`: a fresh session rebuilt the same program from its source. Bad programs and inputs are refused with a `QdlError` before anything runs: mixed-up units (`unit-type`), a value outside its declared range such as `minutes: -5` (`refinement`), a missing input (`missing-input`) or an operation that does not exist, for example an LLM inventing a `fetch` step (`invalid-input`). Errors at run time, such as division by zero, give a `failed` run with a diagnostic.
+
+### With ai-audit: the LLM proposes, the policy decides
+```mermaid
+sequenceDiagram
+  participant A as Your agent
+  participant P as ai-audit proxy
+  participant M as LLM provider
+  participant L as audit.jsonl
+  A->>P: chat request with the part description
+  P->>M: inspected request, secrets and PII masked
+  M-->>P: tool call propose_quote
+  P-->>A: unchanged response + x-request-id
+  P->>L: llm-call record, id = x-request-id
+  A->>A: recordQdl runs the policy on the proposal
+  A->>L: decision + decision:qdl, params.llmCallId = x-request-id
+  A->>L: review from log.approve
+```
+Run the proxy with `node dist/src/cli.js serve --log audit.jsonl`, then save this as `quote.mjs` in the repo root and run `OPENAI_API_KEY=… node quote.mjs`. The agent writes to the same log file as the proxy; the append lock keeps one chain ([ADR 0016](docs/adr/0016-fail-closed-when-log-unavailable.md)).
+```js
+import { AuditLog } from "./dist/src/audit.js";
+import { recordQdl, replayQdl } from "./dist/src/qdl.js";
+
+const number = (unit) => ({ kind: "number", unit, min: 0 });
+const POLICY = {
+  format: "qdl-intent", version: 1, name: "Machining quote policy v1",
+  thought: "price = max(minutes × rate + setup + material, floor); auto-approve only if the LLM price matches",
+  inputs: [
+    { id: "minutes", name: "minutes", type: number("min") }, { id: "rate", name: "rate", type: number("PLN*min^-1") },
+    { id: "setup", name: "setup", type: number("PLN") }, { id: "material", name: "material", type: number("PLN") },
+    { id: "llmPrice", name: "llmPrice", type: number("PLN") }, { id: "floor", value: 150, type: number("PLN") },
+  ],
+  steps: [
+    { id: "machining", op: "arithmetic", inputs: ["minutes", "rate"], params: { kind: "mul" } },
+    { id: "withSetup", op: "arithmetic", inputs: ["machining", "setup"], params: { kind: "add" } },
+    { id: "cost", op: "arithmetic", inputs: ["withSetup", "material"], params: { kind: "add" } },
+    { id: "price", op: "arithmetic", inputs: ["cost", "floor"], params: { kind: "max" } },
+    { id: "agrees", op: "compareValues", inputs: ["price", "llmPrice"], params: { operator: "eq" } },
+    { id: "approve", op: "action", inputs: ["agrees", "price"], params: { allowed: true, action: "auto-approve-quote" } },
+  ],
+  outputs: ["price", "agrees", "approve"],
+};
+
+const res = await fetch("http://127.0.0.1:8787/v1/chat/completions", {
+  method: "POST",
+  headers: { "content-type": "application/json", authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+    "x-audit-system-id": "cad-quote", "x-audit-use-case": "machining-quote" },
+  body: JSON.stringify({
+    model: "gpt-4o-mini",
+    messages: [{ role: "user", content: "Quote: flange DN100, S355, CAM estimate 42 min, blank 85 PLN, setup 120 PLN." }],
+    tools: [{ type: "function", function: { name: "propose_quote", parameters: { type: "object",
+      properties: { minutes: { type: "number" }, material: { type: "number" }, setup: { type: "number" }, price: { type: "number" } },
+      required: ["minutes", "material", "setup", "price"] } } }],
+    tool_choice: { type: "function", function: { name: "propose_quote" } },
+  }),
+});
+const llmCallId = res.headers.get("x-request-id");
+const proposal = JSON.parse((await res.json()).choices[0].message.tool_calls[0].function.arguments);
+
+const log = new AuditLog("audit.jsonl");
+const qdl = await recordQdl(log,
+  { systemId: "cad-quote", useCase: "machining-quote", input: "flange DN100", params: { llmCallId } },
+  { intent: POLICY },
+  { minutes: proposal.minutes, rate: 4.5, setup: proposal.setup, material: proposal.material, llmPrice: proposal.price });
+const [price, agrees] = log.read().find((r) => r.id === qdl.refId).output;
+log.approve(qdl.refId, "A. Nowak", "approved", `LLM proposed ${proposal.price} PLN, policy says ${price} PLN`);
+console.log({ llmPrice: proposal.price, price, agrees, reproduced: (await replayQdl(log, qdl.id)).reproduced });
+```
+The model never sees the shop rate, so its price is a guess. When it proposes 274 PLN, the script prints `{ llmPrice: 274, price: 394, agrees: false, reproduced: true }`: the policy's 394 PLN (42 × 4.50 + 120 + 85) is what gets approved, and the log shows both. On a fresh log, `node dist/src/cli.js verify --log audit.jsonl` then reports `OK: 4 records, chain intact`:
+
+| record | written by | holds |
+|---|---|---|
+| `llm-call` | proxy | findings as rule + path, tool call names, output hash, usage; no prompt text |
+| `decision` | `recordQdl` | policy outputs, a hash of `input`, `params.llmCallId` |
+| `decision` (id `…:qdl`) | `recordQdl` | the program source, its inputs, `inputHash`, `outputsHash` |
+| `review` | `log.approve` | reviewer, approved/overridden/rejected, note |
+
+`replayQdl(log, id)` rebuilds the program from the log in a fresh session and returns `reproduced: true` when the output matches. Edit a logged input and `verify` reports a broken chain; replaying the edited record gives `reproduced: false`. `npm run example:quote` runs a similar scenario offline (add `-- --live` for one real gpt-4o-mini call).
+
+Limits today:
+- Library only. The CLI has no command for decisions, reviews or replay; call `recordQdl`, `AuditLog.approve` and `replayQdl` from your code.
+- A refused or failed evaluation throws and is not logged.
+- Every decision stores the whole program again (about 14 KB for the policy above) and its inputs as given, without the secret/PII scanner. Keep personal data out of the inputs.
+- One run takes about 20 ms (compile 35–60 ms), against the proxy's ~0.6 ms, so this belongs in your application, not in the request path.
+- The SDK is a 1.0.0 tarball that is not published to npm, and it pulls in about 100 packages (zod, the MCP and A2A SDKs, express). It is an optional dependency: the proxy runs without it ([ADR 0004](docs/adr/0004-quinelings-optional.md)).
 
 ## Limits
 - Attachments need tesseract, poppler, python3-PIL, prlimit (util-linux, so Linux only) and a working bwrap. Workers run in bwrap with no network, all capabilities dropped and an empty environment. Resource limits are preflight's: worker RLIMIT_DATA 4 GiB, CPU 90 s, files 64 MiB, 128 open files; each native tool also gets RLIMIT_AS 1.5 GiB; 120 s wall clock; 16 MiB output caps for the worker and each tool. Exceeding any of them gives 422. Read-only mounts are limited to `/usr`, the Node install and the worker script, so a worker cannot read the log, the session key, the config or your home directory. Without a usable sandbox, attachments get 422 `audit_sandbox_unavailable` and `/readyz` is 503. `--unsafe-no-sandbox` (development only) runs workers unsandboxed and records `decision.sandbox: "disabled"` ([ADR 0021](docs/adr/0021-attachment-sandbox-hardening.md)).
