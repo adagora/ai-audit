@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 export type Mode = "redact" | "no-go" | "advisory";
 export type Allowlist = Pick<ReadonlySet<string>, "has">;
 interface Rule { readonly id: string; readonly re: RegExp; readonly group?: number; readonly keywords?: readonly string[]; readonly valid?: (m: string) => boolean; readonly field?: RegExp }
-export const SCANNER_VERSION = "2";
-const END = String.raw`(?:[\x60'"\s;]|\\[nr]|$)`;
+export const SCANNER_VERSION = "3";
+const KEY_END = String.raw`(?![\w-])`, JWT_END = String.raw`(?![\w\/\\=-])`;
 
 const pesel = (s: string) => {
   const d = [...s].map(Number), w = [1, 3, 7, 9, 1, 3, 7, 9, 1, 3];
@@ -32,18 +32,18 @@ const definitions: Rule[] = [
   { id: "aws-session-token", re: /\b(?:aws[_.-]?)?session[_.-]?token\b[\\"'\s]*[:=][\\"'\s]*([A-Za-z0-9/+=]{16,})(?![A-Za-z0-9/+=])/gi, group: 1, field: /^(?:aws[_.-]?)?session[_.-]?token$/i },
   { id: "database-credentials", re: /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|rediss?|mssql|sqlserver|cockroachdb):\/\/[^\s<>"'`]+/gi, valid: databaseCredentials },
   { id: "database-password", re: /\b(?:PGPASSWORD|MYSQL_PWD|(?:db|database)[_.-]?password)\b[\\"'\s]*[:=]\s*(["'])((?:\\.|(?!\1)[^\\\r\n])+)\1/gi, group: 2 },
-  { id: "database-password", re: /\b(?:PGPASSWORD|MYSQL_PWD|(?:db|database)[_.-]?password)\b[\\"'\s]*[:=]\s*([^\s\\"'`;]+)(?:[\s;]|$)/gi, group: 1, field: /^(?:PGPASSWORD|MYSQL_PWD|(?:db|database)[_.-]?password)$/i },
+  { id: "database-password", re: /\b(?:PGPASSWORD|MYSQL_PWD|(?:db|database)[_.-]?password)\b[\\"'\s]*[:=]\s*([^\s\\"'`;]+)/gi, group: 1, field: /^(?:PGPASSWORD|MYSQL_PWD|(?:db|database)[_.-]?password)$/i },
   { id: "credential-client-secret", re: /\bclient[_.-]?secret\b[\\"'\s]*[:=][\\"'\s]*([A-Za-z0-9_./+~=-]{8,})/gi, group: 1, field: /^client[_.-]?secret$/i },
   { id: "credential-refresh-token", re: /\brefresh[_.-]?token\b[\\"'\s]*[:=][\\"'\s]*([A-Za-z0-9_./+~=-]{8,})/gi, group: 1, field: /^refresh[_.-]?token$/i },
   { id: "github-pat", re: /ghp_[0-9a-zA-Z]{36}/g, keywords: ["ghp_"] },
   { id: "github-fine-grained-pat", re: /github_pat_\w{82}/g, keywords: ["github_pat_"] },
-  { id: "openai-api-key", re: new RegExp(String.raw`\b(sk-(?:proj|svcacct|admin)-(?:[A-Za-z0-9_-]{74}|[A-Za-z0-9_-]{58})T3BlbkFJ(?:[A-Za-z0-9_-]{74}|[A-Za-z0-9_-]{58})\b|sk-[a-zA-Z0-9]{20}T3BlbkFJ[a-zA-Z0-9]{20})${END}`, "g"), group: 1, keywords: ["t3blbkfj"] },
-  { id: "anthropic-api-key", re: new RegExp(String.raw`\b(sk-ant-api03-[a-zA-Z0-9_\-]{93}AA)${END}`, "g"), group: 1, keywords: ["sk-ant-api03"] },
-  { id: "anthropic-admin-api-key", re: new RegExp(String.raw`\b(sk-ant-admin01-[a-zA-Z0-9_\-]{93}AA)${END}`, "g"), group: 1, keywords: ["sk-ant-admin01"] },
-  { id: "gcp-api-key", re: new RegExp(String.raw`\b(AIza[\w-]{35})${END}`, "g"), group: 1, keywords: ["aiza"] },
-  { id: "stripe-access-token", re: new RegExp(String.raw`\b((?:sk|rk)_(?:test|live|prod)_[a-zA-Z0-9]{10,99})${END}`, "g"), group: 1, keywords: ["sk_test", "sk_live", "sk_prod", "rk_test", "rk_live", "rk_prod"] },
+  { id: "openai-api-key", re: new RegExp(String.raw`\b(sk-(?:proj|svcacct|admin)-(?:[A-Za-z0-9_-]{74}|[A-Za-z0-9_-]{58})T3BlbkFJ(?:[A-Za-z0-9_-]{74}|[A-Za-z0-9_-]{58})\b|sk-[a-zA-Z0-9]{20}T3BlbkFJ[a-zA-Z0-9]{20})${KEY_END}`, "g"), group: 1, keywords: ["t3blbkfj"] },
+  { id: "anthropic-api-key", re: new RegExp(String.raw`\b(sk-ant-api03-[a-zA-Z0-9_\-]{93}AA)${KEY_END}`, "g"), group: 1, keywords: ["sk-ant-api03"] },
+  { id: "anthropic-admin-api-key", re: new RegExp(String.raw`\b(sk-ant-admin01-[a-zA-Z0-9_\-]{93}AA)${KEY_END}`, "g"), group: 1, keywords: ["sk-ant-admin01"] },
+  { id: "gcp-api-key", re: new RegExp(String.raw`\b(AIza[\w-]{35})${KEY_END}`, "g"), group: 1, keywords: ["aiza"] },
+  { id: "stripe-access-token", re: new RegExp(String.raw`\b((?:sk|rk)_(?:test|live|prod)_[a-zA-Z0-9]{10,99})${KEY_END}`, "g"), group: 1, keywords: ["sk_test", "sk_live", "sk_prod", "rk_test", "rk_live", "rk_prod"] },
   { id: "private-key", re: /-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----[\s\S-]{64,}?KEY(?: BLOCK)?-----/gi, keywords: ["-----begin"], field: /^private[_.-]?key(?:[_.-]?data)?$/i },
-  { id: "jwt", re: new RegExp(String.raw`\b(ey[a-zA-Z0-9]{17,}\.ey[a-zA-Z0-9\/\\_-]{17,}\.(?:[a-zA-Z0-9\/\\_-]{10,}={0,2})?)${END}`, "g"), group: 1, keywords: ["ey"] },
+  { id: "jwt", re: new RegExp(String.raw`\b(ey[a-zA-Z0-9]{17,}\.ey[a-zA-Z0-9\/\\_-]{17,}\.(?:[a-zA-Z0-9\/\\_-]{10,}={0,2})?)${JWT_END}`, "g"), group: 1, keywords: ["ey"] },
   { id: "slack-bot-token", re: /xoxb-[0-9]{10,13}-[0-9]{10,13}[a-zA-Z0-9-]*/g, keywords: ["xoxb"] },
   { id: "slack-user-token", re: /xox[pe](?:-[0-9]{10,13}){3}-[a-zA-Z0-9-]{28,34}/g, keywords: ["xoxp-", "xoxe-"] },
   { id: "slack-webhook-url", re: /(?:https?:\/\/)?hooks.slack.com\/(?:services|workflows|triggers)\/[A-Za-z0-9+/]{43,56}/g, keywords: ["hooks.slack.com"] },
@@ -64,7 +64,7 @@ export const RULES_DIGEST = createHash("sha256").update(JSON.stringify({
 })).digest("hex");
 
 export interface Finding { rule: string; path: string; inKey?: boolean; unredactable?: boolean }
-interface Span { start: number; end: number; rule: string; value: string }
+interface Span { start: number; end: number; matchStart: number; matchEnd: number; rule: string; value: string }
 
 const allowed = (value: string, carnet?: Allowlist) => carnet?.has(createHash("sha256").update(value).digest("hex")) === true;
 export function scanText(text: string, carnet?: Allowlist): Span[] {
@@ -72,25 +72,28 @@ export function scanText(text: string, carnet?: Allowlist): Span[] {
   for (const r of RULES) {
     if (r.keywords && !r.keywords.some((k) => lower.includes(k))) continue;
     for (const m of text.matchAll(new RegExp(r.re.source, r.re.flags.includes("d") ? r.re.flags : r.re.flags + "d"))) {
-      const [s, e] = m.indices![r.group ?? 0]!; const value = text.slice(s, e);
+      const [s, e] = m.indices![r.group ?? 0]!, [matchStart, matchEnd] = m.indices![0]!; const value = text.slice(s, e);
       if (/^\[REDACTED:[\w-]+\]$/.test(value)) continue;
       if (r.valid && !r.valid(value)) continue;
       if (allowed(value, carnet)) continue;
-      spans.push({ start: s, end: e, rule: r.id, value });
+      spans.push({ start: s, end: e, matchStart, matchEnd, rule: r.id, value });
     }
   }
   if (lower.includes("ey")) for (const m of text.matchAll(/ey[\w\-\/\\.=]*(?:\s+[\w\-\/\\.=]{8,}(?![\w\-\/\\.=]))+/g)) {
     const at: number[] = []; let joined = "";
     [...m[0]].forEach((c, i) => { if (!/\s/.test(c)) { at.push(m.index! + i); joined += c; } });
-    for (const j of joined.matchAll(/ey[a-zA-Z0-9]{17,}\.ey[a-zA-Z0-9\/\\_-]{17,}\.(?:[a-zA-Z0-9\/\\_-]{10,}={0,2})?/g))
-      if (!allowed(j[0], carnet)) spans.push({ start: at[j.index!], end: at[j.index! + j[0].length - 1] + 1, rule: "jwt", value: j[0] });
+    for (const j of joined.matchAll(/ey[a-zA-Z0-9]{17,}\.ey[a-zA-Z0-9\/\\_-]{17,}\.(?:[a-zA-Z0-9\/\\_-]{10,}={0,2})?/g)) {
+      const start = at[j.index!], end = at[j.index! + j[0].length - 1] + 1;
+      if (!allowed(j[0], carnet)) spans.push({ start, end, matchStart: start, matchEnd: end, rule: "jwt", value: j[0] });
+    }
   }
   spans.sort((a, b) => a.start - b.start || b.end - a.end);
   const out: Span[] = [];
   for (const s of spans) {
     const prev = out.at(-1);
-    if (!prev || s.start >= prev.end) out.push({ ...s });
-    else if (s.end > prev.end) { prev.end = s.end; prev.value = text.slice(prev.start, prev.end); }
+    if (!prev || s.start >= prev.end) { out.push({ ...s }); continue; }
+    if (s.end > prev.end) { prev.end = s.end; prev.value = text.slice(prev.start, prev.end); }
+    prev.matchStart = Math.min(prev.matchStart, s.matchStart); prev.matchEnd = Math.max(prev.matchEnd, s.matchEnd);
   }
   return out;
 }
@@ -99,6 +102,7 @@ export const redactText = (text: string, spans: Span[]) =>
   spans.reduceRight((t, s) => t.slice(0, s.start) + `[REDACTED:${s.rule}]` + t.slice(s.end), text);
 
 const isPayload = (s: string) => /^data:[\w.+-]+\/[\w.+-]+(?:;[^,]*)?;base64,/.test(s);
+const outsideStrings = (json: string) => json.replace(/"(?:[^"\\]|\\.)*"/g, (s) => `"${" ".repeat(s.length - 2)}"`);
 export function inspect(v: unknown, carnet?: Allowlist, path = "$", findings: Finding[] = [], payload = false): { value: unknown; findings: Finding[] } {
   if (typeof v === "string") {
     if (payload || isPayload(v)) return { value: v, findings };
@@ -112,12 +116,14 @@ export function inspect(v: unknown, carnet?: Allowlist, path = "$", findings: Fi
         }
         const nested = inspect(parsed, carnet, `${path}#json`);
         if (nested.findings.length) { findings.push(...nested.findings); return { value: JSON.stringify(nested.value), findings }; }
+        const spans = scanText(outsideStrings(v), carnet); spans.forEach((s) => findings.push({ rule: s.rule, path }));
+        return { value: spans.length ? redactText(v, spans) : v, findings };
       }
     }
     const spans = scanText(v, carnet); spans.forEach((s) => findings.push({ rule: s.rule, path }));
     return { value: spans.length ? redactText(v, spans) : v, findings };
   }
-  if (Array.isArray(v)) return { value: joinParts(v.map((x, i) => inspect(x, carnet, `${path}[${i}]`, findings).value), carnet, path, findings), findings };
+  if (Array.isArray(v)) return { value: joinParts(v, carnet, path, findings).map((x, i) => inspect(x, carnet, `${path}[${i}]`, findings).value), findings };
   if (v && typeof v === "object") {
     const o: Record<string, unknown> = {};
     for (const [k, x] of Object.entries(v)) {
@@ -135,18 +141,30 @@ export function inspect(v: unknown, carnet?: Allowlist, path = "$", findings: Fi
   return { value: v, findings };
 }
 
+const lastWhere = (n: number, ok: (i: number) => boolean) => {
+  let lo = 0, hi = n - 1, found = -1;
+  while (lo <= hi) { const mid = (lo + hi) >> 1; if (ok(mid)) { found = mid; lo = mid + 1; } else hi = mid - 1; }
+  return found;
+};
 function joinParts(arr: unknown[], carnet: Allowlist | undefined, path: string, findings: Finding[]): unknown[] {
   const idx: number[] = [], texts: string[] = [];
   arr.forEach((x: any, i) => { const t = typeof x === "string" ? x : x && typeof x === "object" && typeof x.text === "string" ? x.text : undefined; if (t !== undefined && !isPayload(t)) { idx.push(i); texts.push(t); } });
   if (texts.length < 2) return arr;
   const starts: number[] = []; let joined = ""; texts.forEach((t) => { starts.push(joined.length); joined += t; });
-  const part = (pos: number) => { let k = 0; while (k + 1 < starts.length && starts[k + 1] <= pos) k++; return k; };
-  const cross = scanText(joined, carnet).filter((s) => part(s.start) !== part(s.end - 1));
+  const part = (pos: number) => lastWhere(starts.length, (k) => starts[k] <= pos);
+  const spans = scanText(joined, carnet), taken = spans.map((s) => part(s.matchStart) !== part(s.matchEnd - 1));
+  for (let grew = taken.includes(true); grew;) {
+    const removed = spans.filter((_, i) => taken[i]);
+    const overlapsRemoved = (s: Span) => { const k = lastWhere(removed.length, (i) => removed[i].start < s.matchEnd); return k >= 0 && removed[k].end > s.matchStart; };
+    grew = false;
+    spans.forEach((s, i) => { if (!taken[i] && overlapsRemoved(s)) taken[i] = grew = true; });
+  }
+  const cross = spans.filter((_, i) => taken[i]);
   if (!cross.length) return arr;
   const out = arr.slice(), next = texts.slice();
   for (const s of cross.reverse()) {
-    const a = part(s.start), b = part(s.end - 1);
-    findings.push({ rule: s.rule, path: `${path}[${idx[a]}..${idx[b]}]` });
+    const a = part(s.start), b = part(s.end - 1), first = idx[part(s.matchStart)], last = idx[part(s.matchEnd - 1)];
+    findings.push({ rule: s.rule, path: first === last ? `${path}[${first}]` : `${path}[${first}..${last}]` });
     for (let k = b; k >= a; k--) {
       const from = Math.max(s.start - starts[k], 0), to = Math.min(s.end - starts[k], texts[k].length);
       next[k] = next[k].slice(0, from) + (k === a ? `[REDACTED:${s.rule}]` : "") + next[k].slice(to);
