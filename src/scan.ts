@@ -3,15 +3,18 @@ import { createHash } from "node:crypto";
 export type Mode = "redact" | "no-go" | "advisory";
 export type Allowlist = Pick<ReadonlySet<string>, "has">;
 interface Rule { readonly id: string; readonly re: RegExp; readonly group?: number; readonly keywords?: readonly string[]; readonly valid?: (m: string) => boolean; readonly field?: RegExp }
-export const SCANNER_VERSION = "3";
+export const SCANNER_VERSION = "4";
 const KEY_END = String.raw`(?![\w-])`, JWT_END = String.raw`(?![\w\/\\=-])`;
 
 const pesel = (s: string) => {
   const d = [...s].map(Number), w = [1, 3, 7, 9, 1, 3, 7, 9, 1, 3];
   return (10 - (w.reduce((a, x, i) => a + x * d[i], 0) % 10)) % 10 === d[10];
 };
+const IBAN_LENGTHS: Readonly<Record<string, number>> = Object.freeze({ AT: 20, BE: 16, BG: 22, CH: 21, CY: 28, CZ: 24, DE: 22, DK: 18, EE: 20, ES: 24, FI: 18, FR: 27, GB: 22, GR: 27,
+  HR: 21, HU: 28, IE: 22, IS: 26, IT: 27, LI: 21, LT: 20, LU: 20, LV: 21, MT: 31, NL: 18, NO: 15, PL: 28, PT: 25, RO: 24, SE: 24, SI: 19, SK: 24, UA: 29 });
 const mod97 = (iban: string) => {
   const s = iban.replace(/ /g, ""), r = s.slice(4) + s.slice(0, 4);
+  if (s.length < 15 || s.length > 34 || s.length !== (IBAN_LENGTHS[s.slice(0, 2)] ?? s.length)) return false;
   const digits = [...r].map((c) => (/[A-Z]/.test(c) ? String(c.charCodeAt(0) - 55) : c)).join("");
   let m = 0; for (const ch of digits) m = (m * 10 + Number(ch)) % 97;
   return m === 1;
@@ -28,18 +31,28 @@ const databaseCredentials = (uri: string) => {
 
 const definitions: Rule[] = [
   { id: "aws-access-token", re: /\b((?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7]{16})\b/g, group: 1, keywords: ["a3t", "akia", "asia", "abia", "acca"] },
-  { id: "aws-secret-access-key", re: /\b(?:aws[_.-]?)?secret[_.-]?access[_.-]?key\b[\\"'\s]*[:=][\\"'\s]*([A-Za-z0-9/+=]{40})(?![A-Za-z0-9/+=])/gi, group: 1, field: /^(?:aws[_.-]?)?secret[_.-]?access[_.-]?key$/i },
-  { id: "aws-session-token", re: /\b(?:aws[_.-]?)?session[_.-]?token\b[\\"'\s]*[:=][\\"'\s]*([A-Za-z0-9/+=]{16,})(?![A-Za-z0-9/+=])/gi, group: 1, field: /^(?:aws[_.-]?)?session[_.-]?token$/i },
+  { id: "aws-secret-access-key", re: /(?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7]{16}[\s"',:;|/=]{1,4}([A-Za-z0-9/+]{40})(?![A-Za-z0-9/+=])/g, group: 1, keywords: ["a3t", "akia", "asia", "abia", "acca"] },
+  { id: "aws-secret-access-key", re: /(?<![A-Za-z0-9])(?:aws[_.-]?)?secret[_.-]?access[_.-]?key\b[\\"'\s]*[:=][\\"'\s]*((?:[A-Za-z0-9/+=]|%2[FB]|%3D){40})(?![A-Za-z0-9/+=]|%[0-9A-F]{2})/gi, group: 1, field: /^(?:aws[_.-]?)?secret[_.-]?access[_.-]?key$/i },
+  { id: "aws-session-token", re: /(?<![A-Za-z0-9])(?:aws[_.-]?)?session[_.-]?token\b[\\"'\s]*[:=][\\"'\s]*((?:[A-Za-z0-9/+=]|%2[FB]|%3D){16,})(?![A-Za-z0-9/+=]|%[0-9A-F]{2})/gi, group: 1, field: /^(?:aws[_.-]?)?session[_.-]?token$/i },
+  { id: "presigned-url-credential", re: /[?&]X-Amz-Security-Token=([A-Za-z0-9%+/=_.~-]{16,})/gi, group: 1, keywords: ["x-amz-security-token"] },
+  { id: "presigned-url-credential", re: /[?&]X-(?:Amz|Goog)-Signature=([0-9a-f]{16,})/gi, group: 1, keywords: ["x-amz-signature", "x-goog-signature"] },
   { id: "database-credentials", re: /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|rediss?|mssql|sqlserver|cockroachdb):\/\/[^\s<>"'`]+/gi, valid: databaseCredentials },
-  { id: "database-password", re: /\b(?:PGPASSWORD|MYSQL_PWD|(?:db|database)[_.-]?password)\b[\\"'\s]*[:=]\s*(["'])((?:\\.|(?!\1)[^\\\r\n])+)\1/gi, group: 2 },
-  { id: "database-password", re: /\b(?:PGPASSWORD|MYSQL_PWD|(?:db|database)[_.-]?password)\b[\\"'\s]*[:=]\s*([^\s\\"'`;]+)/gi, group: 1, field: /^(?:PGPASSWORD|MYSQL_PWD|(?:db|database)[_.-]?password)$/i },
-  { id: "credential-client-secret", re: /\bclient[_.-]?secret\b[\\"'\s]*[:=][\\"'\s]*([A-Za-z0-9_./+~=-]{8,})/gi, group: 1, field: /^client[_.-]?secret$/i },
-  { id: "credential-refresh-token", re: /\brefresh[_.-]?token\b[\\"'\s]*[:=][\\"'\s]*([A-Za-z0-9_./+~=-]{8,})/gi, group: 1, field: /^refresh[_.-]?token$/i },
+  { id: "database-credentials", re: /(?<![\w.-])[\w.-]+:[^\s@/"'`]+@(?:tcp|unix)\([^)\s]*\)/g, keywords: ["@tcp(", "@unix("] },
+  { id: "database-password", re: /(?<![A-Za-z0-9])(?:PGPASSWORD|MYSQL_PWD|(?:db|database)[_.-]?password)\b[\\"'\s]*[:=]\s*(["'])((?:\\.|(?!\1)[^\\\r\n])+)\1/gi, group: 2 },
+  { id: "database-password", re: /(?<![A-Za-z0-9])(?:PGPASSWORD|MYSQL_PWD|(?:db|database)[_.-]?password)\b[\\"'\s]*[:=]\s*([^\s\\"'`;]+)/gi, group: 1, field: /^(?:PGPASSWORD|MYSQL_PWD|(?:db|database)[_.-]?password)$/i },
+  { id: "credential-client-secret", re: /(?<![A-Za-z0-9])client[_.-]?secret\b[\\"'\s]*[:=][\\"'\s]*([A-Za-z0-9_./+~=-]{8,})/gi, group: 1, field: /^client[_.-]?secret$/i },
+  { id: "credential-refresh-token", re: /(?<![A-Za-z0-9])refresh[_.-]?token\b[\\"'\s]*[:=][\\"'\s]*([A-Za-z0-9_./+~=-]{8,})/gi, group: 1, field: /^refresh[_.-]?token$/i },
+  { id: "azure-ad-client-secret", re: /(?<![a-zA-Z0-9_~.-])([a-zA-Z0-9_~.]{3}\dQ~[a-zA-Z0-9_~.-]{31,34})(?![a-zA-Z0-9_~-])/g, group: 1, keywords: ["q~"] },
   { id: "github-pat", re: /ghp_[0-9a-zA-Z]{36}/g, keywords: ["ghp_"] },
   { id: "github-fine-grained-pat", re: /github_pat_\w{82}/g, keywords: ["github_pat_"] },
+  { id: "github-app-token", re: /(?:ghu|ghs)_[0-9a-zA-Z]{36}/g, keywords: ["ghu_", "ghs_"] },
+  { id: "github-oauth", re: /gho_[0-9a-zA-Z]{36}/g, keywords: ["gho_"] },
+  { id: "github-refresh-token", re: /ghr_[0-9a-zA-Z]{36}/g, keywords: ["ghr_"] },
   { id: "openai-api-key", re: new RegExp(String.raw`\b(sk-(?:proj|svcacct|admin)-(?:[A-Za-z0-9_-]{74}|[A-Za-z0-9_-]{58})T3BlbkFJ(?:[A-Za-z0-9_-]{74}|[A-Za-z0-9_-]{58})\b|sk-[a-zA-Z0-9]{20}T3BlbkFJ[a-zA-Z0-9]{20})${KEY_END}`, "g"), group: 1, keywords: ["t3blbkfj"] },
   { id: "anthropic-api-key", re: new RegExp(String.raw`\b(sk-ant-api03-[a-zA-Z0-9_\-]{93}AA)${KEY_END}`, "g"), group: 1, keywords: ["sk-ant-api03"] },
   { id: "anthropic-admin-api-key", re: new RegExp(String.raw`\b(sk-ant-admin01-[a-zA-Z0-9_\-]{93}AA)${KEY_END}`, "g"), group: 1, keywords: ["sk-ant-admin01"] },
+  { id: "openrouter-api-key", re: new RegExp(String.raw`\b(sk-or-v1-[a-fA-F0-9]{64})${KEY_END}`, "g"), group: 1, keywords: ["sk-or-v1-"] },
+  { id: "xai-api-key", re: new RegExp(String.raw`\b(xai-[A-Za-z0-9]{40,})${KEY_END}`, "g"), group: 1, keywords: ["xai-"] },
   { id: "gcp-api-key", re: new RegExp(String.raw`\b(AIza[\w-]{35})${KEY_END}`, "g"), group: 1, keywords: ["aiza"] },
   { id: "stripe-access-token", re: new RegExp(String.raw`\b((?:sk|rk)_(?:test|live|prod)_[a-zA-Z0-9]{10,99})${KEY_END}`, "g"), group: 1, keywords: ["sk_test", "sk_live", "sk_prod", "rk_test", "rk_live", "rk_prod"] },
   { id: "private-key", re: /-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----[\s\S-]{64,}?KEY(?: BLOCK)?-----/gi, keywords: ["-----begin"], field: /^private[_.-]?key(?:[_.-]?data)?$/i },
@@ -58,7 +71,7 @@ export const RULES: readonly Rule[] = Object.freeze(definitions.map((r) => Objec
   re: Object.freeze(r.re), field: r.field && Object.freeze(r.field), keywords: r.keywords && Object.freeze([...r.keywords]) })));
 
 export const RULES_DIGEST = createHash("sha256").update(JSON.stringify({
-  version: SCANNER_VERSION, validators: [pesel.toString(), mod97.toString()],
+  version: SCANNER_VERSION, validators: [pesel.toString(), mod97.toString()], ibanLengths: IBAN_LENGTHS,
   rules: RULES.map((r) => ({ id: r.id, source: r.re.source, flags: r.re.flags, group: r.group,
     keywords: r.keywords, valid: r.valid?.toString(), field: r.field && [r.field.source, r.field.flags] })),
 })).digest("hex");
@@ -67,14 +80,26 @@ export interface Finding { rule: string; path: string; inKey?: boolean; unredact
 interface Span { start: number; end: number; matchStart: number; matchEnd: number; rule: string; value: string }
 
 const allowed = (value: string, carnet?: Allowlist) => carnet?.has(createHash("sha256").update(value).digest("hex")) === true;
+const validBeforeSpace = (r: Rule, text: string, start: number, end: number) => {
+  const whole = new RegExp(`^(?:${r.re.source})$`, r.re.flags.replace("g", ""));
+  for (let cut = text.lastIndexOf(" ", end - 1); cut > start; cut = text.lastIndexOf(" ", cut - 1))
+    if (whole.test(text.slice(start, cut)) && r.valid!(text.slice(start, cut))) return cut;
+  return undefined;
+};
 export function scanText(text: string, carnet?: Allowlist): Span[] {
   const lower = text.toLowerCase(), spans: Span[] = [];
   for (const r of RULES) {
     if (r.keywords && !r.keywords.some((k) => lower.includes(k))) continue;
-    for (const m of text.matchAll(new RegExp(r.re.source, r.re.flags.includes("d") ? r.re.flags : r.re.flags + "d"))) {
-      const [s, e] = m.indices![r.group ?? 0]!, [matchStart, matchEnd] = m.indices![0]!; const value = text.slice(s, e);
-      if (/^\[REDACTED:[\w-]+\]$/.test(value)) continue;
-      if (r.valid && !r.valid(value)) continue;
+    const re = new RegExp(r.re.source, r.re.flags.includes("d") ? r.re.flags : r.re.flags + "d");
+    for (let m = re.exec(text); m; m = re.exec(text)) {
+      let [s, e] = m.indices![r.group ?? 0]!, [matchStart, matchEnd] = m.indices![0]!;
+      if (/^\[REDACTED:[\w-]+\]$/.test(text.slice(s, e))) continue;
+      if (r.valid && !r.valid(text.slice(s, e))) {
+        const cut = r.group === undefined ? validBeforeSpace(r, text, matchStart, matchEnd) : undefined;
+        if (cut === undefined) continue;
+        e = matchEnd = re.lastIndex = cut;
+      }
+      const value = text.slice(s, e);
       if (allowed(value, carnet)) continue;
       spans.push({ start: s, end: e, matchStart, matchEnd, rule: r.id, value });
     }

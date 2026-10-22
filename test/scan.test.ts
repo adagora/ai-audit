@@ -105,6 +105,29 @@ test("a contextual credential split across text parts is fully removed", () => {
   assert.deepEqual((result.value as any[]).map((v) => v.text), ["AWS_SECRET_ACCESS_KEY=[REDACTED:aws-secret-access-key]", ""]);
 });
 
+test("leaks found by the laws stay fixed: key endings, PGPASSWORD before a quote, split key and value", () => {
+  const key = "sk-ant-api03-" + "aB9".repeat(31) + "AA", value = "XfMCHGFnlyVQLNo2";
+  for (const text of [`Use my key ${key}.`, `(${key}), see`, "run: docker run -e 'PGPASSWORD=s3cretPassw0rd' postgres", `cfg = "PROD_DB_PASSWORD=s3cretPassw0rd"`])
+    assert.ok(!redactText(text, scanText(text)).includes(text.includes(key) ? key : "s3cretPassw0rd"), text);
+  const parts = inspect([{ type: "text", text: "config: client_secret" }, { type: "text", text: `=${value} done` }]);
+  assert.ok(!JSON.stringify(parts.value).includes(value));
+  assert.deepEqual(parts.findings, [{ rule: "credential-client-secret", path: "$[0..1]" }]);
+});
+
+test("clean JSON inside a string is not rewritten; numbers outside its strings are still scanned", () => {
+  for (const raw of ['{"cmd":"export PGPASSWORD=","x":"y"}', '{"note":"set db_password:","next":"value"}']) assert.deepEqual(inspect(raw), { value: raw, findings: [] }, raw);
+  assert.deepEqual(inspect('{"pesel": 44051401359}'), { value: '{"pesel": [REDACTED:pii-pesel]}', findings: [{ rule: "pii-pesel", path: "$" }] });
+});
+
+test("an IBAN is found before a currency, BIC or year, and two adjacent IBANs are both found", () => {
+  const iban = "PL61 1090 1014 0000 0712 1981 2874";
+  for (const text of [`konto ${iban} PLN`, `konto ${iban} BIC WBKPPLPP`, `IBAN: ${iban.replace(/ /g, "")} EUR`, `${iban} 2026`])
+    assert.ok(scanText(text).some((s) => s.rule === "pii-iban" && s.value.startsWith(iban.slice(0, 4)) && s.value.replace(/ /g, "").includes(iban.replace(/ /g, ""))), text);
+  const pair = "PL34376072511540854462682912 PL72 9100 7388 8561 9351 6865 5169 BIC WBKPPLPP";
+  assert.deepEqual(scanText(pair).map((s) => s.value), ["PL34376072511540854462682912", "PL72 9100 7388 8561 9351 6865 5169"]);
+  assert.deepEqual(scanText("kod AB12 CDEF GHIJ KLMN"), []);
+});
+
 test("a decimal fraction is not a phone number; international numbers still are", () => {
   for (const text of ["0.0012444963678717614", '{"bend":[-0.18,0.0012444963678717614]}', "ratio 1.00485551234567"]) assert.deepEqual(scanText(text), [], text);
   for (const text of ["tel +48 601 234 567", "call 0048 601 234 567", "0048601234567"]) assert.deepEqual(scanText(text).map((s) => s.rule), ["pii-phone"], text);

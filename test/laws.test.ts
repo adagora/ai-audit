@@ -40,7 +40,18 @@ const SECRETS: ((g: Gen) => Planted)[] = [
   (g) => planted("pii-email", `${g.chars(10, LOWER)}@${g.chars(8, LOWER)}.pl`),
   (g) => planted("pii-pesel", pesel(g.chars(10, DIGITS))),
   (g) => planted("pii-iban", iban(g.chars(24, DIGITS))),
+  (g) => { const raw = iban(g.chars(24, DIGITS)), written = g.int(2) ? raw : raw.replace(/(.{4})/g, "$1 ").trim(); return planted("pii-iban", `${written} ${g.pick(["PLN", "EUR", "BIC WBKPPLPP", "2026"])}`, written); },
   (g) => planted("pii-phone", `+48 ${g.chars(3, DIGITS)} ${g.chars(3, DIGITS)} ${g.chars(3, DIGITS)}`),
+  (g) => { const c = g.chars(40, ALNUM + "/+"); return planted("aws-access-token", `AKIA${g.chars(16, UPPER + "234567")}${g.pick([" : ", ":", " ", "/", ","])}${c}`, c); },
+  (g) => { const c = encodeURIComponent(g.chars(40, ALNUM + "/+")); return planted("aws-secret-access-key", `s3://backup/x?secret-access-key=${c}`, c); },
+  (g) => { const c = encodeURIComponent(g.chars(60, ALNUM + "/+") + "=="); return planted("presigned-url-credential", `https://b.s3.amazonaws.com/k?X-Amz-Expires=600&X-Amz-Security-Token=${c}&X-Amz-Signature=${g.chars(64, "0123456789abcdef")}`, c); },
+  (g) => { const c = g.chars(14, ALNUM); return planted("database-credentials", `root:${c}@tcp(db.example.invalid:4000)`, c); },
+  (g) => { const c = g.chars(14, ALNUM); return planted("database-password", `${g.pick(["PROD_", "APP_", ""])}DB_PASSWORD=${c}`, c); },
+  (g) => { const c = g.chars(16, ALNUM); return planted("credential-client-secret", `AZURE_CLIENT_SECRET=${c}`, c); },
+  (g) => { const c = g.chars(34, ALNUM + "_~.-"); return planted("azure-ad-client-secret", `${g.chars(3, ALNUM)}${g.chars(1, DIGITS)}Q~${c}`, c); },
+  (g) => { const [prefix, rule] = g.pick([["ghu_", "github-app-token"], ["ghs_", "github-app-token"], ["gho_", "github-oauth"], ["ghr_", "github-refresh-token"]] as const), c = g.chars(36, ALNUM); return planted(rule, prefix + c, c); },
+  (g) => { const c = g.chars(64, "0123456789abcdef"); return planted("openrouter-api-key", "sk-or-v1-" + c, c); },
+  (g) => { const c = g.chars(80, ALNUM); return planted("xai-api-key", "xai-" + c, c); },
 ];
 const SEPARATORS = [" ", "\n", "\t", '"', "'", ";"];
 const PUNCTUATION = [".", ",", ")", ":", "!", "?", "]", "}", ">", "*", "|"];
