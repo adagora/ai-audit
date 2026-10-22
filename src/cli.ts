@@ -22,15 +22,16 @@ const { values: a } = parseArgs({ args: rest, options: {
 } });
 const NOT_REPRODUCED = new Set(["audit_qdl_source_invalid", "audit_qdl_source_mismatch", "audit_qdl_intent_mismatch"]);
 const log = new AuditLog(a.log!);
+const allowlist = () => {
+  if (!a["allow-hashes"]) return undefined;
+  let hashes: unknown;
+  try { hashes = JSON.parse(readFileSync(a["allow-hashes"], "utf8")); } catch { throw new Error("audit_invalid_allowlist"); }
+  if (!Array.isArray(hashes) || hashes.some((h) => typeof h !== "string")) throw new Error("audit_invalid_allowlist");
+  return new Set<string>(hashes as string[]);
+};
 if (cmd === "scrub" || cmd === "profile") {
   try {
-    let carnet: Set<string> | undefined;
-    if (a["allow-hashes"]) {
-      let hashes: unknown;
-      try { hashes = JSON.parse(readFileSync(a["allow-hashes"], "utf8")); } catch { throw new Error("audit_invalid_allowlist"); }
-      if (!Array.isArray(hashes) || hashes.some((h) => typeof h !== "string")) throw new Error("audit_invalid_allowlist");
-      carnet = new Set(hashes);
-    }
+    const carnet = allowlist();
     if (cmd === "scrub") {
       console.log(JSON.stringify(await scrubHistory({ input: a.input!, output: a.output!, format: a.format as "json" | "jsonl" | undefined,
         maxRecordBytes: a["max-record-bytes"] === undefined ? undefined : Number(a["max-record-bytes"]), carnet })));
@@ -87,8 +88,10 @@ if (cmd === "scrub" || cmd === "profile") {
       if (!inputs || typeof inputs !== "object" || Array.isArray(inputs)) throw new Error("audit_invalid_inputs");
       if (!a["system-id"] || !a["use-case"]) throw new Error("audit_missing_argument");
       if (a["llm-call"] && !log.read().some((r) => r.kind === "llm-call" && r.id === a["llm-call"])) throw new Error("audit_unknown_llm_call");
-      const { decision, step } = await recordQdl(log, { systemId: a["system-id"], useCase: a["use-case"], llmCallId: a["llm-call"], input: readFileSync(a.inputs!, "utf8") }, program, inputs);
-      console.log(JSON.stringify({ decision: decision.id, status: step.qdl.status, ...(decision.output !== undefined && { outputs: decision.output }), ...(step.qdl.error && { error: step.qdl.error }) }));
+      const carnet = createInspectionProfile({ mode: "redact", carnet: allowlist() }).carnet;
+      const { decision, step } = await recordQdl(log, { systemId: a["system-id"], useCase: a["use-case"], llmCallId: a["llm-call"], input: readFileSync(a.inputs!, "utf8") }, program, inputs, carnet);
+      console.log(JSON.stringify({ decision: decision.id, status: step.qdl.status, ...(decision.output !== undefined && { outputs: decision.output }),
+        ...(step.qdl.error && { error: step.qdl.error }), ...(step.qdl.findings && { findings: step.qdl.findings }) }));
       process.exitCode = step.qdl.status === "completed" ? 0 : 1;
     } else if (cmd === "approve") {
       if (!a.decision || !a.reviewer) throw new Error("audit_missing_argument");
@@ -107,4 +110,4 @@ if (cmd === "scrub" || cmd === "profile") {
     console.error(code); process.exitCode = NOT_REPRODUCED.has(code) ? 1 : 2;
   }
 } else if (cmd === "report") console.log(report(log, a.from!, a.to!).md);
-else { console.error("usage: ai-audit serve|verify|anchor|report|stats|context [--session ID --output FILE]|keygen|profile|scrub [--input FILE --output FILE --format json|jsonl --max-record-bytes N]|decide --policy FILE --inputs FILE --system-id ID --use-case UC [--llm-call ID]|approve --decision ID --reviewer NAME --verdict approved|overridden|rejected [--note TEXT]|replay --decision ID [--allow-hashes FILE] [--config FILE] [--by key|model|hour] [--name N] [--log-content] [--anchors FILE] [--no-page-redaction] [--log ./audit.jsonl] [--mode redact|no-go|advisory] [--port 8787] [--from ISO --to ISO]"); process.exit(2); }
+else { console.error("usage: ai-audit serve|verify|anchor|report|stats|context [--session ID --output FILE]|keygen|profile|scrub [--input FILE --output FILE --format json|jsonl --max-record-bytes N]|decide --policy FILE --inputs FILE --system-id ID --use-case UC [--llm-call ID] [--allow-hashes FILE]|approve --decision ID --reviewer NAME --verdict approved|overridden|rejected [--note TEXT]|replay --decision ID [--allow-hashes FILE] [--config FILE] [--by key|model|hour] [--name N] [--log-content] [--anchors FILE] [--no-page-redaction] [--log ./audit.jsonl] [--mode redact|no-go|advisory] [--port 8787] [--from ISO --to ISO]"); process.exit(2); }

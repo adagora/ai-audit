@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mockUpstream, startProxy } from "./helpers.js";
+import { sha256 } from "../src/audit.js";
 
 const skip = Number(process.versions.node.split(".")[0]) < 22 ? "Quinelings SDK needs Node >= 22" : false;
 const cli = fileURLToPath(new URL("../src/cli.js", import.meta.url));
@@ -71,4 +72,23 @@ test("a refusal is recorded and replays as a refusal; usage errors write nothing
   writeFileSync(tampered, lines.join("\n") + "\n");
   const s = cliRun(tampered, "replay", "--decision", edited.refId);
   assert.equal(s.code, 1); assert.equal(s.err, "audit_qdl_source_invalid");
+});
+
+test("decide refuses inputs with personal data before running them, keeps only rule and path, and replay says not replayable", { skip }, async () => {
+  const sensitive = join(dir, "sensitive.json"), email = "jan.kowalski@example.com";
+  writeFileSync(sensitive, JSON.stringify({ minutes: 42, rate: 4.5, setup: 120, material: 85, llmPrice: 274, customer: email }));
+  const before = px.log.read().length;
+  const refused = decide(sensitive);
+  assert.equal(refused.code, 1, refused.err); assert.equal(refused.out.status, "refused");
+  assert.deepEqual(refused.out.error, { code: "audit-sensitive-input", path: "$.inputs.customer" });
+  assert.deepEqual(refused.out.findings, [{ rule: "pii-email", path: "$.inputs.customer" }]);
+  assert.equal(px.log.read().length, before + 2); assert.ok(!readFileSync(px.log.path, "utf8").includes(email));
+  const replay = run("replay", "--decision", refused.out.decision);
+  assert.equal(replay.code, 2); assert.equal(replay.err, "audit_qdl_not_replayable");
+  const allow = join(dir, "allow.json"), bad = join(dir, "bad-allow.json");
+  writeFileSync(allow, JSON.stringify([sha256(email)])); writeFileSync(bad, JSON.stringify(["not-a-hash"]));
+  const allowed = decide(sensitive, "--allow-hashes", allow);
+  assert.deepEqual(allowed.out.error, { code: "unknown-field", path: "$.customer" }); assert.equal(allowed.out.findings, undefined);
+  const invalid = decide(sensitive, "--allow-hashes", bad);
+  assert.equal(invalid.code, 2); assert.equal(invalid.err, "audit_invalid_allowlist");
 });

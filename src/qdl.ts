@@ -1,11 +1,12 @@
 import { AuditLog, canon, sha256, type Entry, type Rec } from "./audit.js";
+import { inspect, type Allowlist } from "./scan.js";
 
 export type QdlStatus = "completed" | "refused" | "failed";
 export interface QdlFault { code: string; path: string; nodeId?: string }
 export interface QdlStep {
-  status?: QdlStatus; inputs: Record<string, unknown>;
+  status?: QdlStatus; inputs?: Record<string, unknown>;
   sourceHash?: string; source?: string; intent?: unknown; intentHash?: string;
-  inputHash?: string; outputsHash?: string; error?: QdlFault;
+  inputHash?: string; outputsHash?: string; error?: QdlFault; findings?: { rule: string; path: string }[];
 }
 export type QdlRec = Rec & { qdl: QdlStep };
 export interface Program { intent?: unknown; source?: string }
@@ -28,8 +29,15 @@ function evaluate(s: any, refusal: (e: unknown) => boolean, artifact: any, input
     : { status: "failed", inputHash: r.result.inputHash, error: fault(occurrence?.diagnostic) };
 }
 
-export async function recordQdl(log: AuditLog, e: Omit<Entry, "output" | "step">, prog: Program, inputs: Record<string, unknown>): Promise<{ decision: Rec; step: QdlRec }> {
+export async function recordQdl(log: AuditLog, e: Omit<Entry, "output" | "step">, prog: Program, inputs: Record<string, unknown>, carnet?: Allowlist): Promise<{ decision: Rec; step: QdlRec }> {
   const { s, refusal } = await session();
+  const findings = inspect({ inputs, program: prog.source ?? prog.intent, params: e.params, sources: e.sources, model: e.model, prompt: e.prompt?.templateId }, carnet).findings;
+  if (findings.length) {
+    const decision = log.record({ systemId: e.systemId, useCase: e.useCase, llmCallId: e.llmCallId, input: e.input, output: undefined });
+    const step = log.append({ kind: "decision", id: decision.id + ":qdl", ts: decision.ts, refId: decision.id,
+      qdl: { status: "refused", error: { code: "audit-sensitive-input", path: findings[0].path }, findings: findings.map((f) => ({ rule: f.rule, path: f.path })) } }) as QdlRec;
+    return { decision, step };
+  }
   let artifact: any, outcome: Outcome | undefined;
   try { artifact = prog.source !== undefined ? s.recover({ source: prog.source }) : s.compile(prog.intent as any); }
   catch (err) { if (!refusal(err)) throw err; outcome = { status: "refused", error: fault(err) }; }
@@ -48,6 +56,7 @@ export async function replayQdl(log: AuditLog, id: string) {
   const r = (recs.find((x) => x.id === id && x.qdl) ?? recs.find((x) => x.refId === id && x.qdl)) as QdlRec | undefined;
   if (!r) throw new Error("audit_no_qdl_step");
   const q = r.qdl, logged = q.status ?? "completed";
+  if (q.inputs === undefined) throw new Error("audit_qdl_not_replayable");
   const { s, refusal } = await session();
   let artifact: any, outcome: Outcome | undefined;
   if (q.sourceHash !== undefined) {
@@ -58,7 +67,7 @@ export async function replayQdl(log: AuditLog, id: string) {
     try { artifact = q.source !== undefined ? s.recover({ source: q.source }) : s.compile(q.intent as any); }
     catch (e) { if (!refusal(e)) throw e; outcome = { status: "refused", error: fault(e) }; }
   }
-  outcome ??= evaluate(s, refusal, artifact, q.inputs, "replay");
+  outcome ??= evaluate(s, refusal, artifact, q.inputs!, "replay");
   const reproduced = outcome.status === logged && (logged === "completed"
     ? sha256(canon(outcome.outputs)) === q.outputsHash && outcome.inputHash === q.inputHash
     : logged === "failed" ? outcome.inputHash === q.inputHash && sameFault(outcome.error, q.error) : sameFault(outcome.error, q.error));

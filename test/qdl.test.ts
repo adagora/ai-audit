@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AuditLog, report } from "../src/audit.js";
+import { AuditLog, report, sha256 } from "../src/audit.js";
 
 const major = Number(process.versions.node.split(".")[0]);
 const skip = major < 22 ? "Quinelings SDK needs Node >= 22" : false;
@@ -75,4 +75,28 @@ test("llmCallId links the decision; approve and report treat the :qdl companion 
   const copy = new AuditLog(log.path + ".edited"); writeFileSync(copy.path, lines.join("\n") + "\n");
   assert.equal(copy.verifyChain().ok, false);
   assert.equal((await replayQdl(copy, decision.id)).reproduced, false);
+});
+
+test("secrets and personal data in inputs, program or params are refused before evaluation and never stored", { skip }, async () => {
+  const { recordQdl, replayQdl } = await import("../src/qdl.js");
+  const log = fresh();
+  const email = "jan.kowalski@example.com", key = "AKIA" + "IOSFODNN7EXAMPLQ";
+  const echo = { format: "qdl-intent", version: 1, name: "Echo contact", thought: "returns the routing contact",
+    inputs: [{ id: "contact", name: "contact", type: { kind: "string" } }], steps: [], outputs: ["contact"] };
+  const inInputs = await recordQdl(log, { ...entry, llmCallId: "llm-call-7" }, { intent: echo }, { contact: email });
+  assert.equal(inInputs.step.qdl.status, "refused"); assert.deepEqual(inInputs.step.qdl.error, { code: "audit-sensitive-input", path: "$.inputs.contact" });
+  assert.deepEqual(inInputs.step.qdl.findings, [{ rule: "pii-email", path: "$.inputs.contact" }]);
+  assert.deepEqual([inInputs.step.qdl.inputs, inInputs.step.qdl.intent, inInputs.decision.output, inInputs.decision.llmCallId], [undefined, undefined, undefined, "llm-call-7"]);
+  const inProgram = await recordQdl(log, entry, { intent: { ...quoteIntent, thought: `use ${key} to fetch rates` } }, quote);
+  assert.deepEqual(inProgram.step.qdl.findings, [{ rule: "aws-access-token", path: "$.program.thought" }]);
+  const inParams = await recordQdl(log, { ...entry, params: { customer: "PESEL 44051401359" } }, { intent: quoteIntent }, quote);
+  assert.deepEqual(inParams.step.qdl.findings, [{ rule: "pii-pesel", path: "$.params.customer" }]); assert.equal(inParams.decision.params, undefined);
+  const raw = readFileSync(log.path, "utf8");
+  for (const value of [email, key, "44051401359", "returns the routing contact"]) assert.ok(!raw.includes(value), value);
+  await assert.rejects(replayQdl(log, inInputs.decision.id), /audit_qdl_not_replayable/);
+  assert.deepEqual(report(log, "2000", "2100").qdl, { completed: 0, refused: 3, failed: 0 });
+  const allowed = await recordQdl(log, entry, { intent: echo }, { contact: email }, new Set([sha256(email)]));
+  assert.equal(allowed.step.qdl.status, "completed"); assert.deepEqual(allowed.decision.output, [email]);
+  assert.equal((await replayQdl(log, allowed.decision.id)).reproduced, true);
+  assert.deepEqual(log.verifyChain(), { ok: true });
 });
