@@ -2,11 +2,10 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { mockUpstream, startProxy } from "./helpers.js";
-import { work, SANDBOX_AVAILABLE } from "../src/attachments.js";
+import { mockUpstream, startProxy, NEEDS_BWRAP } from "./helpers.js";
+import { work } from "../src/attachments.js";
 import { metrics } from "../src/proxy.js";
 
-const NEEDS_BWRAP = SANDBOX_AVAILABLE || process.env.CI ? {} : { skip: "bwrap cannot create namespaces here; CI runs this" };
 const up = await mockUpstream();
 const imageRequest = { model: "gpt-4o-mini", messages: [{ role: "user", content: [{ type: "text", text: "what is this" }, { type: "image_url", image_url: { url: "data:image/png;base64,iVBORw0KGgo=" } }] }] };
 const post = (url: string, body: object) => fetch(`${url}/v1/chat/completions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -15,29 +14,31 @@ after(() => { up.close(); rmSync(privateDir, { recursive: true, force: true }); 
 
 test("without a usable sandbox an attachment is refused with 422 audit_sandbox_unavailable and never forwarded", async () => {
   const p = await startProxy(up.url, "redact", { sandboxAvailable: false });
-  const before = up.seen.length, counted = metrics.sandboxUnavailable.get();
-  const r = await post(p.url, imageRequest);
-  assert.equal(r.status, 422);
-  assert.equal((await r.json()).error.code, "audit_sandbox_unavailable");
-  assert.equal(up.seen.length, before);
-  assert.equal(metrics.sandboxUnavailable.get(), counted + 1);
-  const rec = p.log.read().at(-1) as any;
-  assert.equal(rec.error, "audit_sandbox_unavailable");
-  assert.equal(rec.decision.sandbox, "unavailable");
-  assert.equal((await fetch(`${p.url}/readyz`)).status, 503);
-  const text = await post(p.url, { model: "gpt-4o-mini", messages: [{ role: "user", content: "no attachment" }] });
-  assert.equal(text.status, 200);
-  p.close();
+  try {
+    const before = up.seen.length, counted = metrics.sandboxUnavailable.get();
+    const r = await post(p.url, imageRequest);
+    assert.equal(r.status, 422);
+    assert.equal((await r.json()).error.code, "audit_sandbox_unavailable");
+    assert.equal(up.seen.length, before);
+    assert.equal(metrics.sandboxUnavailable.get(), counted + 1);
+    const rec = p.log.read().at(-1) as any;
+    assert.equal(rec.error, "audit_sandbox_unavailable");
+    assert.equal(rec.decision.sandbox, "unavailable");
+    assert.equal((await fetch(`${p.url}/readyz`)).status, 503);
+    const text = await post(p.url, { model: "gpt-4o-mini", messages: [{ role: "user", content: "no attachment" }] });
+    assert.equal(text.status, 200);
+  } finally { p.close(); }
 });
 
 test("--unsafe-no-sandbox runs attachments unsandboxed, records it per request and raises the gauge", async () => {
   const p = await startProxy(up.url, "redact", { sandboxAvailable: false, unsafeNoSandbox: true });
-  const r = await post(p.url, imageRequest);
-  assert.notEqual((await r.json().catch(() => ({})))?.error?.code, "audit_sandbox_unavailable");
-  const rec = p.log.read().at(-1) as any;
-  assert.equal(rec.decision.sandbox, "disabled");
-  assert.match(metrics.sandboxDisabled.expose().join("\n"), /^ai_audit_sandbox_disabled 1$/m);
-  p.close();
+  try {
+    const r = await post(p.url, imageRequest);
+    assert.notEqual((await r.json().catch(() => ({})))?.error?.code, "audit_sandbox_unavailable");
+    const rec = p.log.read().at(-1) as any;
+    assert.equal(rec.decision.sandbox, "disabled");
+    assert.match(metrics.sandboxDisabled.expose().join("\n"), /^ai_audit_sandbox_disabled 1$/m);
+  } finally { p.close(); }
 });
 
 test("the worker environment never contains upstream keys, sandboxed or not", NEEDS_BWRAP, async () => {

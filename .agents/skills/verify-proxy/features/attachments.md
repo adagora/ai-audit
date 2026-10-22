@@ -6,4 +6,4 @@ Send an image_url, or an Anthropic `document` or `image` block.
 ## Driving it with drive.mjs
 `node drive.mjs attachments sandbox`. The remote URL and sandbox cases run everywhere; the PDF case needs the tools. A no-bwrap host cannot be simulated from outside, so `test/sandbox.test.ts` covers the 422 with `sandboxAvailable: false`.
 ## Gotchas
-Without tesseract, poppler-utils and python3-PIL, `/readyz` is 503 and the PDF scenario skips (it fails when `CI` is set). Inside Docker, bwrap needs extra capabilities (see the README).
+Without tesseract, poppler-utils, python3-PIL or prlimit (util-linux), `/readyz` is 503 and the PDF scenario skips (it fails when `CI` is set). Inside Docker, bwrap needs extra capabilities (see the README).

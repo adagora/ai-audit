@@ -19,7 +19,7 @@ const AWS = "AKIA" + "IOSFODNN7EXAMPLQ";
 const CLIENT_KEY = "aia-verify-client-key";
 const ADMIN_KEY = "aia-verify-admin-key";
 const UPSTREAM_KEY = "sk-verify-upstream-FAKE";
-const toolsOk = ["tesseract", "pdftotext", "pdfinfo", "pdftoppm", "python3"].every((c) => { try { execFileSync("which", [c], { stdio: "ignore" }); return true; } catch { return false; } });
+const toolsOk = ["prlimit", "tesseract", "pdftotext", "pdfinfo", "pdftoppm", "python3"].every((c) => { try { execFileSync("which", [c], { stdio: "ignore" }); return true; } catch { return false; } });
 
 const seen = [];
 const sse = (res, frames) => { res.writeHead(200, { "content-type": "text/event-stream" }); for (const f of frames) res.write(f); res.end(); };

@@ -22,7 +22,7 @@ Scenarios live in `drive.mjs`, one `scenario(name, fn)` each, and use only the u
 
 ## Evidence
 `~/.ai-audit-verify/<run-id>/results.json` (pass/fail/skip per scenario, details, repo HEAD, whether attachment tools exist) and `context-map.html`. Override the location with `VERIFY_PROXY_EVIDENCE`. Proof standards: assert both the client-visible result and the side effect (upstream body, log line, counter). Mocks only at the provider boundary. The exit code is 1 when any scenario fails.
-The PDF attachment scenario needs tesseract, poppler-utils and python3-PIL; without them it is reported as `skip` unless `CI` is set, in which case it runs and fails.
+The PDF attachment scenario needs tesseract, poppler-utils, python3-PIL and prlimit (util-linux); without them it is reported as `skip` unless `CI` is set, in which case it runs and fails.
 
 ## Cleanup
 The driver kills only the proxies it spawned and closes its mock. It deletes `scratch/` (logs, configs) unless `VERIFY_PROXY_KEEP_SCRATCH=1`, and keeps `results.json` and the HTML.

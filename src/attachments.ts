@@ -34,7 +34,8 @@ const probeSandbox = () => has("bwrap") && spawnSync("bwrap", [...sandboxMounts(
 export const SANDBOX_AVAILABLE = probeSandbox();
 export type SandboxState = "bwrap" | "unavailable" | "disabled";
 export const sandboxState = (available: boolean, unsafeNoSandbox: boolean): SandboxState => unsafeNoSandbox ? "disabled" : available ? "bwrap" : "unavailable";
-export const TOOLS_OK = ["tesseract", "pdftotext", "pdfinfo", "pdftoppm", "python3"].every(has);
+export const PRLIMIT_OK = has("prlimit");
+export const TOOLS_OK = PRLIMIT_OK && ["tesseract", "pdftotext", "pdfinfo", "pdftoppm", "python3"].every(has);
 const SUPPORTED = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "application/pdf"]);
 
 export interface Att { path: (string | number)[]; mime: string; b64: string; set: (b64: string) => void }

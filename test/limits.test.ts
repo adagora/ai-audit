@@ -2,13 +2,12 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { mockUpstream, startProxy, ATTACHMENT_TOOLS } from "./helpers.js";
+import { mockUpstream, startProxy, ATTACHMENT_TOOLS, NEEDS_BWRAP, NEEDS_PRLIMIT, SANDBOXED_ATTACHMENTS } from "./helpers.js";
 import { mkdtempSync, writeFileSync, symlinkSync, rmSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { work, readJobFiles, SANDBOX_AVAILABLE, WORKER_LIMITS, WORKER_OUTPUT_LIMIT, WORKER_WALL_CLOCK_MS, TOOL_ADDRESS_SPACE_LIMIT } from "../src/attachments.js";
+import { work, readJobFiles, WORKER_LIMITS, WORKER_OUTPUT_LIMIT, WORKER_WALL_CLOCK_MS, TOOL_ADDRESS_SPACE_LIMIT } from "../src/attachments.js";
 
-const NEEDS_BWRAP = SANDBOX_AVAILABLE || process.env.CI ? {} : { skip: "bwrap cannot create namespaces here; CI runs this" };
 const ROWS = { as: "Max address space", data: "Max data size", cpu: "Max cpu time", fsize: "Max file size", nofile: "Max open files" } as const;
 const limitsOf = (table: string) => Object.fromEntries(Object.entries(ROWS).map(([key, label]) => {
   const cells = table.split("\n").find((l) => l.startsWith(label))!.slice(label.length).trim().split(/\s+/);
@@ -29,7 +28,7 @@ test("worker: DATA 4 GiB (ADR 0003), CPU 90 s, FSIZE 64 MiB, NOFILE 128; tools: 
 });
 
 for (const sandbox of ["bwrap", "disabled"] as const)
-  test(`${sandbox}: soft and hard limits are set on the worker, inherited by native tools, which also get the address-space cap`, sandbox === "bwrap" ? NEEDS_BWRAP : {}, async () => {
+  test(`${sandbox}: soft and hard limits are set on the worker, inherited by native tools, which also get the address-space cap`, sandbox === "bwrap" ? NEEDS_BWRAP : NEEDS_PRLIMIT, async () => {
     const r = await work({ op: "check" }, undefined, sandbox);
     assert.equal(r.ok, true);
     assert.deepEqual(limitsOf(r.workerLimits), workerExpected);
@@ -43,29 +42,30 @@ test("the worker exits without output when its limits were not applied", () => {
   assert.equal(r.stdout, "");
 });
 
-test("native tool output above 16 MiB fails the tool; exactly 16 MiB passes", async () => {
+test("native tool output above 16 MiB fails the tool; exactly 16 MiB passes", NEEDS_PRLIMIT, async () => {
   assert.equal((await work({ op: "check", toolOutputBytes: WORKER_OUTPUT_LIMIT }, undefined, "disabled")).toolOutput, WORKER_OUTPUT_LIMIT);
   assert.equal((await work({ op: "check", toolOutputBytes: WORKER_OUTPUT_LIMIT + 1 }, undefined, "disabled")).toolOutput, "output_limit");
 });
 
-test("worker stdout above the cap kills the worker and fails", async () => {
+test("worker stdout above the cap kills the worker and fails", NEEDS_PRLIMIT, async () => {
   assert.deepEqual(await work({ op: "check", stdoutBytes: WORKER_OUTPUT_LIMIT + 1 }, undefined, "disabled"), { ok: false, error: "worker_output_limit" });
 });
 
-test("the wall clock kills a worker that runs too long", async () => {
+test("the wall clock kills a worker that runs too long", NEEDS_PRLIMIT, async () => {
   assert.deepEqual(await work({ op: "check" }, 1, "disabled"), { ok: false, error: "attachment_timeout" });
 });
 
-test("an attachment whose worker output exceeds the cap is refused with 422 and never forwarded", ATTACHMENT_TOOLS, async () => {
+test("an attachment whose worker output exceeds the cap is refused with 422 and never forwarded", SANDBOXED_ATTACHMENTS, async () => {
   const p = await startProxy(up.url, "redact", { workerOutputLimit: 64 });
-  const before = up.seen.length;
-  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
-  const r = await fetch(`${p.url}/v1/chat/completions`, { method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ model: "gpt-4o-mini", messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: `data:image/png;base64,${png}` } }] }] }) });
-  assert.equal(r.status, 422);
-  assert.equal((await r.json()).error.code, "audit_inspection_failed");
-  assert.equal(up.seen.length, before);
-  p.close();
+  try {
+    const before = up.seen.length;
+    const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const r = await fetch(`${p.url}/v1/chat/completions`, { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "gpt-4o-mini", messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: `data:image/png;base64,${png}` } }] }] }) });
+    assert.equal(r.status, 422);
+    assert.equal((await r.json()).error.code, "audit_inspection_failed");
+    assert.equal(up.seen.length, before);
+  } finally { p.close(); }
 });
 
 const noisePdf = () => spawnSync("python3", ["-c", `import sys,io,os
@@ -74,7 +74,7 @@ pages=[Image.frombytes("RGB",(935,1210),os.urandom(935*1210*3)) for _ in range(7
 b=io.BytesIO(); pages[0].save(b,format="PDF",resolution=110,save_all=True,append_images=pages[1:]); sys.stdout.buffer.write(b.getvalue())`], { maxBuffer: 256 * 1024 * 1024 }).stdout;
 
 for (const sandbox of ["bwrap", "disabled"] as const)
-  test(`${sandbox}: rendered pages beyond the 16 MiB stdout cap come back as job files, not stdout`, sandbox === "bwrap" ? { ...ATTACHMENT_TOOLS, ...NEEDS_BWRAP } : ATTACHMENT_TOOLS, async () => {
+  test(`${sandbox}: rendered pages beyond the 16 MiB stdout cap come back as job files, not stdout`, sandbox === "bwrap" ? SANDBOXED_ATTACHMENTS : ATTACHMENT_TOOLS, async () => {
     const r = await work({ op: "extract", mime: "application/pdf", raster: true }, undefined, sandbox, undefined, [{ name: "in", data: noisePdf() }]);
     assert.equal(r.ok, true);
     const pngs = (r.units as any[]).filter((u) => u.png).map((u) => Buffer.from(u.png, "base64"));

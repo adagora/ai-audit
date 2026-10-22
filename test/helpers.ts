@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { AuditLog } from "../src/audit.js";
-import { TOOLS_OK } from "../src/attachments.js";
+import { PRLIMIT_OK, SANDBOX_AVAILABLE, TOOLS_OK } from "../src/attachments.js";
 import { createProxy } from "../src/proxy.js";
 import type { Mode } from "../src/scan.js";
 export const AWS = "AKIA" + "IOSFODNN7EXAMPLQ";
@@ -64,4 +64,7 @@ export function makePdf(lines: string[]): Buffer {
   pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${off.map((o) => String(o).padStart(10, "0") + " 00000 n \n").join("")}trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${x}\n%%EOF\n`;
   return Buffer.from(pdf, "latin1");
 }
-export const ATTACHMENT_TOOLS = TOOLS_OK || process.env.CI ? {} : { skip: "attachment tools missing (tesseract-ocr, poppler-utils, python3-pil); CI installs them and never skips" };
+export const ATTACHMENT_TOOLS = TOOLS_OK || process.env.CI ? {} : { skip: "attachment tools missing (tesseract-ocr, poppler-utils, python3-pil, prlimit from util-linux); CI installs them and never skips" };
+export const NEEDS_PRLIMIT = PRLIMIT_OK || process.env.CI ? {} : { skip: "prlimit (util-linux, Linux only) is missing, so no worker can start; CI runs this" };
+export const NEEDS_BWRAP = SANDBOX_AVAILABLE || process.env.CI ? {} : { skip: "bwrap cannot create namespaces here; CI runs this" };
+export const SANDBOXED_ATTACHMENTS = { ...ATTACHMENT_TOOLS, ...NEEDS_BWRAP };
