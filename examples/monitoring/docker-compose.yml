@@ -1,7 +1,7 @@
 name: ai-audit-monitoring
 services:
   mock-upstream:
-    image: node:26.10.0-slim
+    image: node:26.12.1-slim
     command: ["node", "/srv/mock-upstream.mjs"]
     volumes: ["./mock-upstream.mjs:/srv/mock-upstream.mjs:ro"]
   proxy:

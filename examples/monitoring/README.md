@@ -5,7 +5,7 @@ VictoriaMetrics scrapes the proxy's `/metrics`. Grafana shows a dashboard and ev
 | Service | Image | URL |
 |---|---|---|
 | proxy | built from `../../Dockerfile` | http://127.0.0.1:8787 |
-| mock-upstream | `node:26.10.0-slim` | internal only |
+| mock-upstream | `node:26.12.1-slim` | internal only |
 | victoriametrics | `victoriametrics/victoria-metrics:v1.154.1` | http://127.0.0.1:8428 |
 | grafana | `grafana/grafana:13.2.4` | http://127.0.0.1:3000 |
 | ntfy | `binwiederhier/ntfy:v2.32.0` | http://127.0.0.1:8080 |
