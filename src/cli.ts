@@ -3,6 +3,7 @@ import { parseArgs } from "node:util";
 import { readFileSync, writeFileSync } from "node:fs";
 import { AuditLog, AuditLogUnavailable, anchor, report, sha256, stats, verifyAnchors, type Review } from "./audit.js";
 import { recordQdl, replayQdl } from "./qdl.js";
+import { policyHistories, withChanges } from "./policies.js";
 import { randomBytes } from "node:crypto";
 import { SANDBOX_AVAILABLE, TOOLS_OK, sandboxState } from "./attachments.js";
 import { createProxy } from "./proxy.js";
@@ -78,7 +79,7 @@ if (cmd === "scrub" || cmd === "profile") {
       if (a.output) writeFileSync(a.output, html); else process.stdout.write(html);
     } catch { console.error("audit_unknown_session"); process.exitCode = 2; }
   }
-} else if (cmd === "decide" || cmd === "approve" || cmd === "replay") {
+} else if (cmd === "decide" || cmd === "approve" || cmd === "replay" || cmd === "policies") {
   const json = (file: string | undefined, code: string) => { try { return JSON.parse(readFileSync(file!, "utf8")); } catch { throw new Error(code); } };
   try {
     if (cmd === "decide") {
@@ -98,11 +99,14 @@ if (cmd === "scrub" || cmd === "profile") {
       if (!["approved", "overridden", "rejected"].includes(a.verdict ?? "")) throw new Error("audit_invalid_verdict");
       const review = log.approve(a.decision, a.reviewer, a.verdict as Review["decision"], a.note);
       console.log(JSON.stringify({ review: review.id, decision: a.decision, verdict: a.verdict }));
-    } else {
+    } else if (cmd === "replay") {
       if (!a.decision) throw new Error("audit_missing_argument");
       const r = await replayQdl(log, a.decision);
       console.log(JSON.stringify({ decision: r.decision, reproduced: r.reproduced, status: r.status, ...(r.output !== undefined && { outputs: r.output }), ...(r.error && { error: r.error }) }));
       process.exitCode = r.reproduced ? 0 : 1;
+    } else {
+      const records = log.read();
+      for (const h of await withChanges(policyHistories(records, { systemId: a["system-id"], useCase: a["use-case"] }), records)) console.log(JSON.stringify(h));
     }
   } catch (cause) {
     const code = cause instanceof AuditLogUnavailable ? "audit_log_unavailable"
@@ -110,4 +114,4 @@ if (cmd === "scrub" || cmd === "profile") {
     console.error(code); process.exitCode = NOT_REPRODUCED.has(code) ? 1 : 2;
   }
 } else if (cmd === "report") console.log(report(log, a.from!, a.to!).md);
-else { console.error("usage: ai-audit serve|verify|anchor|report|stats|context [--session ID --output FILE]|keygen|profile|scrub [--input FILE --output FILE --format json|jsonl --max-record-bytes N]|decide --policy FILE --inputs FILE --system-id ID --use-case UC [--llm-call ID] [--allow-hashes FILE]|approve --decision ID --reviewer NAME --verdict approved|overridden|rejected [--note TEXT]|replay --decision ID [--allow-hashes FILE] [--config FILE] [--by key|model|hour] [--name N] [--log-content] [--anchors FILE] [--no-page-redaction] [--log ./audit.jsonl] [--mode redact|no-go|advisory] [--port 8787] [--from ISO --to ISO]"); process.exit(2); }
+else { console.error("usage: ai-audit serve|verify|anchor|report|stats|context [--session ID --output FILE]|keygen|profile|scrub [--input FILE --output FILE --format json|jsonl --max-record-bytes N]|decide --policy FILE --inputs FILE --system-id ID --use-case UC [--llm-call ID] [--allow-hashes FILE]|approve --decision ID --reviewer NAME --verdict approved|overridden|rejected [--note TEXT]|replay --decision ID|policies [--system-id ID] [--use-case UC] [--allow-hashes FILE] [--config FILE] [--by key|model|hour] [--name N] [--log-content] [--anchors FILE] [--no-page-redaction] [--log ./audit.jsonl] [--mode redact|no-go|advisory] [--port 8787] [--from ISO --to ISO]"); process.exit(2); }

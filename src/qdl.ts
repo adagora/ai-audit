@@ -16,11 +16,12 @@ const fault = (e: any): QdlFault => ({ code: String(e?.code ?? "failed"), path: 
 const sameFault = (a?: QdlFault, b?: QdlFault) => a?.code === b?.code && a?.path === b?.path;
 
 const storedPrograms = new WeakMap<AuditLog, Set<string>>();
-function storeProgram(log: AuditLog, artifact: { id: string; source: string }) {
+function storeProgram(log: AuditLog, artifact: { id: string; source: string; payload?: { name?: unknown } }) {
   let known = storedPrograms.get(log);
   if (!known) { known = new Set(log.read().filter((r) => r.kind === "program").map((r) => r.id)); storedPrograms.set(log, known); }
   if (known.has(artifact.id)) return;
-  log.append({ kind: "program", id: artifact.id, ts: new Date().toISOString(), source: artifact.source });
+  const name = artifact.payload?.name;
+  log.append({ kind: "program", id: artifact.id, ts: new Date().toISOString(), ...(typeof name === "string" && { name }), source: artifact.source });
   known.add(artifact.id);
 }
 

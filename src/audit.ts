@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { accessSync, appendFileSync, closeSync, constants, existsSync, fstatSync, openSync, readFileSync, readSync, statSync, unlinkSync, writeSync } from "node:fs";
 import { dirname } from "node:path";
 import vm from "node:vm";
+import { policyHistories } from "./policies.js";
 
 export const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 const GENESIS = "0".repeat(64);
@@ -159,6 +160,7 @@ export function report(log: AuditLog, from: string, to: string) {
   const dec = all.filter((r) => r.kind === "decision" && !r.qdl && inRange(r.ts));
   const steps = all.filter((r) => r.qdl && inRange(r.ts)) as any[], stepRefs = new Set(steps.map((s) => s.refId));
   const qdl = { completed: 0, refused: 0, failed: 0 };
+  const policies = policyHistories(all.filter((r) => r.kind === "program" || inRange(r.ts)));
   steps.forEach((s) => qdl[(s.qdl.status ?? "completed") as keyof typeof qdl]++);
   const ids = new Set(dec.map((d) => d.id));
   const rev = all.filter((r) => r.kind === "review" && ids.has(r.refId!));
@@ -181,6 +183,8 @@ export function report(log: AuditLog, from: string, to: string) {
     "| Metryka | Wartość |", "|---|---|",
     ...Object.entries(stats).map(([k, x]) => `| ${k} | ${x} |`), "",
     ...(steps.length ? ["## Kroki QDL", "| status | liczba |", "|---|---|", ...Object.entries(qdl).map(([k, x]) => `| ${k} | ${x} |`), ""] : []),
+    ...(policies.length ? ["## Wersje polityk QDL", ...policies.flatMap((p) => [`### ${p.systemId} / ${p.useCase}`,
+      ...p.versions.map((v) => `- v${v.version}${v.current ? " (aktualna)" : ""} ${v.sourceHash.slice(0, 15)}…${v.name ? ` „${v.name}”` : ""}: decyzje ${v.decisions}, ${v.firstUsed} – ${v.lastUsed}`)]), ""] : []),
     "## Decyzje według systemu", ...Object.entries(dec.reduce<Record<string, number>>((a, d) => ((a[`${d.systemId} / ${d.useCase}`] = (a[`${d.systemId} / ${d.useCase}`] ?? 0) + 1), a), {})).map(([k, x]) => `- ${k}: ${x}`), "",
     "## Cytowane źródła", ...(src.size ? [...src].map(([k, x]) => `- ${k}: ${x}`) : ["- brak"]), "",
     "## Modele", ...[...new Set(dec.filter((d) => d.model).map((d) => `${d.model!.name}@${d.model!.version}`))].map((m) => `- ${m}`), "",
@@ -192,7 +196,7 @@ export function report(log: AuditLog, from: string, to: string) {
     ...(llm.withQuinelings ? ["### Quinelings w ruchu (tylko hashe, ADR 0024)", ...count(calls.flatMap((c) => (c.quinelings ?? []).map((e: any) => `${e.where} ${e.op}${e.status ? ` ${e.status}` : ""}${e.error ? ` error ${e.error.code}` : ""}`))), ""] : []),
     "_Raport generowany automatycznie z dziennika. Nie stanowi porady prawnej._",
   ].join("\n");
-  return { md, stats, llm, qdl };
+  return { md, stats, llm, qdl, policies };
 }
 
 export function anchor(log: AuditLog, anchorsPath: string, now = new Date().toISOString()) {

@@ -98,7 +98,7 @@ Proxy overhead, measured (`npm run bench:overhead`, loopback mock, Node 22, 3 ru
 
 ## Deterministic decisions with Quinelings (optional, Node ≥ 22)
 **TL;DR: where Quinelings helps this project**
-- **Proves why a decision was made, long after.** The log carries the decision program itself. `ai-audit replay` rebuilds it from the log alone and recomputes the result. The proxy proves what the AI said; the Quineling proves what was decided ([DESIGN.md](DESIGN.md), AI Act Art. 12 and 14).
+- **Proves why a decision was made, long after.** The log carries the decision program itself. `ai-audit replay` rebuilds it from the log alone and recomputes the result, and `ai-audit policies` shows which policy version decided and what changed since. The proxy proves what the AI said; the Quineling proves what was decided ([DESIGN.md](DESIGN.md), AI Act Art. 12 and 14).
 - **Catches LLM mistakes in numbers and rules.** The LLM proposes, a fixed policy decides, a person approves. In the example below the LLM quotes 274 PLN, the policy computes 394 PLN, and the quote goes to review.
 - **Runs logic an LLM wrote, safely.** A program always stops, cannot read files or the network, and is refused if it invents an operation or mixes up units. The built-in `replay()` runs JavaScript in `node:vm`, which is only safe for trusted code.
 - **Keeps secrets out of the evidence.** Inputs and programs are checked with the proxy's rules before anything runs; a customer e-mail or an API key stops the decision instead of landing in the log.
@@ -211,6 +211,18 @@ Each command prints one JSON line:
 Exit codes: `0` completed or reproduced; `1` recorded but refused or failed, or not reproduced; `2` nothing written (bad arguments, unknown id, SDK missing). A refusal is still a record: inputs with `minutes: -5` print `{"decision":"…","status":"refused","error":{"code":"refinement","path":"$.bindings.minutes"}}` and exit 1, and `replay` later reproduces the refusal. `ai-audit report` lists QDL outcomes (completed, refused, failed) next to the decision counts.
 
 Before anything runs, the inputs, the program, `params`, `sources` and `model` are checked with the same rules and allowlist as the proxy ([ADR 0025](docs/adr/0025-scan-decision-inputs.md)). Replay needs exact values, so nothing is masked: a finding stops the decision and only a content-free refusal is recorded. Inputs with a `customer` e-mail print `{"decision":"…","status":"refused","error":{"code":"audit-sensitive-input","path":"$.inputs.customer"},"findings":[{"rule":"pii-email","path":"$.inputs.customer"}]}` and exit 1; the log keeps the rule and the path, not the address, and `replay` exits 2 with `audit_qdl_not_replayable`. Exempt an exact value you know is safe with `--allow-hashes FILE` (a JSON array of SHA-256 hashes). Text values and keys are checked, numbers are not, and names are not detected, so this is a check, not anonymisation.
+
+### Policy versions
+Change a policy and its program gets a new `sourceHash`. `ai-audit policies [--system-id ID] [--use-case UC]` lists, per use case, every version in order of first use and exactly what changed against the previous one ([ADR 0027](docs/adr/0027-policy-versions-per-use-case.md)). After a decision with the example policy, one with a copy whose floor is 160 PLN and tolerance 3%, and one with the example policy again (shortened):
+```
+{"systemId":"cad-quote","useCase":"machining-quote","versions":[
+  {"version":1,"sourceHash":"ql_283f225a…","name":"CAD machining quote policy v1","decisions":2,"current":true,…},
+  {"version":2,"sourceHash":"ql_0ece9248…","name":"CAD machining quote policy v2","decisions":1,"current":false,…,
+   "changes":[{"path":"name","from":"CAD machining quote policy v1","to":"CAD machining quote policy v2"},
+              {"path":"nodes.floor.params.value","from":150,"to":160},
+              {"path":"nodes.tolerance.params.value","from":0.05,"to":0.03}]}]}
+```
+Going back to v1 does not create a v3: v1 is `current` again and its `lastUsed` moves. Versions belong to a use case, not to a file name or the policy's `name`. `report` lists them as well, without the changes; `policies` rebuilds the programs to compute `changes`, so it needs the SDK.
 
 ### Agents running Quinelings themselves
 When an agent uses the Quinelings MCP server (tools `quineling_v1_*`, often prefixed by the client, such as `mcp__quinelings__quineling_v1_run`), its tool calls and the tool results pass through the proxy. The `llm-call` record then lists what happened, as hashes and statuses only ([ADR 0024](docs/adr/0024-observe-quinelings-in-traffic.md)). From a real agent run, the request that carried the compile result and asked for a run:

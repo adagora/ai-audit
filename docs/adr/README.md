@@ -34,3 +34,4 @@ Format: Nygard (Status, Context, Decision, Consequences), at most ~40 lines, fil
 - [24. Quinelings activity in LLM traffic is observed as identity hashes](0024-observe-quinelings-in-traffic.md)
 - [25. Decision inputs and programs are scanned before they are stored](0025-scan-decision-inputs.md)
 - [26. Each QDL program is stored once per log](0026-store-each-program-once.md)
+- [27. Policy versions are derived per use case from the log](0027-policy-versions-per-use-case.md)
