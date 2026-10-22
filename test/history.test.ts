@@ -1,6 +1,6 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync, readdirSync, statSync, symlinkSync, linkSync, rmSync, appendFileSync, watch } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, readdirSync, statSync, symlinkSync, linkSync, rmSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -109,12 +109,15 @@ test("chained audit records, including JSON arrays, are refused and anchors stil
 test("source edits during a scrub abort publication", async () => {
   const dir = fresh(), input = join(dir, "h.jsonl"), output = join(dir, "c.jsonl");
   writeFileSync(input, (JSON.stringify({ text: "ordinary content" }) + "\n").repeat(1000));
-  let edited = false;
-  const watcher = watch(dir, (_, filename) => {
-    if (!edited && filename?.startsWith(".ai-audit-scrub-")) { edited = true; appendFileSync(input, '{"new":"content"}\n'); }
-  });
+  let edited = false, done = false;
+  const poll = () => {
+    if (done) return;
+    if (readdirSync(dir).some((f) => f.startsWith(".ai-audit-scrub-"))) { edited = true; appendFileSync(input, '{"new":"content"}\n'); return; }
+    setImmediate(poll);
+  };
+  setImmediate(poll);
   try { await assert.rejects(scrubHistory({ input, output }), /scrub_source_changed/); assert.ok(edited); }
-  finally { watcher.close(); }
+  finally { done = true; }
   assert.ok(!readdirSync(dir).includes("c.jsonl"));
 });
 
