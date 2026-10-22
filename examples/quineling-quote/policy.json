@@ -1,0 +1,34 @@
+{
+  "format": "qdl-intent",
+  "version": 1,
+  "name": "CAD machining quote policy v1",
+  "thought": "Price from CAM minutes, shop rate, setup and material with a 150 PLN floor; auto-approve only quotes up to 1000 PLN where the LLM's own price is within 5%, otherwise route to human review.",
+  "inputs": [
+    { "id": "minutes", "name": "minutes", "type": { "kind": "number", "unit": "min", "min": 0 } },
+    { "id": "rate", "name": "rate", "type": { "kind": "number", "unit": "PLN*min^-1", "min": 0 } },
+    { "id": "setup", "name": "setup", "type": { "kind": "number", "unit": "PLN", "min": 0 } },
+    { "id": "material", "name": "material", "type": { "kind": "number", "unit": "PLN", "min": 0 } },
+    { "id": "llmPrice", "name": "llmPrice", "type": { "kind": "number", "unit": "PLN", "min": 0 } },
+    { "id": "floor", "value": 150, "type": { "kind": "number", "unit": "PLN", "min": 0 } },
+    { "id": "reviewAbove", "value": 1000, "type": { "kind": "number", "unit": "PLN", "min": 0 } },
+    { "id": "tolerance", "value": 0.05, "type": { "kind": "number", "unit": "one", "min": 0 } },
+    { "id": "no", "value": false, "type": { "kind": "boolean" } }
+  ],
+  "steps": [
+    { "id": "machining", "op": "arithmetic", "inputs": ["minutes", "rate"], "params": { "kind": "mul" } },
+    { "id": "withSetup", "op": "arithmetic", "inputs": ["machining", "setup"], "params": { "kind": "add" } },
+    { "id": "cost", "op": "arithmetic", "inputs": ["withSetup", "material"], "params": { "kind": "add" } },
+    { "id": "price", "op": "arithmetic", "inputs": ["cost", "floor"], "params": { "kind": "max" } },
+    { "id": "hi", "op": "arithmetic", "inputs": ["price", "llmPrice"], "params": { "kind": "max" } },
+    { "id": "lo", "op": "arithmetic", "inputs": ["price", "llmPrice"], "params": { "kind": "min" } },
+    { "id": "gap", "op": "arithmetic", "inputs": ["hi", "lo"], "params": { "kind": "sub" } },
+    { "id": "allowed", "op": "arithmetic", "inputs": ["price", "tolerance"], "params": { "kind": "mul" } },
+    { "id": "llmAgrees", "op": "compareValues", "inputs": ["gap", "allowed"], "params": { "operator": "lte" } },
+    { "id": "small", "op": "compareValues", "inputs": ["price", "reviewAbove"], "params": { "operator": "lte" } },
+    { "id": "autoOk", "op": "choose", "inputs": ["small", "llmAgrees", "no"], "params": {} },
+    { "id": "needsReview", "op": "compare", "inputs": ["autoOk"], "params": { "operator": "eq", "value": false } },
+    { "id": "approve", "op": "action", "inputs": ["autoOk", "price"], "params": { "allowed": true, "action": "auto-approve-quote" } },
+    { "id": "review", "op": "action", "inputs": ["needsReview", "price"], "params": { "allowed": true, "action": "route-to-human-review" } }
+  ],
+  "outputs": ["price", "llmAgrees", "autoOk", "approve", "review"]
+}

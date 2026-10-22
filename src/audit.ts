@@ -12,7 +12,7 @@ export class AuditLogUnavailable extends Error { constructor(reason: string) { s
 export interface Step { source: string; input: unknown; output: unknown }
 export interface Review { reviewer: string; decision: "approved" | "overridden" | "rejected"; note?: string; at: string }
 export interface Entry {
-  systemId: string; useCase: string;
+  systemId: string; useCase: string; llmCallId?: string;
   input: string; storeRedactedInput?: boolean;
   sources?: { doc: string; page?: number }[];
   model?: { name: string; version: string };
@@ -23,7 +23,7 @@ export interface Entry {
 }
 export interface Rec {
   kind: "decision" | "review" | "llm-call"; id: string; ts: string; refId?: string;
-  systemId?: string; useCase?: string; inputHash?: string; redactedInput?: string;
+  systemId?: string; useCase?: string; llmCallId?: string; inputHash?: string; redactedInput?: string;
   sources?: { doc: string; page?: number }[]; model?: { name: string; version: string };
   prompt?: { templateId: string; hash: string }; params?: Record<string, unknown>; output?: unknown;
   step?: { sourceHash: string; input: unknown; outputHash: string };
@@ -99,7 +99,7 @@ export class AuditLog {
       step = { sourceHash, input: e.step.input, outputHash: sha256(canon(e.step.output)) };
     }
     return this.append({
-      kind: "decision", id: randomUUID(), ts: this.now(), systemId: e.systemId, useCase: e.useCase,
+      kind: "decision", id: randomUUID(), ts: this.now(), systemId: e.systemId, useCase: e.useCase, llmCallId: e.llmCallId,
       inputHash: sha256(e.input), redactedInput: e.storeRedactedInput ? redact(e.input) : undefined,
       sources: e.sources, model: e.model,
       prompt: e.prompt && { templateId: e.prompt.templateId, hash: sha256(e.prompt.template) },
@@ -108,7 +108,7 @@ export class AuditLog {
   }
 
   approve(refId: string, reviewer: string, decision: Review["decision"], note?: string): Rec {
-    if (!this.read().some((r) => r.kind === "decision" && r.id === refId)) throw new Error(`unknown decision ${refId}`);
+    if (!this.read().some((r) => r.kind === "decision" && r.id === refId && !r.qdl)) throw new Error("audit_unknown_decision");
     return this.append({ kind: "review", id: randomUUID(), ts: this.now(), refId, review: { reviewer, decision, note, at: this.now() } });
   }
 
@@ -156,7 +156,10 @@ export function tokenTotals(calls: any[]) {
 export function report(log: AuditLog, from: string, to: string) {
   const all = log.read();
   const inRange = (ts: string) => ts >= from && ts < to;
-  const dec = all.filter((r) => r.kind === "decision" && inRange(r.ts));
+  const dec = all.filter((r) => r.kind === "decision" && !r.qdl && inRange(r.ts));
+  const steps = all.filter((r) => r.qdl && inRange(r.ts)) as any[], stepRefs = new Set(steps.map((s) => s.refId));
+  const qdl = { completed: 0, refused: 0, failed: 0 };
+  steps.forEach((s) => qdl[(s.qdl.status ?? "completed") as keyof typeof qdl]++);
   const ids = new Set(dec.map((d) => d.id));
   const rev = all.filter((r) => r.kind === "review" && ids.has(r.refId!));
   const last = new Map<string, Review>(); rev.forEach((r) => last.set(r.refId!, r.review!));
@@ -165,7 +168,7 @@ export function report(log: AuditLog, from: string, to: string) {
   dec.forEach((d) => d.sources?.forEach((s) => { const k = `${s.doc}${s.page ? ` s.${s.page}` : ""}`; src.set(k, (src.get(k) ?? 0) + 1); }));
   const v = log.verifyChain();
   const stats = { decisions: dec.length, reviewed: last.size, unreviewed: dec.length - last.size, overridden,
-    overrideRatePct: last.size ? Math.round((overridden / last.size) * 1000) / 10 : 0, withReplayableStep: dec.filter((d) => d.step).length };
+    overrideRatePct: last.size ? Math.round((overridden / last.size) * 1000) / 10 : 0, withReplayableStep: dec.filter((d) => d.step || stepRefs.has(d.id)).length };
   const calls = all.filter((r) => r.kind === "llm-call" && inRange(r.ts)) as any[];
   const llm = { calls: calls.length, blocked: calls.filter((c) => c.decision.action === "block").length,
     redacted: calls.filter((c) => c.decision.action === "forward-redacted").length,
@@ -177,6 +180,7 @@ export function report(log: AuditLog, from: string, to: string) {
     `Integralność łańcucha: ${v.ok ? "OK ✅" : `NARUSZONA ❌ (linia ${v.badLine}: ${v.reason})`}`, "",
     "| Metryka | Wartość |", "|---|---|",
     ...Object.entries(stats).map(([k, x]) => `| ${k} | ${x} |`), "",
+    ...(steps.length ? ["## Kroki QDL", "| status | liczba |", "|---|---|", ...Object.entries(qdl).map(([k, x]) => `| ${k} | ${x} |`), ""] : []),
     "## Decyzje według systemu", ...Object.entries(dec.reduce<Record<string, number>>((a, d) => ((a[`${d.systemId} / ${d.useCase}`] = (a[`${d.systemId} / ${d.useCase}`] ?? 0) + 1), a), {})).map(([k, x]) => `- ${k}: ${x}`), "",
     "## Cytowane źródła", ...(src.size ? [...src].map(([k, x]) => `- ${k}: ${x}`) : ["- brak"]), "",
     "## Modele", ...[...new Set(dec.filter((d) => d.model).map((d) => `${d.model!.name}@${d.model!.version}`))].map((m) => `- ${m}`), "",
@@ -187,7 +191,7 @@ export function report(log: AuditLog, from: string, to: string) {
     "### Sygnały prompt injection (advisory, tylko ID)", ...count(calls.flatMap((c) => (c.decision.signals ?? []).map((f: any) => f.rule))), "",
     "_Raport generowany automatycznie z dziennika. Nie stanowi porady prawnej._",
   ].join("\n");
-  return { md, stats, llm };
+  return { md, stats, llm, qdl };
 }
 
 export function anchor(log: AuditLog, anchorsPath: string, now = new Date().toISOString()) {

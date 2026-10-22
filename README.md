@@ -59,7 +59,7 @@ stateDiagram-v2
 `npm run build` compiles with TypeScript (`tsc`); tests, demos and benchmarks use that output. `npm run build:fast` uses the pinned experimental [tsrs](https://github.com/oxc-project/tsrs) Rust compiler instead. It is about 15x faster, for local iteration. It needs `--skipLibCheck` because tsrs reports TS5115 for circular types in Zod dependency declarations.
 
 ## Log tools
-`ai-audit verify [--anchors a.jsonl]` checks the chain (with anchors it also catches a swapped or truncated file) · `ai-audit anchor --anchors a.jsonl` (run daily, keep the anchors file somewhere else) · `ai-audit report --from 2026-10-01 --to 2026-11-01`.
+`ai-audit verify [--anchors a.jsonl]` checks the chain (with anchors it also catches a swapped or truncated file) · `ai-audit anchor --anchors a.jsonl` (run daily, keep the anchors file somewhere else) · `ai-audit report --from 2026-10-01 --to 2026-11-01` · `ai-audit decide|approve|replay` for deterministic decisions (see Quinelings below).
 Gateway: `ai-audit keygen --name agent` creates a virtual key (only its hash goes in `--config`, together with allowed `models`/`providers`). Response content: by default the log keeps only `outputHash` and tool-call `argsHash`; a key with `"logContent": true` (agents/services, `keygen --log-content`) also keeps the redacted output and tool args, e.g. `{"keys":[{"name":"quote-agent","sha256":"…","models":["*"],"logContent":true}]}`. Each line records `content: "hash"|"redacted"` ([ADR 0011](docs/adr/0011-response-content-per-key.md)). Real keys live in `AI_AUDIT_UPSTREAM_OPENAI_KEY` / `_ANTHROPIC_KEY`, which are only set in the proxy's environment. Config `aliases` (`{"fast":{"model":"gpt-4o-mini","upstream":"…"}}`) switch model or upstream without changing the client. `ai-audit stats --by key|model|hour`, or `GET /audit/stats?by=…` with `x-admin-key` (`AI_AUDIT_ADMIN_KEY`), shows tokens, cached tokens, latency and errors. A call whose provider reported no usage counts in `unknownUsage` (per field: `unknownInputUsage`/`unknownOutputUsage`), never as 0, and `tokensComplete: false` marks totals as a lower bound ([ADR 0012](docs/adr/0012-unknown-usage-never-zero.md)). OpenAI chat streams omit usage unless the client sends `"stream_options": {"include_usage": true}`; the proxy never adds it (ADR 0009), so set it in your clients. Also `/healthz`, `/readyz` and `/metrics`.
 
 Context composition: each `llm-call` record has `context.bytes` per segment (`system`, `tools`, `user`, `assistant`, `toolResults`, `attachments`, `other`). When the provider reported prompt tokens, `context.tokens` splits that total across the segments by size (`tokenBasis: "provider-scaled"`). Otherwise it stays `"unknown"`. Sizes only, never content ([ADR 0017](docs/adr/0017-context-composition-metadata.md)).
@@ -97,9 +97,14 @@ Pointer compression, measured (`node bench/memory.mjs`, 5 runs each): JS heap �
 Proxy overhead, measured (`npm run bench:overhead`, loopback mock, Node 22, 3 runs): **+0.6–0.7 ms p50, ~+1.1 ms p95** per request at concurrency 1 (redaction included); at concurrency 16 one process caps at ~2000 req/s. Details: [docs/performance/2026-10-20](docs/performance/2026-10-20/README.md).
 
 ## Deterministic decisions with Quinelings (optional, Node ≥ 22)
-[Quinelings](https://github.com/CharlesHoskinson/quinelings) (`@quinelings/agent-sdk`, Apache-2.0, vendored in `vendor/`) runs small calculation programs written in QDL, a JSON format: typed inputs with units, steps from a fixed set of about 30 operations (`arithmetic`, `compareValues`, `budget`, `allocate`, `action`, …) and outputs. The SDK compiles a program into self-contained source whose hash is its identity (`ql_…`), checks types and units before anything runs, and can rebuild and rerun it anywhere from that source alone. A program is data, not JavaScript: it cannot read files or the network, and `action` steps are only simulated.
+**TL;DR: where Quinelings helps this project**
+- **Proves why a decision was made, long after.** The log carries the decision program itself. `ai-audit replay` rebuilds it from the log alone and recomputes the result. The proxy proves what the AI said; the Quineling proves what was decided ([DESIGN.md](DESIGN.md), AI Act Art. 12 and 14).
+- **Catches LLM mistakes in numbers and rules.** The LLM proposes, a fixed policy decides, a person approves. In the example below the LLM quotes 274 PLN, the policy computes 394 PLN, and the quote goes to review.
+- **Runs logic an LLM wrote, safely.** A program always stops, cannot read files or the network, and is refused if it invents an operation or mixes up units. The built-in `replay()` runs JavaScript in `node:vm`, which is only safe for trusted code.
+- **Keeps the hard cases.** Refused and failed evaluations are recorded too, and each decision links to the proxied LLM call (`llmCallId` is the proxy's `x-request-id`).
+- **Not for** the proxy's request path (one run takes ~20 ms against the proxy's ~0.6 ms), finding secrets or PII, making the LLM itself reproducible, or real actions (they are only simulated).
 
-Why it is here: an LLM is good at reading a part description and proposing numbers, but it gets arithmetic wrong and its answers cannot be reproduced. With QDL the LLM proposes, a fixed policy decides and a person approves, and every step lands in the same hash-chained log as the LLM call ([DESIGN.md](DESIGN.md), AI Act Art. 12 and 14). The built-in `replay()` does this for JavaScript step functions, but `node:vm` is only safe for trusted code; a QDL program is safe to run even when an LLM wrote it.
+[Quinelings](https://github.com/CharlesHoskinson/quinelings) (`@quinelings/agent-sdk`, Apache-2.0, vendored in `vendor/`) runs small calculation programs written in QDL, a JSON format: typed inputs with units, steps from a fixed set of about 30 operations (`arithmetic`, `compareValues`, `budget`, `allocate`, `action`, …) and outputs. The SDK compiles a program into self-contained source whose hash is its identity (`ql_…`), checks types and units before anything runs, and can rebuild and rerun it anywhere from that source alone. A program is data, not JavaScript, and `action` steps are only simulated.
 
 ### The SDK on its own
 Save as `qdl-hello.mjs` in the repo root and run `node qdl-hello.mjs`:
@@ -139,35 +144,17 @@ sequenceDiagram
   M-->>P: tool call propose_quote
   P-->>A: unchanged response + x-request-id
   P->>L: llm-call record, id = x-request-id
-  A->>A: recordQdl runs the policy on the proposal
-  A->>L: decision + decision:qdl, params.llmCallId = x-request-id
-  A->>L: review from log.approve
+  A->>A: recordQdl or ai-audit decide runs the policy
+  A->>L: decision with llmCallId = x-request-id, plus its :qdl step
+  A->>L: review from approve
 ```
-Run the proxy with `node dist/src/cli.js serve --log audit.jsonl`, then save this as `quote.mjs` in the repo root and run `OPENAI_API_KEY=… node quote.mjs`. The agent writes to the same log file as the proxy; the append lock keeps one chain ([ADR 0016](docs/adr/0016-fail-closed-when-log-unavailable.md)).
+The policy is [`examples/quineling-quote/policy.json`](examples/quineling-quote/policy.json): price from CAM minutes, shop rate, setup and material with a 150 PLN floor; auto-approve only quotes up to 1000 PLN where the LLM's own price is within 5%, otherwise route to human review. Run the proxy with `node dist/src/cli.js serve --log audit.jsonl`, then save this as `quote.mjs` in the repo root and run `OPENAI_API_KEY=… node quote.mjs`. The agent writes to the same log file as the proxy; the append lock keeps one chain ([ADR 0016](docs/adr/0016-fail-closed-when-log-unavailable.md)).
 ```js
+import { readFileSync } from "node:fs";
 import { AuditLog } from "./dist/src/audit.js";
 import { recordQdl, replayQdl } from "./dist/src/qdl.js";
 
-const number = (unit) => ({ kind: "number", unit, min: 0 });
-const POLICY = {
-  format: "qdl-intent", version: 1, name: "Machining quote policy v1",
-  thought: "price = max(minutes × rate + setup + material, floor); auto-approve only if the LLM price matches",
-  inputs: [
-    { id: "minutes", name: "minutes", type: number("min") }, { id: "rate", name: "rate", type: number("PLN*min^-1") },
-    { id: "setup", name: "setup", type: number("PLN") }, { id: "material", name: "material", type: number("PLN") },
-    { id: "llmPrice", name: "llmPrice", type: number("PLN") }, { id: "floor", value: 150, type: number("PLN") },
-  ],
-  steps: [
-    { id: "machining", op: "arithmetic", inputs: ["minutes", "rate"], params: { kind: "mul" } },
-    { id: "withSetup", op: "arithmetic", inputs: ["machining", "setup"], params: { kind: "add" } },
-    { id: "cost", op: "arithmetic", inputs: ["withSetup", "material"], params: { kind: "add" } },
-    { id: "price", op: "arithmetic", inputs: ["cost", "floor"], params: { kind: "max" } },
-    { id: "agrees", op: "compareValues", inputs: ["price", "llmPrice"], params: { operator: "eq" } },
-    { id: "approve", op: "action", inputs: ["agrees", "price"], params: { allowed: true, action: "auto-approve-quote" } },
-  ],
-  outputs: ["price", "agrees", "approve"],
-};
-
+const policy = JSON.parse(readFileSync("examples/quineling-quote/policy.json", "utf8"));
 const res = await fetch("http://127.0.0.1:8787/v1/chat/completions", {
   method: "POST",
   headers: { "content-type": "application/json", authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
@@ -185,31 +172,46 @@ const llmCallId = res.headers.get("x-request-id");
 const proposal = JSON.parse((await res.json()).choices[0].message.tool_calls[0].function.arguments);
 
 const log = new AuditLog("audit.jsonl");
-const qdl = await recordQdl(log,
-  { systemId: "cad-quote", useCase: "machining-quote", input: "flange DN100", params: { llmCallId } },
-  { intent: POLICY },
+const { decision, step } = await recordQdl(log,
+  { systemId: "cad-quote", useCase: "machining-quote", input: "flange DN100", llmCallId },
+  { intent: policy },
   { minutes: proposal.minutes, rate: 4.5, setup: proposal.setup, material: proposal.material, llmPrice: proposal.price });
-const [price, agrees] = log.read().find((r) => r.id === qdl.refId).output;
-log.approve(qdl.refId, "A. Nowak", "approved", `LLM proposed ${proposal.price} PLN, policy says ${price} PLN`);
-console.log({ llmPrice: proposal.price, price, agrees, reproduced: (await replayQdl(log, qdl.id)).reproduced });
+if (step.qdl.status !== "completed") throw new Error(`policy ${step.qdl.status}: ${step.qdl.error.code}`);
+const [price, llmAgrees, autoApprove] = decision.output;
+log.approve(decision.id, "A. Nowak", "approved", `LLM proposed ${proposal.price} PLN, policy says ${price} PLN`);
+console.log({ llmPrice: proposal.price, price, llmAgrees, autoApprove, reproduced: (await replayQdl(log, decision.id)).reproduced });
 ```
-The model never sees the shop rate, so its price is a guess. When it proposes 274 PLN, the script prints `{ llmPrice: 274, price: 394, agrees: false, reproduced: true }`: the policy's 394 PLN (42 × 4.50 + 120 + 85) is what gets approved, and the log shows both. On a fresh log, `node dist/src/cli.js verify --log audit.jsonl` then reports `OK: 4 records, chain intact`:
+The model never sees the shop rate, so its price is a guess. When it proposes 274 PLN, the script prints `{ llmPrice: 274, price: 394, llmAgrees: false, autoApprove: false, reproduced: true }`: the policy's 394 PLN (42 × 4.50 + 120 + 85) is more than 5% away from 274, so the quote goes to review and a person approves 394. On a fresh log, `node dist/src/cli.js verify --log audit.jsonl` then reports `OK: 4 records, chain intact`:
 
 | record | written by | holds |
 |---|---|---|
 | `llm-call` | proxy | findings as rule + path, tool call names, output hash, usage; no prompt text |
-| `decision` | `recordQdl` | policy outputs, a hash of `input`, `params.llmCallId` |
-| `decision` (id `…:qdl`) | `recordQdl` | the program source, its inputs, `inputHash`, `outputsHash` |
-| `review` | `log.approve` | reviewer, approved/overridden/rejected, note |
+| `decision` | `recordQdl` or `decide` | `llmCallId`, a hash of `input`, the policy outputs (only when completed) |
+| `decision` (id `…:qdl`) | `recordQdl` or `decide` | `status` (completed, refused or failed), the error code and path unless completed, the program source (or the refused intent), its inputs, `inputHash`, `outputsHash` |
+| `review` | `log.approve` or `approve` | reviewer, approved/overridden/rejected, note |
 
-`replayQdl(log, id)` rebuilds the program from the log in a fresh session and returns `reproduced: true` when the output matches. Edit a logged input and `verify` reports a broken chain; replaying the edited record gives `reproduced: false`. `npm run example:quote` runs a similar scenario offline (add `-- --live` for one real gpt-4o-mini call).
+`replayQdl(log, id)` takes the decision id or its `:qdl` id, rebuilds the program from the log in a fresh session and returns `reproduced: true` when the outcome matches, refusals and failures included. Edit a logged input and `verify` reports a broken chain; replaying the edited record gives `reproduced: false`. `npm run example:quote` runs the same policy offline (add `-- --live` for one real gpt-4o-mini call).
+
+### From the command line
+Any script or agent, in any language, can do the same without JavaScript ([ADR 0023](docs/adr/0023-decision-records-cli-and-outcomes.md)). Take `REQUEST_ID` from the `x-request-id` header of the proxied call; `--llm-call` must name an `llm-call` record already in the log.
+```sh
+node dist/src/cli.js decide --log audit.jsonl --policy examples/quineling-quote/policy.json \
+  --inputs examples/quineling-quote/inputs.json --system-id cad-quote --use-case machining-quote --llm-call "$REQUEST_ID"
+node dist/src/cli.js approve --log audit.jsonl --decision "$DECISION" --reviewer "A. Nowak" --verdict approved --note "policy price 394 PLN"
+node dist/src/cli.js replay --log audit.jsonl --decision "$DECISION"
+```
+Each command prints one JSON line:
+```
+{"decision":"1e23e101-…","status":"completed","outputs":[394,false,false,{"status":"skipped","action":"auto-approve-quote","payload":394},{"status":"simulated","action":"route-to-human-review","payload":394}]}
+{"review":"a6e8fd3f-…","decision":"1e23e101-…","verdict":"approved"}
+{"decision":"1e23e101-…","reproduced":true,"status":"completed","outputs":[394,false,false,…]}
+```
+Exit codes: `0` completed or reproduced; `1` recorded but refused or failed, or not reproduced; `2` nothing written (bad arguments, unknown id, SDK missing). A refusal is still a record: inputs with `minutes: -5` print `{"decision":"…","status":"refused","error":{"code":"refinement","path":"$.bindings.minutes"}}` and exit 1, and `replay` later reproduces the refusal. `ai-audit report` lists QDL outcomes (completed, refused, failed) next to the decision counts.
 
 Limits today:
-- Library only. The CLI has no command for decisions, reviews or replay; call `recordQdl`, `AuditLog.approve` and `replayQdl` from your code.
-- A refused or failed evaluation throws and is not logged.
-- Every decision stores the whole program again (about 14 KB for the policy above) and its inputs as given, without the secret/PII scanner. Keep personal data out of the inputs.
-- One run takes about 20 ms (compile 35–60 ms), against the proxy's ~0.6 ms, so this belongs in your application, not in the request path.
-- The SDK is a 1.0.0 tarball that is not published to npm, and it pulls in about 100 packages (zod, the MCP and A2A SDKs, express). It is an optional dependency: the proxy runs without it ([ADR 0004](docs/adr/0004-quinelings-optional.md)).
+- Every decision stores the whole program again (about 21 KB for the 14-step policy above) and its inputs as given, without the secret/PII scanner. Keep personal data out of the inputs.
+- `replay` covers QDL decisions. JavaScript steps recorded with `log.record({ step })` replay only through `replay()` in the process that recorded them, because their source registry is in memory.
+- The SDK is a 1.0.0 tarball that is not published to npm, and it pulls in about 100 packages (zod, the MCP and A2A SDKs, express). It is an optional dependency: the proxy runs without it, and `decide` and `replay` then exit 2 with `audit_qdl_unavailable` ([ADR 0004](docs/adr/0004-quinelings-optional.md)).
 
 ## Limits
 - Attachments need tesseract, poppler, python3-PIL, prlimit (util-linux, so Linux only) and a working bwrap. Workers run in bwrap with no network, all capabilities dropped and an empty environment. Resource limits are preflight's: worker RLIMIT_DATA 4 GiB, CPU 90 s, files 64 MiB, 128 open files; each native tool also gets RLIMIT_AS 1.5 GiB; 120 s wall clock; 16 MiB output caps for the worker and each tool. Exceeding any of them gives 422. Read-only mounts are limited to `/usr`, the Node install and the worker script, so a worker cannot read the log, the session key, the config or your home directory. Without a usable sandbox, attachments get 422 `audit_sandbox_unavailable` and `/readyz` is 503. `--unsafe-no-sandbox` (development only) runs workers unsandboxed and records `decision.sandbox: "disabled"` ([ADR 0021](docs/adr/0021-attachment-sandbox-hardening.md)).
