@@ -6,7 +6,8 @@ import { KIND_CODES, type ArenaBlock, type ContextBlock } from "./context.js";
 export interface FirstChanged { block: number; offset: number }
 export interface SessionLink { id: string; turn: number; digest: string; parent: string | null; messages: number; firstChanged?: FirstChanged | null; arena?: "tracked" | "untracked" }
 export interface Arena { blocks: ArenaBlock[]; firstChanged: FirstChanged | null; tracked: boolean }
-interface ArenaState { hashes: string[]; ages: number[] }
+export interface ArenaState { hashes: string[]; ages: number[] }
+export type SizedBlock = Pick<ContextBlock, "kind" | "bytes">;
 export interface SessionRecordLike { session?: SessionLink }
 
 const KEY_BYTES = 32;
@@ -37,6 +38,21 @@ export function conversationItems(api: Api, body: any): unknown[] | undefined {
   return body.system !== undefined ? [{ role: "system", content: body.system }, ...body.messages] : body.messages;
 }
 
+export function arenaOf(previous: ArenaState | undefined, hashes: string[], blocks: SizedBlock[], turn: number, tracked: boolean): { state: ArenaState; arena: Arena } {
+  let changed = previous ? hashes.findIndex((h, i) => previous.hashes[i] !== h) : -1;
+  if (previous && changed === -1 && hashes.length < previous.hashes.length) changed = hashes.length;
+  const ages = hashes.map((_, i) => previous && (changed === -1 || i < changed) ? previous.ages[i] : tracked ? turn : 0);
+  const firstChanged = !previous || changed === -1 || changed >= previous.hashes.length ? null
+    : { block: changed, offset: blocks.slice(0, changed).reduce((a, b) => a + b.bytes, 0) };
+  const compact: ArenaBlock[] = [];
+  blocks.forEach((b, i) => {
+    const code = KIND_CODES[b.kind], last = compact[compact.length - 1];
+    if (last && last[0] === code && last[2] === ages[i] && !(firstChanged && i === firstChanged.block)) last[1] += b.bytes;
+    else compact.push([code, b.bytes, ages[i]]);
+  });
+  return { state: { hashes, ages }, arena: { blocks: compact, firstChanged, tracked } };
+}
+
 export class SessionIndex {
   private readonly byDigest = new Map<string, SessionLink>();
   private readonly arenas = new Map<string, ArenaState>();
@@ -45,21 +61,10 @@ export class SessionIndex {
   arena(link: SessionLink, blocks: ContextBlock[]): Arena {
     const hashes = blocks.map((b) => createHmac("sha256", this.key).update(b.kind).update("\0").update(canonical(b.value)).digest("base64url").slice(0, 16));
     const previous = this.arenas.get(link.digest) ?? (link.parent ? this.arenas.get(link.parent) : undefined);
-    const tracked = link.turn === 1 || !!previous;
-    let changed = previous ? hashes.findIndex((h, i) => previous.hashes[i] !== h) : -1;
-    if (previous && changed === -1 && hashes.length < previous.hashes.length) changed = hashes.length;
-    const ages = hashes.map((_, i) => previous && (changed === -1 || i < changed) ? previous.ages[i] : tracked ? link.turn : 0);
-    this.arenas.delete(link.digest); this.arenas.set(link.digest, { hashes, ages });
+    const { state, arena } = arenaOf(previous, hashes, blocks, link.turn, link.turn === 1 || !!previous);
+    this.arenas.delete(link.digest); this.arenas.set(link.digest, state);
     if (this.arenas.size > this.arenaCapacity) this.arenas.delete(this.arenas.keys().next().value!);
-    const firstChanged = !previous || changed === -1 || changed >= previous.hashes.length ? null
-      : { block: changed, offset: blocks.slice(0, changed).reduce((a, b) => a + b.bytes, 0) };
-    const compact: ArenaBlock[] = [];
-    blocks.forEach((b, i) => {
-      const code = KIND_CODES[b.kind], last = compact[compact.length - 1];
-      if (last && last[0] === code && last[2] === ages[i] && !(firstChanged && i === firstChanged.block)) last[1] += b.bytes;
-      else compact.push([code, b.bytes, ages[i]]);
-    });
-    return { blocks: compact, firstChanged, tracked };
+    return arena;
   }
 
   prefixDigests(items: unknown[]): string[] {
