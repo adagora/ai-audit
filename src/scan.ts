@@ -196,19 +196,26 @@ const lastWhere = (n: number, ok: (i: number) => boolean) => {
   while (lo <= hi) { const mid = (lo + hi) >> 1; if (ok(mid)) { found = mid; lo = mid + 1; } else hi = mid - 1; }
   return found;
 };
+export type SpanRange = Pick<Span, "start" | "end" | "matchStart" | "matchEnd">;
+export function takenAcrossParts(starts: number[], spans: SpanRange[]): boolean[] {
+  const part = (pos: number) => lastWhere(starts.length, (k) => starts[k] <= pos);
+  const taken = spans.map((s) => part(s.matchStart) !== part(s.matchEnd - 1));
+  for (let grew = taken.includes(true); grew;) {
+    const removed = spans.filter((_, i) => taken[i]);
+    const overlapsRemoved = (s: SpanRange) => { const k = lastWhere(removed.length, (i) => removed[i].start < s.matchEnd); return k >= 0 && removed[k].end > s.matchStart; };
+    grew = false;
+    spans.forEach((s, i) => { if (!taken[i] && overlapsRemoved(s)) taken[i] = grew = true; });
+  }
+  return taken;
+}
+
 function joinParts(arr: unknown[], carnet: Allowlist | undefined, path: string, findings: Finding[]): unknown[] {
   const idx: number[] = [], texts: string[] = [];
   arr.forEach((x: any, i) => { const t = typeof x === "string" ? x : x && typeof x === "object" && typeof x.text === "string" ? x.text : undefined; if (t !== undefined && !isPayload(t)) { idx.push(i); texts.push(t); } });
   if (texts.length < 2) return arr;
   const starts: number[] = []; let joined = ""; texts.forEach((t) => { starts.push(joined.length); joined += t; });
   const part = (pos: number) => lastWhere(starts.length, (k) => starts[k] <= pos);
-  const spans = scanText(joined, carnet), taken = spans.map((s) => part(s.matchStart) !== part(s.matchEnd - 1));
-  for (let grew = taken.includes(true); grew;) {
-    const removed = spans.filter((_, i) => taken[i]);
-    const overlapsRemoved = (s: Span) => { const k = lastWhere(removed.length, (i) => removed[i].start < s.matchEnd); return k >= 0 && removed[k].end > s.matchStart; };
-    grew = false;
-    spans.forEach((s, i) => { if (!taken[i] && overlapsRemoved(s)) taken[i] = grew = true; });
-  }
+  const spans = scanText(joined, carnet), taken = takenAcrossParts(starts, spans);
   const cross = spans.filter((_, i) => taken[i]);
   if (!cross.length) return arr;
   const out = arr.slice(), next = texts.slice();
