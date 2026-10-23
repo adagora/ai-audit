@@ -7,7 +7,7 @@ found=$("$BEND" version 2>/dev/null)
 [ "$found" = "bend $BEND_VERSION" ] || { echo "FAIL need bend $BEND_VERSION, found '${found:-no bend}'"; exit 1; }
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 rc=0; ran=""
-MODULES="context arena usage spans"
+MODULES="context arena usage spans parts"
 
 verdict() {
   if (cd "$1" && "$BEND" "$2" 2>&1) | grep -qx "ALL PROOFS CHECK"; then echo pass; else echo fail; fi
@@ -65,6 +65,11 @@ mutant unknown-not-counted usage 's/Nat\.add\(ui, unknown\(i\)\)/ui/'
 mutant lost-extension spans 's/Group\{a, sb, Nat\.min\(c, sc\), Nat\.max\(d, sd\), f, True\{\}\}/Group{a, b, Nat.min(c, sc), Nat.max(d, sd), f, True{}}/'
 mutant over-mask spans 's/Group\{a, b, c, d, i, False\{\}\}/Group{a, 1n+b, c, d, i, False{}}/'
 mutant overlap-opens spans 's/Nat\.is_ge\(raw\.start\(s\), group\.end\(g\)\)/Nat.is_ge(raw.end(s), group.end(g))/'
+mutant crossing-missed parts 's/Bool\.or\(above\(k, c\), below\(bs, d\)\)/above(k, c)/'
+mutant touch-ignored parts 's/near\.at\(s, at, grew, acc, after\(at, s\)\)/near.at(s, at, grew, acc, False{})/'
+mutant over-take parts 's/Bool\.or\(above\(k, c\), below\(bs, d\)\)/True{}/'
+mutant fast-skips-closure parts 's/close\.fast\(r, any_taken\(r\)\)/close.fast(r, False{})/'
+mutant fast-backward-blind parts 's/\n      after\(at, s\)\n/\n      False{}\n/'
 for f in stops/*.bend; do case "$ran" in *" $(basename "$f" .bend) "*) ;; *) echo "FAIL $f has no mutant"; rc=1;; esac; done
 
 if command -v lean >/dev/null 2>&1; then

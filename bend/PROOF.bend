@@ -4,6 +4,7 @@ import ./LAWS.bend as Laws
 import ./arena.bend as A
 import ./usage.bend as U
 import ./spans.bend as S
+import ./parts.bend as P
 
 def add_zero(a: Nat) -> {a == Nat.add(a, 0n) : Nat}:
   match a:
@@ -2411,3 +2412,2070 @@ def go_apart(xs: +List<S.Raw>, +acc: +List<S.Group>, ra: RevApart(acc)) -> Laws.
 
 def Laws.spans_groups_are_apart(xs):
   go_apart(xs, Nil{}, Unit{})
+
+def q.srev(xs: +List<P.Span>, ys: +List<P.Span>) -> List<&2, P.Span>:
+  match xs:
+    case Nil{}:
+      ys
+    case Con{x, rest}:
+      q.srev(rest, x <> ys)
+
+def q.sapp(xs: +List<P.Span>, ys: +List<P.Span>) -> List<&2, P.Span>:
+  match xs:
+    case Nil{}:
+      ys
+    case Con{x, rest}:
+      x <> q.sapp(rest, ys)
+
+def q.srev2(xs: +List<P.Span>, +ys: +List<P.Span>, +zs: +List<P.Span>) -> {q.srev(q.srev(xs, ys), zs) == q.srev(ys, q.sapp(xs, zs)) : List<&2, P.Span>}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+x, +rest}:
+      q.srev2(rest, x <> ys, zs)
+
+def q.sapp_nil(xs: +List<P.Span>) -> {q.sapp(xs, Nil{}) == xs : List<&2, P.Span>}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+x, +rest}:
+      %q.sapp_nil(rest) : {x <> q.sapp(rest, Nil{}) == x <> _ : List<&2, P.Span>}
+      {==}
+
+def q.srev_srev(+xs: +List<P.Span>) -> {q.srev(q.srev(xs, Nil{}), Nil{}) == xs : List<&2, P.Span>}:
+  Equal.trans(List<&2, P.Span>, q.srev(q.srev(xs, Nil{}), Nil{}), q.sapp(xs, Nil{}), xs, q.srev2(xs, Nil{}, Nil{}), q.sapp_nil(xs))
+
+def q.mspans_rev(ms: +List<P.Mark>, +acc: +List<P.Mark>) -> {Laws.SpansOf(P.rev.go(ms, acc)) == q.srev(Laws.SpansOf(ms), Laws.SpansOf(acc)) : List<&2, P.Span>}:
+  match ms:
+    case Nil{}:
+      {==}
+    case Con{P.Mark{+s, +t}, +rest}:
+      q.mspans_rev(rest, P.Mark{s, t} <> acc)
+
+def q.walk_at_spans(s: P.Span, cb: List<&2, Nat> & List<&2, Nat>, +acc: +List<P.Mark>) -> {Laws.SpansOf(P.walk.acc(P.walk.at(s, cb, acc))) == s <> Laws.SpansOf(acc) : List<&2, P.Span>}:
+  match s:
+    case P.Span{a, b, c, d}:
+      match cb:
+        case (k, bs):
+          {==}
+
+def q.step_spans(s: P.Span, w: P.Walk) -> {Laws.SpansOf(P.walk.acc(P.walk.step(s, w))) == s <> Laws.SpansOf(P.walk.acc(w)) : List<&2, P.Span>}:
+  match s w:
+    case P.Span{+a, +b, +c, +d} P.Walk{+k, +bs, +acc}:
+      q.walk_at_spans(P.Span{a, b, c, d}, P.adv(bs, a, k), acc)
+
+def q.walk_spans(ss: +List<P.Span>, +w: P.Walk) -> {Laws.SpansOf(P.walk.go(ss, w)) == q.srev(ss, Laws.SpansOf(P.walk.acc(w))) : List<&2, P.Span>}:
+  match ss:
+    case Nil{}:
+      {==}
+    case Con{+s, +rest}:
+      %q.step_spans(s, w) : {Laws.SpansOf(P.walk.go(rest, P.walk.step(s, w))) == q.srev(rest, _) : List<&2, P.Span>}
+      q.walk_spans(rest, P.walk.step(s, w))
+
+def q.nacc(n: P.Near) -> List<&2, P.Mark>:
+  match n:
+    case P.Near{at, g, acc}:
+      acc
+
+def q.ngrew(n: P.Near) -> Bool:
+  match n:
+    case P.Near{at, g, acc}:
+      g
+
+def q.pms(p: P.Pass) -> List<&2, P.Mark>:
+  match p:
+    case P.Pass{ms, g}:
+      ms
+
+def q.pgrew(p: P.Pass) -> Bool:
+  match p:
+    case P.Pass{ms, g}:
+      g
+
+def q.near_at_spans(+s: P.Span, at: Maybe<&2, P.Span>, g: Bool, +acc: +List<P.Mark>, e: Bool) -> {Laws.SpansOf(q.nacc(P.near.at(s, at, g, acc, e))) == s <> Laws.SpansOf(acc) : List<&2, P.Span>}:
+  match e:
+    case True{}:
+      {==}
+    case False{}:
+      {==}
+
+def q.back_step_spans(+s: P.Span, +t: Bool, n: P.Near) -> {Laws.SpansOf(q.nacc(P.back.step(P.Mark{s, t}, n))) == s <> Laws.SpansOf(q.nacc(n)) : List<&2, P.Span>}:
+  match t n:
+    case True{} P.Near{at, g, acc}:
+      {==}
+    case False{} P.Near{+at, g, +acc}:
+      q.near_at_spans(s, at, g, acc, P.after(at, s))
+
+def q.fwd_step_spans(+s: P.Span, +t: Bool, n: P.Near) -> {Laws.SpansOf(q.nacc(P.fwd.step(P.Mark{s, t}, n))) == s <> Laws.SpansOf(q.nacc(n)) : List<&2, P.Span>}:
+  match t n:
+    case True{} P.Near{at, g, acc}:
+      {==}
+    case False{} P.Near{+at, g, +acc}:
+      q.near_at_spans(s, at, g, acc, P.before(at, s))
+
+def q.back_spans(ms: +List<P.Mark>, +n: P.Near) -> {Laws.SpansOf(q.nacc(P.back.go(ms, n))) == q.srev(Laws.SpansOf(ms), Laws.SpansOf(q.nacc(n))) : List<&2, P.Span>}:
+  match ms:
+    case Nil{}:
+      {==}
+    case Con{P.Mark{+s, +t}, +rest}:
+      %q.back_step_spans(s, t, n) : {Laws.SpansOf(q.nacc(P.back.go(rest, P.back.step(P.Mark{s, t}, n)))) == q.srev(Laws.SpansOf(rest), _) : List<&2, P.Span>}
+      q.back_spans(rest, P.back.step(P.Mark{s, t}, n))
+
+def q.fwd_spans(ms: +List<P.Mark>, +n: P.Near) -> {Laws.SpansOf(q.nacc(P.fwd.go(ms, n))) == q.srev(Laws.SpansOf(ms), Laws.SpansOf(q.nacc(n))) : List<&2, P.Span>}:
+  match ms:
+    case Nil{}:
+      {==}
+    case Con{P.Mark{+s, +t}, +rest}:
+      %q.fwd_step_spans(s, t, n) : {Laws.SpansOf(q.nacc(P.fwd.go(rest, P.fwd.step(P.Mark{s, t}, n)))) == q.srev(Laws.SpansOf(rest), _) : List<&2, P.Span>}
+      q.fwd_spans(rest, P.fwd.step(P.Mark{s, t}, n))
+
+def q.roundend_spans(g: Bool, f: P.Near) -> {Laws.SpansOf(q.pms(P.round.end(g, f))) == Laws.SpansOf(q.nacc(f)) : List<&2, P.Span>}:
+  match f:
+    case P.Near{at, g2, ms}:
+      {==}
+
+def q.roundfwd_spans(b: P.Near) -> {Laws.SpansOf(q.pms(P.round.fwd(b))) == q.srev(Laws.SpansOf(q.nacc(b)), Nil{}) : List<&2, P.Span>}:
+  match b:
+    case P.Near{at, g, +ms}:
+      Equal.trans(List<&2, P.Span>,
+        Laws.SpansOf(q.pms(P.round.end(g, P.fwd.go(ms, P.Near{None{}, False{}, Nil{}})))),
+        Laws.SpansOf(q.nacc(P.fwd.go(ms, P.Near{None{}, False{}, Nil{}}))),
+        q.srev(Laws.SpansOf(ms), Nil{}),
+        q.roundend_spans(g, P.fwd.go(ms, P.Near{None{}, False{}, Nil{}})),
+        q.fwd_spans(ms, P.Near{None{}, False{}, Nil{}}))
+
+def q.round_spans(+r: +List<P.Mark>) -> {Laws.SpansOf(q.pms(P.round(r))) == Laws.SpansOf(r) : List<&2, P.Span>}:
+  +n0 = {P.Near{None{}, False{}, Nil{}} : P.Near}
+  +b = Laws.SpansOf(q.nacc(P.back.go(r, n0)))
+  Equal.trans(List<&2, P.Span>, Laws.SpansOf(q.pms(P.round(r))), q.srev(b, Nil{}), Laws.SpansOf(r),
+    q.roundfwd_spans(P.back.go(r, n0)),
+    Equal.trans(List<&2, P.Span>, q.srev(b, Nil{}), q.srev(q.srev(Laws.SpansOf(r), Nil{}), Nil{}), Laws.SpansOf(r),
+      Equal.cong(List<&2, P.Span>, List<&2, P.Span>, x => q.srev(x, Nil{}), b, q.srev(Laws.SpansOf(r), Nil{}), q.back_spans(r, n0)),
+      q.srev_srev(Laws.SpansOf(r))))
+
+def q.loop_spans(u: Nat, pr: P.Pass) -> {Laws.SpansOf(P.loop(u, pr)) == Laws.SpansOf(q.pms(pr)) : List<&2, P.Span>}:
+  match u pr:
+    case 0n P.Pass{r, g}:
+      {==}
+    case 1n+v P.Pass{+r, True{}}:
+      Equal.trans(List<&2, P.Span>, Laws.SpansOf(P.loop(v, P.round(r))), Laws.SpansOf(q.pms(P.round(r))), Laws.SpansOf(r), q.loop_spans(v, P.round(r)), q.round_spans(r))
+    case 1n+v P.Pass{r, False{}}:
+      {==}
+
+def Laws.parts_keep_every_span_in_order(bs, ss):
+  +r0 = P.walk.go(ss, P.Walk{Nil{}, bs, Nil{}})
+  +l = P.loop(P.untaken.go(r0, 0n), P.Pass{r0, True{}})
+  -T = List<&2, P.Span>
+  Equal.trans(T, Laws.SpansOf(P.rev.go(l, Nil{})), q.srev(Laws.SpansOf(l), Nil{}), ss, q.mspans_rev(l, Nil{}),
+    Equal.trans(T, q.srev(Laws.SpansOf(l), Nil{}), q.srev(Laws.SpansOf(r0), Nil{}), ss,
+      Equal.cong(T, T, x => q.srev(x, Nil{}), Laws.SpansOf(l), Laws.SpansOf(r0), q.loop_spans(P.untaken.go(r0, 0n), P.Pass{r0, True{}})),
+      Equal.trans(T, q.srev(Laws.SpansOf(r0), Nil{}), q.srev(q.srev(ss, Nil{}), Nil{}), ss,
+        Equal.cong(T, T, x => q.srev(x, Nil{}), Laws.SpansOf(r0), q.srev(ss, Nil{}), q.walk_spans(ss, P.Walk{Nil{}, bs, Nil{}})),
+        q.srev_srev(ss))))
+
+def q.le_not_lt(a: Nat, b: Nat, e: {Nat.is_le(a, b) == True{} : Bool}) -> {Nat.is_lt(b, a) == False{} : Bool}:
+  match a b:
+    case 0n 0n:
+      {==}
+    case 0n 1n+bb:
+      {==}
+    case 1n+aa 0n:
+      Empty.absurd({Nat.is_lt(0n, 1n+aa) == False{} : Bool}, ft(e))
+    case 1n+aa 1n+bb:
+      q.le_not_lt(aa, bb, e)
+
+def q.le_lt_trans(a: Nat, b: Nat, c: Nat, e1: {Nat.is_le(a, b) == True{} : Bool}, e2: {Nat.is_lt(b, c) == True{} : Bool}) -> {Nat.is_lt(a, c) == True{} : Bool}:
+  match a b c:
+    case 0n 0n 0n:
+      e2
+    case 0n 0n 1n+cc:
+      {==}
+    case 0n 1n+bb 0n:
+      e2
+    case 0n 1n+bb 1n+cc:
+      {==}
+    case 1n+aa 0n cc:
+      Empty.absurd({Nat.is_lt(1n+aa, cc) == True{} : Bool}, ft(e1))
+    case 1n+aa 1n+bb 0n:
+      e2
+    case 1n+aa 1n+bb 1n+cc:
+      q.le_lt_trans(aa, bb, cc, e1, e2)
+
+def q.lt_gt(a: Nat, b: Nat) -> {Nat.is_lt(a, b) == Nat.is_gt(b, a) : Bool}:
+  match a b:
+    case 0n 0n:
+      {==}
+    case 0n 1n+bb:
+      {==}
+    case 1n+aa 0n:
+      {==}
+    case 1n+aa 1n+bb:
+      q.lt_gt(aa, bb)
+
+def q.and_true(x: Bool) -> {Bool.and(x, True{}) == x : Bool}:
+  match x:
+    case True{}:
+      {==}
+    case False{}:
+      {==}
+
+def q.or_swap(a: Bool, x: Bool, -b: Bool) -> {Bool.or(a, Bool.or(x, b)) == Bool.or(Bool.or(x, a), b) : Bool}:
+  match a x:
+    case True{} True{}:
+      {==}
+    case True{} False{}:
+      {==}
+    case False{} True{}:
+      {==}
+    case False{} False{}:
+      {==}
+
+def q.sym(-a: Bool, -b: Bool, e: {a == b : Bool}) -> {b == a : Bool}:
+  Equal.sym(Bool, a, b, e)
+
+def q.rapp(c: +List<Nat>, bs: +List<Nat>) -> List<&2, Nat>:
+  match c:
+    case Nil{}:
+      bs
+    case Con{x, rest}:
+      q.rapp(rest, x <> bs)
+
+def q.DescFrom(+a: Nat, c: +List<Nat>) -> Type:
+  match c:
+    case Nil{}:
+      Unit
+    case Con{+b, rest}:
+      {Nat.is_le(b, a) == True{} : Bool} & q.DescFrom(b, rest)
+
+def q.low(c: +List<Nat>) -> Nat:
+  match c:
+    case Nil{}:
+      0n
+    case Con{b, rest}:
+      b
+
+def q.Stop(bs: +List<Nat>, +x: Nat) -> Type:
+  match bs:
+    case Nil{}:
+      Unit
+    case Con{b, rest}:
+      {Nat.is_le(b, x) == False{} : Bool}
+
+def q.Exact(+bs: +List<Nat>, ms: +List<P.Mark>) -> Type:
+  match ms:
+    case Nil{}:
+      Unit
+    case Con{P.Mark{s, t}, rest}:
+      {t == Laws.CrossOf(bs, s) : Bool} & q.Exact(bs, rest)
+
+def q.cross_rapp(c: +List<Nat>, +r: +List<Nat>, +ms: Nat, +me: Nat) -> {Laws.Crossing(q.rapp(c, r), ms, me) == Bool.or(Laws.Crossing(c, ms, me), Laws.Crossing(r, ms, me)) : Bool}:
+  match c:
+    case Nil{}:
+      {==}
+    case Con{+x, +rest}:
+      Equal.trans(Bool, Laws.Crossing(q.rapp(rest, x <> r), ms, me), Bool.or(Laws.Crossing(rest, ms, me), Laws.Crossing(x <> r, ms, me)), Bool.or(Laws.Crossing(x <> rest, ms, me), Laws.Crossing(r, ms, me)),
+        q.cross_rapp(rest, x <> r, ms, me),
+        q.or_swap(Laws.Crossing(rest, ms, me), Bool.and(Nat.is_lt(ms, x), Nat.is_lt(x, me)), Laws.Crossing(r, ms, me)))
+
+def q.desc_weaken(c: +List<Nat>, +a: Nat, +a2: Nat, e: {Nat.is_le(a, a2) == True{} : Bool}, d: q.DescFrom(a, c)) -> q.DescFrom(a2, c):
+  match c:
+    case Nil{}:
+      Unit{}
+    case Con{+y, +rest}:
+      (h, t) = d
+      (le_trans(y, a, a2, h, e), t)
+
+def q.cross_none_le(c: +List<Nat>, +b: Nat, +ms: Nat, +me: Nat, e: {Nat.is_le(b, ms) == True{} : Bool}, d: q.DescFrom(b, c)) -> {Laws.Crossing(c, ms, me) == False{} : Bool}:
+  match c:
+    case Nil{}:
+      {==}
+    case Con{+y, +rest}:
+      (h, t) = d
+      +ym = le_trans(y, b, ms, h, e)
+      %q.sym(Nat.is_lt(ms, y), False{}, q.le_not_lt(y, ms, ym)) : {Bool.or(Bool.and(_, Nat.is_lt(y, me)), Laws.Crossing(rest, ms, me)) == False{} : Bool}
+      q.cross_none_le(rest, y, ms, me, ym, t)
+
+def q.cross_desc.at(+y: Nat, -rest: +List<Nat>, +ms: Nat, -me: Nat, v: Bool, +ev: {Nat.is_lt(ms, y) == v : Bool}, fin: {Nat.is_lt(ms, y) == False{} : Bool} -> {Laws.Crossing(rest, ms, me) == False{} : Bool})
+  -> {Bool.or(Nat.is_lt(ms, y), Laws.Crossing(rest, ms, me)) == Nat.is_gt(y, ms) : Bool}:
+  match v:
+    case True{}:
+      %q.sym(Nat.is_lt(ms, y), True{}, ev) : {Bool.or(_, Laws.Crossing(rest, ms, me)) == Nat.is_gt(y, ms) : Bool}
+      Equal.trans(Bool, True{}, Nat.is_lt(ms, y), Nat.is_gt(y, ms), q.sym(Nat.is_lt(ms, y), True{}, ev), q.lt_gt(ms, y))
+    case False{}:
+      %q.sym(Nat.is_lt(ms, y), False{}, ev) : {Bool.or(_, Laws.Crossing(rest, ms, me)) == Nat.is_gt(y, ms) : Bool}
+      %q.sym(Laws.Crossing(rest, ms, me), False{}, fin(ev)) : {Bool.or(False{}, _) == Nat.is_gt(y, ms) : Bool}
+      Equal.trans(Bool, False{}, Nat.is_lt(ms, y), Nat.is_gt(y, ms), q.sym(Nat.is_lt(ms, y), False{}, ev), q.lt_gt(ms, y))
+
+def q.cross_desc(c: +List<Nat>, +x: Nat, +ms: Nat, +me: Nat, xe: {Nat.is_lt(x, me) == True{} : Bool}, d: q.DescFrom(x, c)) -> {Laws.Crossing(c, ms, me) == P.above(c, ms) : Bool}:
+  match c:
+    case Nil{}:
+      {==}
+    case Con{+y, +rest}:
+      (+h, t) = d
+      %q.sym(Nat.is_lt(y, me), True{}, q.le_lt_trans(y, x, me, h, xe)) : {Bool.or(Bool.and(Nat.is_lt(ms, y), _), Laws.Crossing(rest, ms, me)) == Nat.is_gt(y, ms) : Bool}
+      %q.sym(Bool.and(Nat.is_lt(ms, y), True{}), Nat.is_lt(ms, y), q.and_true(Nat.is_lt(ms, y))) : {Bool.or(_, Laws.Crossing(rest, ms, me)) == Nat.is_gt(y, ms) : Bool}
+      q.cross_desc.at(y, rest, ms, me, Nat.is_lt(ms, y), {==}, f => q.cross_none_le(rest, y, ms, me, gt_false_le(y, ms, Equal.trans(Bool, Nat.is_gt(y, ms), Nat.is_lt(ms, y), False{}, q.sym(Nat.is_lt(ms, y), Nat.is_gt(y, ms), q.lt_gt(ms, y)), f)), t))
+
+def q.le_false_lt(a: Nat, b: Nat, e: {Nat.is_le(a, b) == False{} : Bool}) -> {Nat.is_lt(b, a) == True{} : Bool}:
+  match a b:
+    case 0n 0n:
+      Empty.absurd({Nat.is_lt(0n, 0n) == True{} : Bool}, ft(Equal.sym(Bool, True{}, False{}, e)))
+    case 0n 1n+bb:
+      Empty.absurd({Nat.is_lt(1n+bb, 0n) == True{} : Bool}, ft(Equal.sym(Bool, True{}, False{}, e)))
+    case 1n+aa 0n:
+      {==}
+    case 1n+aa 1n+bb:
+      q.le_false_lt(aa, bb, e)
+
+def q.cross_none_ge(r: +List<Nat>, +f: Nat, +ms: Nat, +me: Nat, e: {Nat.is_le(me, f) == True{} : Bool}, so: Laws.BsFrom(f, r)) -> {Laws.Crossing(r, ms, me) == False{} : Bool}:
+  match r:
+    case Nil{}:
+      {==}
+    case Con{+y, +rest}:
+      (h, t) = so
+      +my = le_trans(me, f, y, e, h)
+      %q.sym(Nat.is_lt(y, me), False{}, q.le_not_lt(me, y, my)) : {Bool.or(Bool.and(Nat.is_lt(ms, y), _), Laws.Crossing(rest, ms, me)) == False{} : Bool}
+      %q.sym(Bool.and(Nat.is_lt(ms, y), False{}), False{}, and_false(Nat.is_lt(ms, y))) : {Bool.or(_, Laws.Crossing(rest, ms, me)) == False{} : Bool}
+      q.cross_none_ge(rest, y, ms, me, my, t)
+
+def q.cross_asc.at(+f: Nat, -rest: +List<Nat>, -ms: Nat, +me: Nat, v: Bool, +ev: {Nat.is_lt(f, me) == v : Bool}, fin: {Nat.is_lt(f, me) == False{} : Bool} -> {Laws.Crossing(rest, ms, me) == False{} : Bool})
+  -> {Bool.or(Nat.is_lt(f, me), Laws.Crossing(rest, ms, me)) == Nat.is_lt(f, me) : Bool}:
+  match v:
+    case True{}:
+      %q.sym(Nat.is_lt(f, me), True{}, ev) : {Bool.or(_, Laws.Crossing(rest, ms, me)) == _ : Bool}
+      {==}
+    case False{}:
+      %q.sym(Nat.is_lt(f, me), False{}, ev) : {Bool.or(_, Laws.Crossing(rest, ms, me)) == _ : Bool}
+      fin(ev)
+
+def q.cross_asc(r: +List<Nat>, +a: Nat, +x: Nat, +ms: Nat, +me: Nat, so: Laws.BsFrom(a, r), st: q.Stop(r, x), mx: {Nat.is_le(ms, x) == True{} : Bool}) -> {Laws.Crossing(r, ms, me) == P.below(r, me) : Bool}:
+  match r:
+    case Nil{}:
+      {==}
+    case Con{+f, +rest}:
+      (h, t) = so
+      %q.sym(Nat.is_lt(ms, f), True{}, q.le_lt_trans(ms, x, f, mx, q.le_false_lt(f, x, st))) : {Bool.or(Bool.and(_, Nat.is_lt(f, me)), Laws.Crossing(rest, ms, me)) == Nat.is_lt(f, me) : Bool}
+      q.cross_asc.at(f, rest, ms, me, Nat.is_lt(f, me), {==}, n => q.cross_none_ge(rest, f, ms, me, ge_le(f, me, lt_false_ge(f, me, n)), t))
+
+def q.desc_head(c: +List<Nat>, -x: Nat, +b: Nat, d: q.DescFrom(x, c), e: {Nat.is_le(q.low(c), b) == True{} : Bool}) -> q.DescFrom(b, c):
+  match c:
+    case Nil{}:
+      Unit{}
+    case Con{+y, +rest}:
+      (h, t) = d
+      (e, t)
+
+def q.AdvOk(pb: List<&2, Nat> & List<&2, Nat>, +bs: +List<Nat>, +x: Nat) -> Type:
+  match pb:
+    case (+c, +r):
+      {q.rapp(c, r) == bs : List<&2, Nat>} & (q.DescFrom(x, c) & (Laws.BsFrom(q.low(c), r) & q.Stop(r, x)))
+
+def q.adv_ok(rest: +List<Nat>, +x: Nat, e: Bool, he: {P.head_le(rest, x) == e : Bool}, +c: +List<Nat>, +bs: +List<Nat>,
+  tot: {q.rapp(c, rest) == bs : List<&2, Nat>}, d: q.DescFrom(x, c), so: Laws.BsFrom(q.low(c), rest)) -> q.AdvOk(P.adv.go(rest, e, x, c), bs, x):
+  match rest e:
+    case Nil{} _:
+      (tot, (d, (Unit{}, Unit{})))
+    case Con{+b, +rr} True{}:
+      (sh, st) = so
+      q.adv_ok(rr, x, P.head_le(rr, x), {==}, b <> c, bs, tot, (he, q.desc_head(c, x, b, d, sh)), st)
+    case Con{+b, +rr} False{}:
+      (tot, (d, (so, he)))
+
+def q.WalkOk(w: P.Walk, +bs: +List<Nat>, +e: Nat) -> Type:
+  match w:
+    case P.Walk{+c, +r, +acc}:
+      {q.rapp(c, r) == bs : List<&2, Nat>} & (q.DescFrom(e, c) & (Laws.BsFrom(q.low(c), r) & q.Exact(bs, acc)))
+
+def q.walk_eq(+k: +List<Nat>, +r: +List<Nat>, +a: Nat, +c: Nat, +d: Nat, +bs: +List<Nat>, tot: {q.rapp(k, r) == bs : List<&2, Nat>},
+  dk: q.DescFrom(a, k), sr: Laws.BsFrom(q.low(k), r), st: q.Stop(r, a), ca: {Nat.is_le(c, a) == True{} : Bool}, ad: {Nat.is_lt(a, d) == True{} : Bool})
+  -> {Bool.or(P.above(k, c), P.below(r, d)) == Laws.Crossing(bs, c, d) : Bool}:
+  %tot : {Bool.or(P.above(k, c), P.below(r, d)) == Laws.Crossing(_, c, d) : Bool}
+  %q.sym(Laws.Crossing(q.rapp(k, r), c, d), Bool.or(Laws.Crossing(k, c, d), Laws.Crossing(r, c, d)), q.cross_rapp(k, r, c, d)) : {Bool.or(P.above(k, c), P.below(r, d)) == _ : Bool}
+  %q.cross_desc(k, a, c, d, ad, dk) : {Bool.or(_, P.below(r, d)) == Bool.or(Laws.Crossing(k, c, d), Laws.Crossing(r, c, d)) : Bool}
+  %q.cross_asc(r, q.low(k), a, c, d, sr, st, ca) : {Bool.or(Laws.Crossing(k, c, d), _) == Bool.or(Laws.Crossing(k, c, d), Laws.Crossing(r, c, d)) : Bool}
+  {==}
+
+def q.desc_dup.k(-y: Nat, -a: Nat, -rest: +List<Nat>, +h: {Nat.is_le(y, a) == True{} : Bool}, tt: q.DescFrom(y, rest) & q.DescFrom(y, rest)) -> q.DescFrom(a, y <> rest) & q.DescFrom(a, y <> rest):
+  (t1, t2) = tt
+  ((h, t1), (h, t2))
+
+def q.desc_dup(c: +List<Nat>, +a: Nat, d: q.DescFrom(a, c)) -> q.DescFrom(a, c) & q.DescFrom(a, c):
+  match c:
+    case Nil{}:
+      (Unit{}, Unit{})
+    case Con{+y, +rest}:
+      (h, t) = d
+      q.desc_dup.k(y, a, rest, h, q.desc_dup(rest, y, t))
+
+def q.bs_dup.k(-y: Nat, -a: Nat, -rest: +List<Nat>, +h: {Nat.is_le(a, y) == True{} : Bool}, tt: Laws.BsFrom(y, rest) & Laws.BsFrom(y, rest)) -> Laws.BsFrom(a, y <> rest) & Laws.BsFrom(a, y <> rest):
+  (t1, t2) = tt
+  ((h, t1), (h, t2))
+
+def q.bs_dup(r: +List<Nat>, +a: Nat, so: Laws.BsFrom(a, r)) -> Laws.BsFrom(a, r) & Laws.BsFrom(a, r):
+  match r:
+    case Nil{}:
+      (Unit{}, Unit{})
+    case Con{+y, +rest}:
+      (h, t) = so
+      q.bs_dup.k(y, a, rest, h, q.bs_dup(rest, y, t))
+
+def q.walk_at_fin(+a: Nat, +b: Nat, +c: Nat, +d: Nat, +k: +List<Nat>, +r: +List<Nat>, +acc: +List<P.Mark>, +bs: +List<Nat>, +tot: {q.rapp(k, r) == bs : List<&2, Nat>},
+  ca: {Nat.is_le(c, a) == True{} : Bool}, +ab: {Nat.is_lt(a, b) == True{} : Bool}, bd: {Nat.is_le(b, d) == True{} : Bool},
+  dd: q.DescFrom(a, k) & q.DescFrom(a, k), ss: Laws.BsFrom(q.low(k), r) & Laws.BsFrom(q.low(k), r), st: q.Stop(r, a), ex: q.Exact(bs, acc))
+  -> q.WalkOk(P.Walk{k, r, P.Mark{P.Span{a, b, c, d}, Bool.or(P.above(k, c), P.below(r, d))} <> acc}, bs, b):
+  (d1, d2) = dd
+  (s1, s2) = ss
+  (tot, (q.desc_weaken(k, a, b, lt_imp_le(a, b, ab), d1), (s1, (q.walk_eq(k, r, a, c, d, bs, tot, d2, s2, st, ca, lt_le_trans(a, b, d, ab, bd)), ex))))
+
+def q.walk_at_ok(+a: Nat, +b: Nat, +c: Nat, +d: Nat, cb: List<&2, Nat> & List<&2, Nat>, +acc: +List<P.Mark>, +bs: +List<Nat>,
+  fr: Laws.Framed(P.Span{a, b, c, d}), aok: q.AdvOk(cb, bs, a), ex: q.Exact(bs, acc)) -> q.WalkOk(P.walk.at(P.Span{a, b, c, d}, cb, acc), bs, b):
+  match cb:
+    case (+k, +r):
+      (ca, (ab, bd)) = fr
+      (tot, (dk, (sr, st))) = aok
+      q.walk_at_fin(a, b, c, d, k, r, acc, bs, tot, ca, ab, bd, q.desc_dup(k, a, dk), q.bs_dup(r, q.low(k), sr), st, ex)
+
+def q.walk_step_ok(+a: Nat, +b: Nat, +c: Nat, +d: Nat, w: P.Walk, +bs: +List<Nat>, +e: Nat, ea: {Nat.is_le(e, a) == True{} : Bool},
+  fr: Laws.Framed(P.Span{a, b, c, d}), wo: q.WalkOk(w, bs, e)) -> q.WalkOk(P.walk.step(P.Span{a, b, c, d}, w), bs, b):
+  match w:
+    case P.Walk{+k, +r, +acc}:
+      (tot, (dk, (sr, ex))) = wo
+      q.walk_at_ok(a, b, c, d, P.adv(r, a, k), acc, bs, fr, q.adv_ok(r, a, P.head_le(r, a), {==}, k, bs, tot, q.desc_weaken(k, e, a, ea, dk), sr), ex)
+
+def q.walk_exact(ss: +List<P.Span>, +w: P.Walk, +bs: +List<Nat>, +e: Nat, sp: Laws.SpansFrom(e, ss), wo: q.WalkOk(w, bs, e)) -> q.Exact(bs, P.walk.go(ss, w)):
+  match ss:
+    case Nil{}:
+      match w:
+        case P.Walk{k, r, acc}:
+          (tot, (dk, (sr, ex))) = wo
+          ex
+    case Con{P.Span{+a, +b, +c, +d}, +rest}:
+      (ea, (fr, sp2)) = sp
+      q.walk_exact(rest, P.walk.step(P.Span{a, b, c, d}, w), bs, b, sp2, q.walk_step_ok(a, b, c, d, w, bs, e, ea, fr, wo))
+
+def q.exact_cross(+bs: +List<Nat>, ms: +List<P.Mark>, ex: q.Exact(bs, ms)) -> Laws.CrossTaken(bs, ms):
+  match ms:
+    case Nil{}:
+      Unit{}
+    case Con{P.Mark{+s, +t}, +rest}:
+      (h, tl) = ex
+      (x => Equal.trans(Bool, t, Laws.CrossOf(bs, s), True{}, h, x), q.exact_cross(bs, rest, tl))
+
+def q.walk0(+bs: +List<Nat>, +ss: +List<P.Span>, sorted: Laws.BsFrom(0n, bs), apart: Laws.SpansFrom(0n, ss)) -> q.Exact(bs, P.walk.go(ss, P.Walk{Nil{}, bs, Nil{}})):
+  q.walk_exact(ss, P.Walk{Nil{}, bs, Nil{}}, bs, 0n, apart, ({==}, (Unit{}, (sorted, Unit{}))))
+
+def q.ct_near_at(+bs: +List<Nat>, +s: P.Span, at: Maybe<&2, P.Span>, g: Bool, +acc: +List<P.Mark>, e: Bool,
+  h: {Laws.CrossOf(bs, s) == True{} : Bool} -> {False{} == True{} : Bool}, ct: Laws.CrossTaken(bs, acc)) -> Laws.CrossTaken(bs, q.nacc(P.near.at(s, at, g, acc, e))):
+  match e:
+    case True{}:
+      (x => {==}, ct)
+    case False{}:
+      (h, ct)
+
+def q.ct_back_step(+bs: +List<Nat>, +s: P.Span, t: Bool, n: P.Near, h: {Laws.CrossOf(bs, s) == True{} : Bool} -> {t == True{} : Bool}, ct: Laws.CrossTaken(bs, q.nacc(n)))
+  -> Laws.CrossTaken(bs, q.nacc(P.back.step(P.Mark{s, t}, n))):
+  match t n:
+    case True{} P.Near{at, g, acc}:
+      (x => {==}, ct)
+    case False{} P.Near{+at, g, +acc}:
+      q.ct_near_at(bs, s, at, g, acc, P.after(at, s), h, ct)
+
+def q.ct_fwd_step(+bs: +List<Nat>, +s: P.Span, t: Bool, n: P.Near, h: {Laws.CrossOf(bs, s) == True{} : Bool} -> {t == True{} : Bool}, ct: Laws.CrossTaken(bs, q.nacc(n)))
+  -> Laws.CrossTaken(bs, q.nacc(P.fwd.step(P.Mark{s, t}, n))):
+  match t n:
+    case True{} P.Near{at, g, acc}:
+      (x => {==}, ct)
+    case False{} P.Near{+at, g, +acc}:
+      q.ct_near_at(bs, s, at, g, acc, P.before(at, s), h, ct)
+
+def q.ct_back(+bs: +List<Nat>, ms: +List<P.Mark>, +n: P.Near, ci: Laws.CrossTaken(bs, ms), ca: Laws.CrossTaken(bs, q.nacc(n))) -> Laws.CrossTaken(bs, q.nacc(P.back.go(ms, n))):
+  match ms:
+    case Nil{}:
+      ca
+    case Con{P.Mark{+s, +t}, +rest}:
+      (h, cr) = ci
+      q.ct_back(bs, rest, P.back.step(P.Mark{s, t}, n), cr, q.ct_back_step(bs, s, t, n, h, ca))
+
+def q.ct_fwd(+bs: +List<Nat>, ms: +List<P.Mark>, +n: P.Near, ci: Laws.CrossTaken(bs, ms), ca: Laws.CrossTaken(bs, q.nacc(n))) -> Laws.CrossTaken(bs, q.nacc(P.fwd.go(ms, n))):
+  match ms:
+    case Nil{}:
+      ca
+    case Con{P.Mark{+s, +t}, +rest}:
+      (h, cr) = ci
+      q.ct_fwd(bs, rest, P.fwd.step(P.Mark{s, t}, n), cr, q.ct_fwd_step(bs, s, t, n, h, ca))
+
+def q.ct_roundend(-bs: +List<Nat>, g: Bool, f: P.Near, ct: Laws.CrossTaken(bs, q.nacc(f))) -> Laws.CrossTaken(bs, q.pms(P.round.end(g, f))):
+  match f:
+    case P.Near{at, g2, ms}:
+      ct
+
+def q.ct_roundfwd(+bs: +List<Nat>, b: P.Near, ct: Laws.CrossTaken(bs, q.nacc(b))) -> Laws.CrossTaken(bs, q.pms(P.round.fwd(b))):
+  match b:
+    case P.Near{at, g, +ms}:
+      q.ct_roundend(bs, g, P.fwd.go(ms, P.Near{None{}, False{}, Nil{}}), q.ct_fwd(bs, ms, P.Near{None{}, False{}, Nil{}}, ct, Unit{}))
+
+def q.ct_round(+bs: +List<Nat>, +r: +List<P.Mark>, ct: Laws.CrossTaken(bs, r)) -> Laws.CrossTaken(bs, q.pms(P.round(r))):
+  q.ct_roundfwd(bs, P.back.go(r, P.Near{None{}, False{}, Nil{}}), q.ct_back(bs, r, P.Near{None{}, False{}, Nil{}}, ct, Unit{}))
+
+def q.ct_loop(+bs: +List<Nat>, u: Nat, pr: P.Pass, ct: Laws.CrossTaken(bs, q.pms(pr))) -> Laws.CrossTaken(bs, P.loop(u, pr)):
+  match u pr:
+    case 0n P.Pass{r, g}:
+      ct
+    case 1n+v P.Pass{+r, True{}}:
+      q.ct_loop(bs, v, P.round(r), q.ct_round(bs, r, ct))
+    case 1n+v P.Pass{r, False{}}:
+      ct
+
+def q.ct_rev(+bs: +List<Nat>, ms: +List<P.Mark>, +acc: +List<P.Mark>, ci: Laws.CrossTaken(bs, ms), ca: Laws.CrossTaken(bs, acc)) -> Laws.CrossTaken(bs, P.rev.go(ms, acc)):
+  match ms:
+    case Nil{}:
+      ca
+    case Con{P.Mark{+s, +t}, +rest}:
+      (h, cr) = ci
+      q.ct_rev(bs, rest, P.Mark{s, t} <> acc, cr, (h, ca))
+
+def Laws.parts_take_every_span_whose_match_crosses_a_part(bs, sorted, ss, apart):
+  +r0 = P.walk.go(ss, P.Walk{Nil{}, bs, Nil{}})
+  q.ct_rev(bs, P.loop(P.untaken.go(r0, 0n), P.Pass{r0, True{}}), Nil{},
+    q.ct_loop(bs, P.untaken.go(r0, 0n), P.Pass{r0, True{}}, q.exact_cross(bs, r0, q.walk0(bs, ss, sorted, apart))), Unit{})
+
+def q.le_refl(n: Nat) -> {Nat.is_le(n, n) == True{} : Bool}:
+  match n:
+    case 0n:
+      {==}
+    case 1n+p:
+      q.le_refl(p)
+
+def q.lt_lt(+a: Nat, +b: Nat, +c: Nat, e1: {Nat.is_lt(a, b) == True{} : Bool}, e2: {Nat.is_lt(b, c) == True{} : Bool}) -> {Nat.is_lt(a, c) == True{} : Bool}:
+  lt_le_trans(a, b, c, e1, lt_imp_le(b, c, e2))
+
+def q.and_tt(a: Bool, b: Bool, ea: {a == True{} : Bool}, eb: {b == True{} : Bool}) -> {Bool.and(a, b) == True{} : Bool}:
+  match a:
+    case True{}:
+      eb
+    case False{}:
+      ea
+
+def q.forced(x: Bool, -t: Bool, gate: Laws.Gate(x, True{}, t), tt: {t == True{} : Bool}) -> {x == True{} : Bool}:
+  match x:
+    case True{}:
+      {==}
+    case False{}:
+      Empty.absurd({False{} == True{} : Bool}, ft(Equal.trans(Bool, False{}, t, True{}, Equal.sym(Bool, t, False{}, gate), tt)))
+
+def q.nta_true(-s: P.Span, -x: Bool, -xs: +List<P.Mark>, e: {x == True{} : Bool}, h: Laws.NoTouchAll(P.Mark{s, x}, xs)) -> Laws.NoTouchAll(P.Mark{s, True{}}, xs):
+  %e : Laws.NoTouchAll(P.Mark{s, _}, xs)
+  h
+
+def q.nat(n: P.Near) -> Maybe<&2, P.Span>:
+  match n:
+    case P.Near{at, g, acc}:
+      at
+
+def q.bools(ms: +List<P.Mark>) -> List<&2, Bool>:
+  match ms:
+    case Nil{}:
+      Nil{}
+    case Con{P.Mark{s, t}, rest}:
+      t <> q.bools(rest)
+
+def q.zipm(ss: +List<P.Span>, xs: +List<Bool>) -> List<&2, P.Mark>:
+  match ss xs:
+    case Con{s, sr} Con{x, xr}:
+      P.Mark{s, x} <> q.zipm(sr, xr)
+    case _ _:
+      Nil{}
+
+def q.brev(xs: +List<Bool>, acc: +List<Bool>) -> List<&2, Bool>:
+  match xs:
+    case Nil{}:
+      acc
+    case Con{x, rest}:
+      q.brev(rest, x <> acc)
+
+def q.WithinB(ms: +List<P.Mark>, xs: +List<Bool>) -> Type:
+  match ms xs:
+    case Nil{} Nil{}:
+      Unit
+    case Con{P.Mark{s, t}, rest} Con{x, xr}:
+      ({t == True{} : Bool} -> {x == True{} : Bool}) & q.WithinB(rest, xr)
+    case _ _:
+      Empty
+
+def q.RevFrom(+a: Nat, ss: +List<P.Span>) -> Type:
+  match ss:
+    case Nil{}:
+      Unit
+    case Con{P.Span{+sa, +sb, +sc, +sd}, rest}:
+      {Nat.is_le(sb, a) == True{} : Bool} & (Laws.Framed(P.Span{sa, sb, sc, sd}) & q.RevFrom(sa, rest))
+
+def q.AtB(at: Maybe<&2, P.Span>, +xs: +List<P.Mark>, +a: Nat) -> Type:
+  match at:
+    case None{}:
+      Unit
+    case Some{P.Span{+fa, +fb, +fc, +fd}}:
+      Laws.NoTouchAll(P.Mark{P.Span{fa, fb, fc, fd}, True{}}, xs) & ({Nat.is_le(a, fa) == True{} : Bool} & {Nat.is_lt(fa, fb) == True{} : Bool})
+
+def q.AtF(at: Maybe<&2, P.Span>, +xs: +List<P.Mark>, +a: Nat) -> Type:
+  match at:
+    case None{}:
+      Unit
+    case Some{P.Span{+fa, +fb, +fc, +fd}}:
+      Laws.NoTouchAll(P.Mark{P.Span{fa, fb, fc, fd}, True{}}, xs) & ({Nat.is_le(fb, a) == True{} : Bool} & {Nat.is_lt(fa, fb) == True{} : Bool})
+
+def q.BInv(+n: P.Near, +xs: +List<P.Mark>, +a: Nat, +XA: +List<Bool>) -> Type:
+  q.AtB(q.nat(n), xs, a) & q.WithinB(q.nacc(n), XA)
+
+def q.FInv(+n: P.Near, +xs: +List<P.Mark>, +a: Nat, +XA: +List<Bool>) -> Type:
+  q.AtF(q.nat(n), xs, a) & q.WithinB(q.nacc(n), XA)
+
+def q.bforced(+sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, at0: Maybe<&2, P.Span>, x: Bool, -xs: +List<P.Mark>, +a: Nat,
+  he: {P.after(at0, P.Span{sa, sb, sc, sd}) == True{} : Bool}, atp: q.AtB(at0, P.Mark{P.Span{sa, sb, sc, sd}, x} <> xs, a),
+  le_ba: {Nat.is_le(sb, a) == True{} : Bool}, fr: Laws.Framed(P.Span{sa, sb, sc, sd})) -> {x == True{} : Bool}:
+  match at0:
+    case None{}:
+      Empty.absurd({x == True{} : Bool}, ft(he))
+    case Some{P.Span{+fa, +fb, fc, fd}}:
+      (((g1, g2), rest), (le_af, lt_ff)) = atp
+      (ca, (ab, bd)) = fr
+      +ca2 = q.le_lt_trans(sc, sa, sb, ca, ab)
+      +cfa = lt_le_trans(sc, a, fa, lt_le_trans(sc, sb, a, ca2, le_ba), le_af)
+      q.forced(x, Laws.Touches(P.Span{sa, sb, sc, sd}, P.Span{fa, fb, fc, fd}), g2, q.and_tt(Nat.is_lt(sc, fb), Nat.is_lt(fa, sd), q.lt_lt(sc, fa, fb, cfa, lt_ff), he))
+
+def q.bat_keep(+sa: Nat, +sb: Nat, -sc: Nat, -sd: Nat, at0: Maybe<&2, P.Span>, -x: Bool, +xs: +List<P.Mark>, +a: Nat,
+  atp: q.AtB(at0, P.Mark{P.Span{sa, sb, sc, sd}, x} <> xs, a), le_ba: {Nat.is_le(sb, a) == True{} : Bool}, ab: {Nat.is_lt(sa, sb) == True{} : Bool})
+  -> q.AtB(at0, xs, sa):
+  match at0:
+    case None{}:
+      Unit{}
+    case Some{P.Span{+fa, +fb, fc, fd}}:
+      ((nt, rest), (le_af, lt_ff)) = atp
+      (rest, (lt_imp_le(sa, fa, lt_le_trans(sa, a, fa, lt_le_trans(sa, sb, a, ab, le_ba), le_af)), lt_ff))
+
+def q.bat_new(+sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, -x: Bool, +xs: +List<P.Mark>, xt: {x == True{} : Bool},
+  nta: Laws.NoTouchAll(P.Mark{P.Span{sa, sb, sc, sd}, x}, xs), ab: {Nat.is_lt(sa, sb) == True{} : Bool}) -> q.AtB(Some{P.Span{sa, sb, sc, sd}}, xs, sa):
+  (q.nta_true(P.Span{sa, sb, sc, sd}, x, xs, xt, nta), (q.le_refl(sa), ab))
+
+def q.bstep.f(+sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, +at0: Maybe<&2, P.Span>, g: Bool, +acc: +List<P.Mark>, +xs: +List<P.Mark>, +x: Bool, +XA: +List<Bool>, +a: Nat,
+  e: Bool, he: {P.after(at0, P.Span{sa, sb, sc, sd}) == e : Bool}, nta: Laws.NoTouchAll(P.Mark{P.Span{sa, sb, sc, sd}, x}, xs),
+  le_ba: {Nat.is_le(sb, a) == True{} : Bool}, fr: Laws.Framed(P.Span{sa, sb, sc, sd}), inv: q.BInv(P.Near{at0, g, acc}, P.Mark{P.Span{sa, sb, sc, sd}, x} <> xs, a, XA))
+  -> q.BInv(P.near.at(P.Span{sa, sb, sc, sd}, at0, g, acc, e), xs, sa, x <> XA):
+  match e:
+    case True{}:
+      (ca, (+ab, bd)) = fr
+      (atp, wa) = inv
+      +xt = q.bforced(sa, sb, sc, sd, at0, x, xs, a, he, atp, le_ba, (ca, (ab, bd)))
+      (q.bat_new(sa, sb, sc, sd, x, xs, xt, nta, ab), (y => xt, wa))
+    case False{}:
+      (ca, (ab, bd)) = fr
+      (atp, wa) = inv
+      (q.bat_keep(sa, sb, sc, sd, at0, x, xs, a, atp, le_ba, ab), (y => Empty.absurd({x == True{} : Bool}, ft(y)), wa))
+
+def q.bstep(+sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, t: Bool, n: P.Near, +xs: +List<P.Mark>, +x: Bool, +XA: +List<Bool>, +a: Nat,
+  tx: {t == True{} : Bool} -> {x == True{} : Bool}, nta: Laws.NoTouchAll(P.Mark{P.Span{sa, sb, sc, sd}, x}, xs),
+  le_ba: {Nat.is_le(sb, a) == True{} : Bool}, fr: Laws.Framed(P.Span{sa, sb, sc, sd}), inv: q.BInv(n, P.Mark{P.Span{sa, sb, sc, sd}, x} <> xs, a, XA))
+  -> q.BInv(P.back.step(P.Mark{P.Span{sa, sb, sc, sd}, t}, n), xs, sa, x <> XA):
+  match t n:
+    case True{} P.Near{at0, g, acc}:
+      (ca, (ab, bd)) = fr
+      (atp, wa) = inv
+      +xt = tx({==})
+      (q.bat_new(sa, sb, sc, sd, x, xs, xt, nta, ab), (y => xt, wa))
+    case False{} P.Near{+at0, g, +acc}:
+      q.bstep.f(sa, sb, sc, sd, at0, g, acc, xs, x, XA, a, P.after(at0, P.Span{sa, sb, sc, sd}), {==}, nta, le_ba, fr, inv)
+
+def q.back_within(R: +List<P.Mark>, XB: +List<Bool>, +n: P.Near, +XA: +List<Bool>, +a: Nat,
+  w: q.WithinB(R, XB), un: Laws.Untouched(q.zipm(Laws.SpansOf(R), XB)), geo: q.RevFrom(a, Laws.SpansOf(R)),
+  inv: q.BInv(n, q.zipm(Laws.SpansOf(R), XB), a, XA))
+  -> q.WithinB(q.nacc(P.back.go(R, n)), q.brev(XB, XA)):
+  match R XB:
+    case Nil{} Nil{}:
+      (atp, wa) = inv
+      wa
+    case Nil{} Con{x, xr}:
+      Empty.absurd(q.WithinB(q.nacc(n), q.brev(x <> xr, XA)), w)
+    case Con{m, rr} Nil{}:
+      Empty.absurd(q.WithinB(q.nacc(P.back.go(m <> rr, n)), XA), w)
+    case Con{P.Mark{P.Span{+sa, +sb, +sc, +sd}, +t}, +rr} Con{+x, +xr}:
+      (tx, w2) = w
+      (nta, un2) = un
+      (le_ba, (fr, geo2)) = geo
+      q.back_within(rr, xr, P.back.step(P.Mark{P.Span{sa, sb, sc, sd}, t}, n), x <> XA, sa, w2, un2, geo2,
+        q.bstep(sa, sb, sc, sd, t, n, q.zipm(Laws.SpansOf(rr), xr), x, XA, a, tx, nta, le_ba, fr, inv))
+
+def q.fforced(+sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, at0: Maybe<&2, P.Span>, x: Bool, -xs: +List<P.Mark>, +a: Nat,
+  he: {P.before(at0, P.Span{sa, sb, sc, sd}) == True{} : Bool}, atp: q.AtF(at0, P.Mark{P.Span{sa, sb, sc, sd}, x} <> xs, a),
+  le_as: {Nat.is_le(a, sa) == True{} : Bool}, fr: Laws.Framed(P.Span{sa, sb, sc, sd})) -> {x == True{} : Bool}:
+  match at0:
+    case None{}:
+      Empty.absurd({x == True{} : Bool}, ft(he))
+    case Some{P.Span{+la, +lb, lc, ld}}:
+      (((g1, g2), rest), (le_lba, lt_ll)) = atp
+      (ca, (ab, bd)) = fr
+      +las = lt_le_trans(la, a, sa, lt_le_trans(la, lb, a, lt_ll, le_lba), le_as)
+      +lad = lt_le_trans(la, sb, sd, q.lt_lt(la, sa, sb, las, ab), bd)
+      q.forced(x, Laws.Touches(P.Span{sa, sb, sc, sd}, P.Span{la, lb, lc, ld}), g2, q.and_tt(Nat.is_lt(sc, lb), Nat.is_lt(la, sd), gt_lt(lb, sc, he), lad))
+
+def q.fat_keep(+sa: Nat, +sb: Nat, -sc: Nat, -sd: Nat, at0: Maybe<&2, P.Span>, -x: Bool, +xs: +List<P.Mark>, +a: Nat,
+  atp: q.AtF(at0, P.Mark{P.Span{sa, sb, sc, sd}, x} <> xs, a), le_as: {Nat.is_le(a, sa) == True{} : Bool}, ab: {Nat.is_lt(sa, sb) == True{} : Bool})
+  -> q.AtF(at0, xs, sb):
+  match at0:
+    case None{}:
+      Unit{}
+    case Some{P.Span{+fa, +fb, fc, fd}}:
+      ((nt, rest), (le_fba, lt_ff)) = atp
+      (rest, (le_trans(fb, a, sb, le_fba, lt_imp_le(a, sb, q.le_lt_trans(a, sa, sb, le_as, ab))), lt_ff))
+
+def q.fat_new(+sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, -x: Bool, +xs: +List<P.Mark>, xt: {x == True{} : Bool},
+  nta: Laws.NoTouchAll(P.Mark{P.Span{sa, sb, sc, sd}, x}, xs), ab: {Nat.is_lt(sa, sb) == True{} : Bool}) -> q.AtF(Some{P.Span{sa, sb, sc, sd}}, xs, sb):
+  (q.nta_true(P.Span{sa, sb, sc, sd}, x, xs, xt, nta), (q.le_refl(sb), ab))
+
+def q.fstep.f(+sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, +at0: Maybe<&2, P.Span>, g: Bool, +acc: +List<P.Mark>, +xs: +List<P.Mark>, +x: Bool, +XA: +List<Bool>, +a: Nat,
+  e: Bool, he: {P.before(at0, P.Span{sa, sb, sc, sd}) == e : Bool}, nta: Laws.NoTouchAll(P.Mark{P.Span{sa, sb, sc, sd}, x}, xs),
+  le_as: {Nat.is_le(a, sa) == True{} : Bool}, fr: Laws.Framed(P.Span{sa, sb, sc, sd}), inv: q.FInv(P.Near{at0, g, acc}, P.Mark{P.Span{sa, sb, sc, sd}, x} <> xs, a, XA))
+  -> q.FInv(P.near.at(P.Span{sa, sb, sc, sd}, at0, g, acc, e), xs, sb, x <> XA):
+  match e:
+    case True{}:
+      (ca, (+ab, bd)) = fr
+      (atp, wa) = inv
+      +xt = q.fforced(sa, sb, sc, sd, at0, x, xs, a, he, atp, le_as, (ca, (ab, bd)))
+      (q.fat_new(sa, sb, sc, sd, x, xs, xt, nta, ab), (y => xt, wa))
+    case False{}:
+      (ca, (ab, bd)) = fr
+      (atp, wa) = inv
+      (q.fat_keep(sa, sb, sc, sd, at0, x, xs, a, atp, le_as, ab), (y => Empty.absurd({x == True{} : Bool}, ft(y)), wa))
+
+def q.fstep(+sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, t: Bool, n: P.Near, +xs: +List<P.Mark>, +x: Bool, +XA: +List<Bool>, +a: Nat,
+  tx: {t == True{} : Bool} -> {x == True{} : Bool}, nta: Laws.NoTouchAll(P.Mark{P.Span{sa, sb, sc, sd}, x}, xs),
+  le_as: {Nat.is_le(a, sa) == True{} : Bool}, fr: Laws.Framed(P.Span{sa, sb, sc, sd}), inv: q.FInv(n, P.Mark{P.Span{sa, sb, sc, sd}, x} <> xs, a, XA))
+  -> q.FInv(P.fwd.step(P.Mark{P.Span{sa, sb, sc, sd}, t}, n), xs, sb, x <> XA):
+  match t n:
+    case True{} P.Near{at0, g, acc}:
+      (ca, (ab, bd)) = fr
+      (atp, wa) = inv
+      +xt = tx({==})
+      (q.fat_new(sa, sb, sc, sd, x, xs, xt, nta, ab), (y => xt, wa))
+    case False{} P.Near{+at0, g, +acc}:
+      q.fstep.f(sa, sb, sc, sd, at0, g, acc, xs, x, XA, a, P.before(at0, P.Span{sa, sb, sc, sd}), {==}, nta, le_as, fr, inv)
+
+def q.fwd_within(F: +List<P.Mark>, XB: +List<Bool>, +n: P.Near, +XA: +List<Bool>, +a: Nat,
+  w: q.WithinB(F, XB), un: Laws.Untouched(q.zipm(Laws.SpansOf(F), XB)), geo: Laws.SpansFrom(a, Laws.SpansOf(F)),
+  inv: q.FInv(n, q.zipm(Laws.SpansOf(F), XB), a, XA))
+  -> q.WithinB(q.nacc(P.fwd.go(F, n)), q.brev(XB, XA)):
+  match F XB:
+    case Nil{} Nil{}:
+      (atp, wa) = inv
+      wa
+    case Nil{} Con{x, xr}:
+      Empty.absurd(q.WithinB(q.nacc(n), q.brev(x <> xr, XA)), w)
+    case Con{m, rr} Nil{}:
+      Empty.absurd(q.WithinB(q.nacc(P.fwd.go(m <> rr, n)), XA), w)
+    case Con{P.Mark{P.Span{+sa, +sb, +sc, +sd}, +t}, +rr} Con{+x, +xr}:
+      (tx, w2) = w
+      (nta, un2) = un
+      (le_as, (fr, geo2)) = geo
+      q.fwd_within(rr, xr, P.fwd.step(P.Mark{P.Span{sa, sb, sc, sd}, t}, n), x <> XA, sb, w2, un2, geo2,
+        q.fstep(sa, sb, sc, sd, t, n, q.zipm(Laws.SpansOf(rr), xr), x, XA, a, tx, nta, le_as, fr, inv))
+
+def q.bapp(xs: +List<Bool>, ys: +List<Bool>) -> List<&2, Bool>:
+  match xs:
+    case Nil{}:
+      ys
+    case Con{x, rest}:
+      x <> q.bapp(rest, ys)
+
+def q.brev2(xs: +List<Bool>, +ys: +List<Bool>, +zs: +List<Bool>) -> {q.brev(q.brev(xs, ys), zs) == q.brev(ys, q.bapp(xs, zs)) : List<&2, Bool>}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+x, +rest}:
+      q.brev2(rest, x <> ys, zs)
+
+def q.bapp_nil(xs: +List<Bool>) -> {q.bapp(xs, Nil{}) == xs : List<&2, Bool>}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+x, +rest}:
+      %q.bapp_nil(rest) : {x <> q.bapp(rest, Nil{}) == x <> _ : List<&2, Bool>}
+      {==}
+
+def q.brev_brev(+xs: +List<Bool>) -> {q.brev(q.brev(xs, Nil{}), Nil{}) == xs : List<&2, Bool>}:
+  Equal.trans(List<&2, Bool>, q.brev(q.brev(xs, Nil{}), Nil{}), q.bapp(xs, Nil{}), xs, q.brev2(xs, Nil{}, Nil{}), q.bapp_nil(xs))
+
+def q.stl(l: +List<P.Span>) -> List<&2, P.Span>:
+  match l:
+    case Nil{}:
+      Nil{}
+    case Con{x, r}:
+      r
+
+def q.shd(l: +List<P.Span>, +d: P.Span) -> P.Span:
+  match l:
+    case Nil{}:
+      d
+    case Con{x, r}:
+      x
+
+def q.isnil(l: +List<P.Span>) -> Bool:
+  match l:
+    case Nil{}:
+      True{}
+    case Con{x, r}:
+      False{}
+
+def q.nil_con(-s: P.Span, -r: +List<P.Span>, e: {Nil{} == s <> r : List<&2, P.Span>}) -> Empty:
+  ft(Equal.sym(Bool, True{}, False{}, Equal.cong(List<&2, P.Span>, Bool, l => q.isnil(l), Nil{}, s <> r, e)))
+
+def q.con_nil(-s: P.Span, -r: +List<P.Span>, e: {s <> r == Nil{} : List<&2, P.Span>}) -> Empty:
+  ft(Equal.cong(List<&2, P.Span>, Bool, l => q.isnil(l), s <> r, Nil{}, e))
+
+def q.con_hd(+s: P.Span, -r: +List<P.Span>, -s2: P.Span, -r2: +List<P.Span>, e: {s <> r == s2 <> r2 : List<&2, P.Span>}) -> {s == s2 : P.Span}:
+  Equal.cong(List<&2, P.Span>, P.Span, l => q.shd(l, s), s <> r, s2 <> r2, e)
+
+def q.con_tl(-s: P.Span, -r: +List<P.Span>, -s2: P.Span, -r2: +List<P.Span>, e: {s <> r == s2 <> r2 : List<&2, P.Span>}) -> {r == r2 : List<&2, P.Span>}:
+  Equal.cong(List<&2, P.Span>, List<&2, P.Span>, l => q.stl(l), s <> r, s2 <> r2, e)
+
+def q.within_init(+bs: +List<Nat>, R: +List<P.Mark>, Y: +List<P.Mark>, ex: q.Exact(bs, R), ct: Laws.CrossTaken(bs, Y), +sp: {Laws.SpansOf(R) == Laws.SpansOf(Y) : List<&2, P.Span>})
+  -> q.WithinB(R, q.bools(Y)):
+  match R Y:
+    case Nil{} Nil{}:
+      Unit{}
+    case Nil{} Con{P.Mark{s2, x}, yr}:
+      Empty.absurd(q.WithinB(Nil{}, x <> q.bools(yr)), q.nil_con(s2, Laws.SpansOf(yr), sp))
+    case Con{P.Mark{s, t}, rr} Nil{}:
+      Empty.absurd(q.WithinB(P.Mark{s, t} <> rr, Nil{}), q.con_nil(s, Laws.SpansOf(rr), sp))
+    case Con{P.Mark{+s, +t}, +rr} Con{P.Mark{+s2, +x}, +yr}:
+      (et, ex2) = ex
+      (cx, ct2) = ct
+      +es = q.con_hd(s, Laws.SpansOf(rr), s2, Laws.SpansOf(yr), sp)
+      (h => cx(Equal.trans(Bool, Laws.CrossOf(bs, s2), Laws.CrossOf(bs, s), True{},
+          Equal.sym(Bool, Laws.CrossOf(bs, s), Laws.CrossOf(bs, s2), Equal.cong(P.Span, Bool, z => Laws.CrossOf(bs, z), s, s2, es)),
+          Equal.trans(Bool, Laws.CrossOf(bs, s), t, True{}, Equal.sym(Bool, t, Laws.CrossOf(bs, s), et), h))),
+       q.within_init(bs, rr, yr, ex2, ct2, q.con_tl(s, Laws.SpansOf(rr), s2, Laws.SpansOf(yr), sp)))
+
+def q.within_taken(ms: +List<P.Mark>, X: +List<P.Mark>, +sp: {Laws.SpansOf(ms) == Laws.SpansOf(X) : List<&2, P.Span>}, w: q.WithinB(ms, q.bools(X)))
+  -> Laws.TakenWithin(ms, X):
+  match ms X:
+    case Nil{} Nil{}:
+      Unit{}
+    case Nil{} Con{P.Mark{s2, x}, xr}:
+      Empty.absurd(Laws.TakenWithin(Nil{}, P.Mark{s2, x} <> xr), q.nil_con(s2, Laws.SpansOf(xr), sp))
+    case Con{P.Mark{s, t}, mr} Nil{}:
+      Empty.absurd(Laws.TakenWithin(P.Mark{s, t} <> mr, Nil{}), q.con_nil(s, Laws.SpansOf(mr), sp))
+    case Con{P.Mark{+s, +t}, +mr} Con{P.Mark{+s2, +x}, +xr}:
+      (h, w2) = w
+      (h, q.within_taken(mr, xr, q.con_tl(s, Laws.SpansOf(mr), s2, Laws.SpansOf(xr), sp), w2))
+
+def q.within_rev(ms: +List<P.Mark>, xs: +List<Bool>, +acc: +List<P.Mark>, +xa: +List<Bool>, w1: q.WithinB(ms, xs), w2: q.WithinB(acc, xa))
+  -> q.WithinB(P.rev.go(ms, acc), q.brev(xs, xa)):
+  match ms xs:
+    case Nil{} Nil{}:
+      w2
+    case Nil{} Con{x, xr}:
+      Empty.absurd(q.WithinB(acc, q.brev(x <> xr, xa)), w1)
+    case Con{m, mr} Nil{}:
+      Empty.absurd(q.WithinB(P.rev.go(m <> mr, acc), xa), w1)
+    case Con{P.Mark{+s, +t}, +mr} Con{+x, +xr}:
+      (h, w3) = w1
+      q.within_rev(mr, xr, P.Mark{s, t} <> acc, x <> xa, w3, (h, w2))
+
+def q.bools_rev(ms: +List<P.Mark>, +acc: +List<P.Mark>) -> {q.bools(P.rev.go(ms, acc)) == q.brev(q.bools(ms), q.bools(acc)) : List<&2, Bool>}:
+  match ms:
+    case Nil{}:
+      {==}
+    case Con{P.Mark{+s, +t}, +rest}:
+      q.bools_rev(rest, P.Mark{s, t} <> acc)
+
+def q.zip_self_r(ms: +List<P.Mark>) -> {ms == q.zipm(Laws.SpansOf(ms), q.bools(ms)) : List<&2, P.Mark>}:
+  match ms:
+    case Nil{}:
+      {==}
+    case Con{P.Mark{+s, +t}, +rest}:
+      %q.zip_self_r(rest) : {P.Mark{s, t} <> rest == P.Mark{s, t} <> _ : List<&2, P.Mark>}
+      {==}
+
+def q.nt_sym(+m: P.Mark, +n: P.Mark, h: Laws.NoTouch(m, n)) -> Laws.NoTouch(n, m):
+  match m n:
+    case P.Mark{s, t} P.Mark{s2, t2}:
+      (g1, g2) = h
+      (g2, g1)
+
+def q.NTA2(xs: +List<P.Mark>, +acc: +List<P.Mark>) -> Type:
+  match xs:
+    case Nil{}:
+      Unit
+    case Con{m, r}:
+      Laws.NoTouchAll(m, acc) & q.NTA2(r, acc)
+
+def q.nta2_nil(xs: +List<P.Mark>) -> q.NTA2(xs, Nil{}):
+  match xs:
+    case Nil{}:
+      Unit{}
+    case Con{m, r}:
+      (Unit{}, q.nta2_nil(r))
+
+def q.nta2_cons(+x: P.Mark, xr: +List<P.Mark>, +acc: +List<P.Mark>, h1: Laws.NoTouchAll(x, xr), h2: q.NTA2(xr, acc)) -> q.NTA2(xr, x <> acc):
+  match xr:
+    case Nil{}:
+      Unit{}
+    case Con{+m, +r}:
+      (n1, n2) = h1
+      (a1, a2) = h2
+      ((q.nt_sym(x, m, n1), a1), q.nta2_cons(x, r, acc, n2, a2))
+
+def q.untouched_revgo(xs: +List<P.Mark>, +acc: +List<P.Mark>, u1: Laws.Untouched(xs), u2: Laws.Untouched(acc), cr: q.NTA2(xs, acc)) -> Laws.Untouched(P.rev.go(xs, acc)):
+  match xs:
+    case Nil{}:
+      u2
+    case Con{+x, +xr}:
+      (n1, u3) = u1
+      (c1, c2) = cr
+      q.untouched_revgo(xr, x <> acc, u3, (c1, u2), q.nta2_cons(x, xr, acc, n1, c2))
+
+def q.lastend(ss: +List<P.Span>, +e: Nat) -> Nat:
+  match ss:
+    case Nil{}:
+      e
+    case Con{P.Span{a, b, c, d}, r}:
+      q.lastend(r, b)
+
+def q.revfrom_weaken(ss: +List<P.Span>, +a: Nat, +a2: Nat, e: {Nat.is_le(a, a2) == True{} : Bool}, h: q.RevFrom(a, ss)) -> q.RevFrom(a2, ss):
+  match ss:
+    case Nil{}:
+      Unit{}
+    case Con{P.Span{+sa, +sb, +sc, +sd}, +r}:
+      (x, rest) = h
+      (le_trans(sb, a, a2, x, e), rest)
+
+def q.rev_geo(ss: +List<P.Span>, +e: Nat, +acc: +List<P.Span>, sp: Laws.SpansFrom(e, ss), ga: q.RevFrom(e, acc)) -> q.RevFrom(q.lastend(ss, e), q.srev(ss, acc)):
+  match ss:
+    case Nil{}:
+      ga
+    case Con{P.Span{+sa, +sb, +sc, +sd}, +r}:
+      (ea, (fr, sp2)) = sp
+      q.rev_geo(r, sb, P.Span{sa, sb, sc, sd} <> acc, sp2, (q.le_refl(sb), (fr, q.revfrom_weaken(acc, e, sa, ea, ga))))
+
+def q.pair2(-A: Type, -B: Type, a: A & A, b: B & B) -> (A & B) & (A & B):
+  (a1, a2) = a
+  (b1, b2) = b
+  ((a1, b1), (a2, b2))
+
+def q.gate_dup(t: Bool, t2: Bool, -x: Bool, g: Laws.Gate(t, t2, x)) -> Laws.Gate(t, t2, x) & Laws.Gate(t, t2, x):
+  match t t2:
+    case False{} True{}:
+      dup_b(x, False{}, g)
+    case True{} True{}:
+      (Unit{}, Unit{})
+    case True{} False{}:
+      (Unit{}, Unit{})
+    case False{} False{}:
+      (Unit{}, Unit{})
+
+def q.nt_dup(+m: P.Mark, +n: P.Mark, h: Laws.NoTouch(m, n)) -> Laws.NoTouch(m, n) & Laws.NoTouch(m, n):
+  match m n:
+    case P.Mark{+s, +t} P.Mark{+s2, +t2}:
+      (g1, g2) = h
+      q.pair2(Laws.Gate(t, t2, Laws.Touches(s, s2)), Laws.Gate(t2, t, Laws.Touches(s2, s)), q.gate_dup(t, t2, Laws.Touches(s, s2), g1), q.gate_dup(t2, t, Laws.Touches(s2, s), g2))
+
+def q.nta_dup(+m: P.Mark, ns: +List<P.Mark>, h: Laws.NoTouchAll(m, ns)) -> Laws.NoTouchAll(m, ns) & Laws.NoTouchAll(m, ns):
+  match ns:
+    case Nil{}:
+      (Unit{}, Unit{})
+    case Con{+n, +rest}:
+      (a, b) = h
+      q.pair2(Laws.NoTouch(m, n), Laws.NoTouchAll(m, rest), q.nt_dup(m, n, a), q.nta_dup(m, rest, b))
+
+def q.un_dup(ms: +List<P.Mark>, h: Laws.Untouched(ms)) -> Laws.Untouched(ms) & Laws.Untouched(ms):
+  match ms:
+    case Nil{}:
+      (Unit{}, Unit{})
+    case Con{+m, +rest}:
+      (a, b) = h
+      q.pair2(Laws.NoTouchAll(m, rest), Laws.Untouched(rest), q.nta_dup(m, rest, a), q.un_dup(rest, b))
+
+def q.fr_mk(-a: Nat, -b: Nat, -c: Nat, -d: Nat, +x: {Nat.is_le(c, a) == True{} : Bool}, +y: {Nat.is_lt(a, b) == True{} : Bool}, +z: {Nat.is_le(b, d) == True{} : Bool})
+  -> Laws.Framed(P.Span{a, b, c, d}) & Laws.Framed(P.Span{a, b, c, d}):
+  ((x, (y, z)), (x, (y, z)))
+
+def q.fr_dup(-a: Nat, -b: Nat, -c: Nat, -d: Nat, h: Laws.Framed(P.Span{a, b, c, d})) -> Laws.Framed(P.Span{a, b, c, d}) & Laws.Framed(P.Span{a, b, c, d}):
+  (x, (y, z)) = h
+  q.fr_mk(a, b, c, d, x, y, z)
+
+def q.sp_dup.k(-e: Nat, -a: Nat, -b: Nat, -c: Nat, -d: Nat, -rest: +List<P.Span>, +x: {Nat.is_le(e, a) == True{} : Bool},
+  f: Laws.Framed(P.Span{a, b, c, d}) & Laws.Framed(P.Span{a, b, c, d}), r: Laws.SpansFrom(b, rest) & Laws.SpansFrom(b, rest))
+  -> Laws.SpansFrom(e, P.Span{a, b, c, d} <> rest) & Laws.SpansFrom(e, P.Span{a, b, c, d} <> rest):
+  (f1, f2) = f
+  (r1, r2) = r
+  ((x, (f1, r1)), (x, (f2, r2)))
+
+def q.sp_dup(ss: +List<P.Span>, +e: Nat, h: Laws.SpansFrom(e, ss)) -> Laws.SpansFrom(e, ss) & Laws.SpansFrom(e, ss):
+  match ss:
+    case Nil{}:
+      (Unit{}, Unit{})
+    case Con{P.Span{+a, +b, +c, +d}, +rest}:
+      (x, (f, r)) = h
+      q.sp_dup.k(e, a, b, c, d, rest, x, q.fr_dup(a, b, c, d, f), q.sp_dup(rest, b, r))
+
+def q.rv_dup.k(-e: Nat, -a: Nat, -b: Nat, -c: Nat, -d: Nat, -rest: +List<P.Span>, +x: {Nat.is_le(b, e) == True{} : Bool},
+  f: Laws.Framed(P.Span{a, b, c, d}) & Laws.Framed(P.Span{a, b, c, d}), r: q.RevFrom(a, rest) & q.RevFrom(a, rest))
+  -> q.RevFrom(e, P.Span{a, b, c, d} <> rest) & q.RevFrom(e, P.Span{a, b, c, d} <> rest):
+  (f1, f2) = f
+  (r1, r2) = r
+  ((x, (f1, r1)), (x, (f2, r2)))
+
+def q.rv_dup(ss: +List<P.Span>, +e: Nat, h: q.RevFrom(e, ss)) -> q.RevFrom(e, ss) & q.RevFrom(e, ss):
+  match ss:
+    case Nil{}:
+      (Unit{}, Unit{})
+    case Con{P.Span{+a, +b, +c, +d}, +rest}:
+      (x, (f, r)) = h
+      q.rv_dup.k(e, a, b, c, d, rest, x, q.fr_dup(a, b, c, d, f), q.rv_dup(rest, a, r))
+
+def q.cast_un(-A: +List<P.Span>, -B: +List<P.Span>, -YB: +List<Bool>, e: {A == B : List<&2, P.Span>}, h: Laws.Untouched(q.zipm(B, YB))) -> Laws.Untouched(q.zipm(A, YB)):
+  %Equal.sym(List<&2, P.Span>, A, B, e) : Laws.Untouched(q.zipm(_, YB))
+  h
+
+def q.cast_rev(-a: Nat, -A: +List<P.Span>, -B: +List<P.Span>, e: {A == B : List<&2, P.Span>}, h: q.RevFrom(a, B)) -> q.RevFrom(a, A):
+  %Equal.sym(List<&2, P.Span>, A, B, e) : q.RevFrom(a, _)
+  h
+
+def q.cast_sp(-a: Nat, -A: +List<P.Span>, -B: +List<P.Span>, e: {A == B : List<&2, P.Span>}, h: Laws.SpansFrom(a, B)) -> Laws.SpansFrom(a, A):
+  %Equal.sym(List<&2, P.Span>, A, B, e) : Laws.SpansFrom(a, _)
+  h
+
+def q.cast_wb(-F: +List<P.Mark>, -X1: +List<Bool>, -X2: +List<Bool>, e: {X1 == X2 : List<&2, Bool>}, h: q.WithinB(F, X1)) -> q.WithinB(F, X2):
+  %e : q.WithinB(F, _)
+  h
+
+def q.cast_wbm(-M1: +List<P.Mark>, -M2: +List<P.Mark>, -XB: +List<Bool>, e: {M1 == M2 : List<&2, P.Mark>}, h: q.WithinB(M2, XB)) -> q.WithinB(M1, XB):
+  %Equal.sym(List<&2, P.Mark>, M1, M2, e) : q.WithinB(_, XB)
+  h
+
+def q.roundend_ms(g: Bool, f: P.Near) -> {q.pms(P.round.end(g, f)) == q.nacc(f) : List<&2, P.Mark>}:
+  match f:
+    case P.Near{at, g2, ms}:
+      {==}
+
+def q.roundfwd_ms(b: P.Near) -> {q.pms(P.round.fwd(b)) == q.nacc(P.fwd.go(q.nacc(b), P.Near{None{}, False{}, Nil{}})) : List<&2, P.Mark>}:
+  match b:
+    case P.Near{at, g, ms}:
+      q.roundend_ms(g, P.fwd.go(ms, P.Near{None{}, False{}, Nil{}}))
+
+def q.round_within(+r: +List<P.Mark>, +ss: +List<P.Span>, +XB: +List<Bool>, +top: Nat,
+  +sr: {Laws.SpansOf(r) == q.srev(ss, Nil{}) : List<&2, P.Span>}, wr: q.WithinB(r, q.brev(XB, Nil{})),
+  uX: Laws.Untouched(q.zipm(ss, XB)), uY: Laws.Untouched(q.zipm(q.srev(ss, Nil{}), q.brev(XB, Nil{}))),
+  gF: Laws.SpansFrom(0n, ss), gR: q.RevFrom(top, q.srev(ss, Nil{})))
+  -> q.WithinB(q.pms(P.round(r)), q.brev(XB, Nil{})):
+  +n0 = {P.Near{None{}, False{}, Nil{}} : P.Near}
+  +F = q.nacc(P.back.go(r, n0))
+  +sF = Equal.trans(List<&2, P.Span>, Laws.SpansOf(F), q.srev(Laws.SpansOf(r), Nil{}), ss,
+    q.back_spans(r, n0),
+    Equal.trans(List<&2, P.Span>, q.srev(Laws.SpansOf(r), Nil{}), q.srev(q.srev(ss, Nil{}), Nil{}), ss,
+      Equal.cong(List<&2, P.Span>, List<&2, P.Span>, x => q.srev(x, Nil{}), Laws.SpansOf(r), q.srev(ss, Nil{}), sr),
+      q.srev_srev(ss)))
+  q.cast_wbm(q.pms(P.round(r)), q.nacc(P.fwd.go(F, n0)), q.brev(XB, Nil{}), q.roundfwd_ms(P.back.go(r, n0)),
+    q.fwd_within(F, XB, n0, Nil{}, 0n,
+      q.cast_wb(F, q.brev(q.brev(XB, Nil{}), Nil{}), XB, q.brev_brev(XB),
+        q.back_within(r, q.brev(XB, Nil{}), n0, Nil{}, top, wr,
+          q.cast_un(Laws.SpansOf(r), q.srev(ss, Nil{}), q.brev(XB, Nil{}), sr, uY),
+          q.cast_rev(top, Laws.SpansOf(r), q.srev(ss, Nil{}), sr, gR), (Unit{}, Unit{}))),
+      q.cast_un(Laws.SpansOf(F), ss, XB, sF, uX), q.cast_sp(0n, Laws.SpansOf(F), ss, sF, gF), (Unit{}, Unit{})))
+
+def q.loop_within(u: Nat, pr: P.Pass, +ss: +List<P.Span>, +XB: +List<Bool>, +top: Nat,
+  +sr: {Laws.SpansOf(q.pms(pr)) == q.srev(ss, Nil{}) : List<&2, P.Span>}, wr: q.WithinB(q.pms(pr), q.brev(XB, Nil{})),
+  uX: Laws.Untouched(q.zipm(ss, XB)) & Laws.Untouched(q.zipm(ss, XB)),
+  uY: Laws.Untouched(q.zipm(q.srev(ss, Nil{}), q.brev(XB, Nil{}))) & Laws.Untouched(q.zipm(q.srev(ss, Nil{}), q.brev(XB, Nil{}))),
+  gF: Laws.SpansFrom(0n, ss) & Laws.SpansFrom(0n, ss), gR: q.RevFrom(top, q.srev(ss, Nil{})) & q.RevFrom(top, q.srev(ss, Nil{})))
+  -> q.WithinB(P.loop(u, pr), q.brev(XB, Nil{})):
+  match u pr:
+    case 0n P.Pass{r, g}:
+      wr
+    case 1n+v P.Pass{+r, True{}}:
+      (uX1, uX2) = uX
+      (uY1, uY2) = uY
+      (gF1, gF2) = gF
+      (gR1, gR2) = gR
+      q.loop_within(v, P.round(r), ss, XB, top,
+        Equal.trans(List<&2, P.Span>, Laws.SpansOf(q.pms(P.round(r))), Laws.SpansOf(r), q.srev(ss, Nil{}), q.round_spans(r), sr),
+        q.round_within(r, ss, XB, top, sr, wr, uX1, uY1, gF1, gR1),
+        q.un_dup(q.zipm(ss, XB), uX2), q.un_dup(q.zipm(q.srev(ss, Nil{}), q.brev(XB, Nil{})), uY2),
+        q.sp_dup(ss, 0n, gF2), q.rv_dup(q.srev(ss, Nil{}), top, gR2))
+    case 1n+v P.Pass{r, False{}}:
+      wr
+
+def q.un_of(+Y: +List<P.Mark>, -A: +List<P.Span>, -B: +List<Bool>, eA: {Laws.SpansOf(Y) == A : List<&2, P.Span>}, eB: {q.bools(Y) == B : List<&2, Bool>}, h: Laws.Untouched(Y))
+  -> Laws.Untouched(q.zipm(A, B)):
+  %eA : Laws.Untouched(q.zipm(_, B))
+  %eB : Laws.Untouched(q.zipm(Laws.SpansOf(Y), _))
+  %q.zip_self_r(Y) : Laws.Untouched(_)
+  h
+
+def q.l3.c(+bs: +List<Nat>, +ss: +List<P.Span>, +xs: +List<P.Mark>, +same: {Laws.SpansOf(xs) == ss : List<&2, P.Span>},
+  +sr0: {Laws.SpansOf(P.walk.go(ss, P.Walk{Nil{}, bs, Nil{}})) == q.srev(ss, Nil{}) : List<&2, P.Span>},
+  wr0: q.WithinB(P.walk.go(ss, P.Walk{Nil{}, bs, Nil{}}), q.brev(q.bools(xs), Nil{})),
+  uX: Laws.Untouched(q.zipm(ss, q.bools(xs))), uY: Laws.Untouched(q.zipm(q.srev(ss, Nil{}), q.brev(q.bools(xs), Nil{}))),
+  gF: Laws.SpansFrom(0n, ss), gR: q.RevFrom(q.lastend(ss, 0n), q.srev(ss, Nil{})))
+  -> Laws.TakenWithin(P.taken(bs, ss), xs):
+  +r0 = P.walk.go(ss, P.Walk{Nil{}, bs, Nil{}})
+  +XB = q.bools(xs)
+  +L = P.loop(P.untaken.go(r0, 0n), P.Pass{r0, True{}})
+  +top = q.lastend(ss, 0n)
+  q.within_taken(P.rev.go(L, Nil{}), xs, Equal.trans(List<&2, P.Span>, Laws.SpansOf(P.rev.go(L, Nil{})), ss, Laws.SpansOf(xs), Laws.parts_keep_every_span_in_order(bs, ss), Equal.sym(List<&2, P.Span>, Laws.SpansOf(xs), ss, same)),
+    q.cast_wb(P.rev.go(L, Nil{}), q.brev(q.brev(XB, Nil{}), Nil{}), XB, q.brev_brev(XB),
+      q.within_rev(L, q.brev(XB, Nil{}), Nil{}, Nil{},
+        q.loop_within(P.untaken.go(r0, 0n), P.Pass{r0, True{}}, ss, XB, top, sr0, wr0,
+          q.un_dup(q.zipm(ss, XB), uX), q.un_dup(q.zipm(q.srev(ss, Nil{}), q.brev(XB, Nil{})), uY),
+          q.sp_dup(ss, 0n, gF), q.rv_dup(q.srev(ss, Nil{}), top, gR)),
+        Unit{})))
+
+def q.l3.b(+bs: +List<Nat>, sorted: Laws.BsFrom(0n, bs), +ss: +List<P.Span>, ap: Laws.SpansFrom(0n, ss) & Laws.SpansFrom(0n, ss), ap3: Laws.SpansFrom(0n, ss),
+  +xs: +List<P.Mark>, +same: {Laws.SpansOf(xs) == ss : List<&2, P.Span>}, cross: Laws.CrossTaken(bs, xs), cl: Laws.Untouched(xs) & Laws.Untouched(xs))
+  -> Laws.TakenWithin(P.taken(bs, ss), xs):
+  (a1, a2) = ap
+  (c1, c2) = cl
+  +r0 = P.walk.go(ss, P.Walk{Nil{}, bs, Nil{}})
+  +Y = P.rev.go(xs, Nil{})
+  +sr0 = q.walk_spans(ss, P.Walk{Nil{}, bs, Nil{}})
+  +sY = Equal.trans(List<&2, P.Span>, Laws.SpansOf(Y), q.srev(Laws.SpansOf(xs), Nil{}), q.srev(ss, Nil{}), q.mspans_rev(xs, Nil{}),
+    Equal.cong(List<&2, P.Span>, List<&2, P.Span>, x => q.srev(x, Nil{}), Laws.SpansOf(xs), ss, same))
+  +bY = q.bools_rev(xs, Nil{})
+  q.l3.c(bs, ss, xs, same, sr0,
+    q.cast_wb(r0, q.bools(Y), q.brev(q.bools(xs), Nil{}), bY,
+      q.within_init(bs, r0, Y, q.walk0(bs, ss, sorted, a1), q.ct_rev(bs, xs, Nil{}, cross, Unit{}),
+        Equal.trans(List<&2, P.Span>, Laws.SpansOf(r0), q.srev(ss, Nil{}), Laws.SpansOf(Y), sr0, Equal.sym(List<&2, P.Span>, Laws.SpansOf(Y), q.srev(ss, Nil{}), sY)))),
+    q.un_of(xs, ss, q.bools(xs), same, {==}, c1),
+    q.un_of(Y, q.srev(ss, Nil{}), q.brev(q.bools(xs), Nil{}), sY, bY, q.untouched_revgo(xs, Nil{}, c2, Unit{}, q.nta2_nil(xs))),
+    a2, q.rev_geo(ss, 0n, Nil{}, ap3, Unit{}))
+
+def q.l3.a(+bs: +List<Nat>, sorted: Laws.BsFrom(0n, bs), +ss: +List<P.Span>, ap: Laws.SpansFrom(0n, ss) & Laws.SpansFrom(0n, ss),
+  +xs: +List<P.Mark>, +same: {Laws.SpansOf(xs) == ss : List<&2, P.Span>}, cross: Laws.CrossTaken(bs, xs), cl: Laws.Untouched(xs))
+  -> Laws.TakenWithin(P.taken(bs, ss), xs):
+  (a1, a2) = ap
+  q.l3.b(bs, sorted, ss, q.sp_dup(ss, 0n, a1), a2, xs, same, cross, q.un_dup(xs, cl))
+
+def Laws.parts_take_no_span_that_crossings_do_not_force(bs, sorted, ss, apart, xs, same, cross, closed):
+  q.l3.a(bs, sorted, ss, q.sp_dup(ss, 0n, apart), xs, same, cross, closed)
+
+def q.cnt(ms: +List<P.Mark>) -> Nat:
+  match ms:
+    case Nil{}:
+      0n
+    case Con{P.Mark{s, True{}}, r}:
+      q.cnt(r)
+    case Con{P.Mark{s, False{}}, r}:
+      1n+q.cnt(r)
+
+def q.bn(g: Bool) -> Nat:
+  match g:
+    case True{}:
+      1n
+    case False{}:
+      0n
+
+def q.untaken_eq(ms: +List<P.Mark>, +n: Nat) -> {P.untaken.go(ms, n) == Nat.add(q.cnt(ms), n) : Nat}:
+  match ms:
+    case Nil{}:
+      {==}
+    case Con{P.Mark{s, True{}}, +r}:
+      q.untaken_eq(r, n)
+    case Con{P.Mark{s, False{}}, +r}:
+      Equal.trans(Nat, P.untaken.go(r, 1n+n), Nat.add(q.cnt(r), 1n+n), 1n+Nat.add(q.cnt(r), n), q.untaken_eq(r, 1n+n), Equal.sym(Nat, 1n+Nat.add(q.cnt(r), n), Nat.add(q.cnt(r), 1n+n), add_succ(q.cnt(r), n)))
+
+def q.le_succ(n: Nat) -> {Nat.is_le(n, 1n+n) == True{} : Bool}:
+  match n:
+    case 0n:
+      {==}
+    case 1n+p:
+      q.le_succ(p)
+
+def q.le_bn(g: Bool, +x: Nat) -> {Nat.is_le(x, Nat.add(q.bn(g), x)) == True{} : Bool}:
+  match g:
+    case True{}:
+      q.le_succ(x)
+    case False{}:
+      q.le_refl(x)
+
+def q.le_zero(x: Nat, h: {Nat.is_le(x, 0n) == True{} : Bool}) -> {x == 0n : Nat}:
+  match x:
+    case 0n:
+      {==}
+    case 1n+p:
+      Empty.absurd({1n+p == 0n : Nat}, ft(h))
+
+def q.cnt_le_eq(-a: Nat, -b: Nat, -c: Nat, e: {b == c : Nat}, h: {Nat.is_le(a, b) == True{} : Bool}) -> {Nat.is_le(a, c) == True{} : Bool}:
+  %e : {Nat.is_le(a, _) == True{} : Bool}
+  h
+
+def q.nstep_cnt.at(+s: P.Span, at: Maybe<&2, P.Span>, g: Bool, +acc: +List<P.Mark>, +K: Nat, e: Bool)
+  -> {Nat.is_le(Nat.add(q.bn(q.ngrew(P.near.at(s, at, g, acc, e))), Nat.add(K, q.cnt(q.nacc(P.near.at(s, at, g, acc, e))))), Nat.add(q.bn(g), Nat.add(1n+K, q.cnt(acc)))) == True{} : Bool}:
+  match g e:
+    case True{} True{}:
+      q.le_succ(1n+Nat.add(K, q.cnt(acc)))
+    case False{} True{}:
+      q.le_refl(1n+Nat.add(K, q.cnt(acc)))
+    case True{} False{}:
+      %add_succ(K, q.cnt(acc)) : {Nat.is_le(Nat.add(1n, _), Nat.add(1n, 1n+Nat.add(K, q.cnt(acc)))) == True{} : Bool}
+      q.le_refl(Nat.add(1n, 1n+Nat.add(K, q.cnt(acc))))
+    case False{} False{}:
+      %add_succ(K, q.cnt(acc)) : {Nat.is_le(_, 1n+Nat.add(K, q.cnt(acc))) == True{} : Bool}
+      q.le_refl(1n+Nat.add(K, q.cnt(acc)))
+
+def q.back_cnt(ms: +List<P.Mark>, +n: P.Near)
+  -> {Nat.is_le(Nat.add(q.bn(q.ngrew(P.back.go(ms, n))), q.cnt(q.nacc(P.back.go(ms, n)))), Nat.add(q.bn(q.ngrew(n)), Nat.add(q.cnt(ms), q.cnt(q.nacc(n))))) == True{} : Bool}:
+  match ms n:
+    case Nil{} _:
+      q.le_refl(Nat.add(q.bn(q.ngrew(n)), q.cnt(q.nacc(n))))
+    case Con{P.Mark{+s, True{}}, +rest} P.Near{+at, +g, +acc}:
+      q.back_cnt(rest, P.back.step(P.Mark{s, True{}}, P.Near{at, g, acc}))
+    case Con{P.Mark{+s, False{}}, +rest} P.Near{+at, +g, +acc}:
+      +n2 = P.back.step(P.Mark{s, False{}}, P.Near{at, g, acc})
+      le_trans(Nat.add(q.bn(q.ngrew(P.back.go(rest, n2))), q.cnt(q.nacc(P.back.go(rest, n2)))),
+        Nat.add(q.bn(q.ngrew(n2)), Nat.add(q.cnt(rest), q.cnt(q.nacc(n2)))),
+        Nat.add(q.bn(g), Nat.add(1n+q.cnt(rest), q.cnt(acc))),
+        q.back_cnt(rest, n2), q.nstep_cnt.at(s, at, g, acc, q.cnt(rest), P.after(at, s)))
+
+def q.fwd_cnt(ms: +List<P.Mark>, +n: P.Near)
+  -> {Nat.is_le(Nat.add(q.bn(q.ngrew(P.fwd.go(ms, n))), q.cnt(q.nacc(P.fwd.go(ms, n)))), Nat.add(q.bn(q.ngrew(n)), Nat.add(q.cnt(ms), q.cnt(q.nacc(n))))) == True{} : Bool}:
+  match ms n:
+    case Nil{} _:
+      q.le_refl(Nat.add(q.bn(q.ngrew(n)), q.cnt(q.nacc(n))))
+    case Con{P.Mark{+s, True{}}, +rest} P.Near{+at, +g, +acc}:
+      q.fwd_cnt(rest, P.fwd.step(P.Mark{s, True{}}, P.Near{at, g, acc}))
+    case Con{P.Mark{+s, False{}}, +rest} P.Near{+at, +g, +acc}:
+      +n2 = P.fwd.step(P.Mark{s, False{}}, P.Near{at, g, acc})
+      le_trans(Nat.add(q.bn(q.ngrew(P.fwd.go(rest, n2))), q.cnt(q.nacc(P.fwd.go(rest, n2)))),
+        Nat.add(q.bn(q.ngrew(n2)), Nat.add(q.cnt(rest), q.cnt(q.nacc(n2)))),
+        Nat.add(q.bn(g), Nat.add(1n+q.cnt(rest), q.cnt(acc))),
+        q.fwd_cnt(rest, n2), q.nstep_cnt.at(s, at, g, acc, q.cnt(rest), P.before(at, s)))
+
+def q.nat_grew(+s: P.Span, at: Maybe<&2, P.Span>, +acc: +List<P.Mark>, e: Bool) -> {q.ngrew(P.near.at(s, at, True{}, acc, e)) == True{} : Bool}:
+  match e:
+    case True{}:
+      {==}
+    case False{}:
+      {==}
+
+def q.back_grew(ms: +List<P.Mark>, +n: P.Near, h: {q.ngrew(n) == True{} : Bool}) -> {q.ngrew(P.back.go(ms, n)) == True{} : Bool}:
+  match ms n:
+    case Nil{} _:
+      h
+    case Con{P.Mark{+s, True{}}, +rest} P.Near{at, True{}, +acc}:
+      q.back_grew(rest, P.Near{Some{s}, True{}, P.Mark{s, True{}} <> acc}, {==})
+    case Con{P.Mark{+s, False{}}, +rest} P.Near{+at, True{}, +acc}:
+      q.back_grew(rest, P.near.at(s, at, True{}, acc, P.after(at, s)), q.nat_grew(s, at, acc, P.after(at, s)))
+    case Con{m, rest} P.Near{at, False{}, acc}:
+      Empty.absurd({q.ngrew(P.back.go(m <> rest, P.Near{at, False{}, acc})) == True{} : Bool}, ft(h))
+
+def q.fwd_grew(ms: +List<P.Mark>, +n: P.Near, h: {q.ngrew(n) == True{} : Bool}) -> {q.ngrew(P.fwd.go(ms, n)) == True{} : Bool}:
+  match ms n:
+    case Nil{} _:
+      h
+    case Con{P.Mark{+s, True{}}, +rest} P.Near{at, True{}, +acc}:
+      q.fwd_grew(rest, P.Near{Some{s}, True{}, P.Mark{s, True{}} <> acc}, {==})
+    case Con{P.Mark{+s, False{}}, +rest} P.Near{+at, True{}, +acc}:
+      q.fwd_grew(rest, P.near.at(s, at, True{}, acc, P.before(at, s)), q.nat_grew(s, at, acc, P.before(at, s)))
+    case Con{m, rest} P.Near{at, False{}, acc}:
+      Empty.absurd({q.ngrew(P.fwd.go(m <> rest, P.Near{at, False{}, acc})) == True{} : Bool}, ft(h))
+
+def q.back_grew_false(+ms: +List<P.Mark>, n: P.Near, h: {q.ngrew(P.back.go(ms, n)) == False{} : Bool}) -> {q.ngrew(n) == False{} : Bool}:
+  match n:
+    case P.Near{+at, True{}, +acc}:
+      Empty.absurd({True{} == False{} : Bool}, ft(Equal.trans(Bool, False{}, q.ngrew(P.back.go(ms, P.Near{at, True{}, acc})), True{},
+        Equal.sym(Bool, q.ngrew(P.back.go(ms, P.Near{at, True{}, acc})), False{}, h), q.back_grew(ms, P.Near{at, True{}, acc}, {==}))))
+    case P.Near{at, False{}, acc}:
+      {==}
+
+def q.fwd_grew_false(+ms: +List<P.Mark>, n: P.Near, h: {q.ngrew(P.fwd.go(ms, n)) == False{} : Bool}) -> {q.ngrew(n) == False{} : Bool}:
+  match n:
+    case P.Near{+at, True{}, +acc}:
+      Empty.absurd({True{} == False{} : Bool}, ft(Equal.trans(Bool, False{}, q.ngrew(P.fwd.go(ms, P.Near{at, True{}, acc})), True{},
+        Equal.sym(Bool, q.ngrew(P.fwd.go(ms, P.Near{at, True{}, acc})), False{}, h), q.fwd_grew(ms, P.Near{at, True{}, acc}, {==}))))
+    case P.Near{at, False{}, acc}:
+      {==}
+
+def q.nat_false(+s: P.Span, +at: Maybe<&2, P.Span>, +g: Bool, +acc: +List<P.Mark>, e: Bool, h: {q.ngrew(P.near.at(s, at, g, acc, e)) == False{} : Bool})
+  -> {P.near.at(s, at, g, acc, e) == P.Near{at, g, P.Mark{s, False{}} <> acc} : P.Near}:
+  match e:
+    case True{}:
+      Empty.absurd({P.Near{Some{s}, True{}, P.Mark{s, True{}} <> acc} == P.Near{at, g, P.Mark{s, False{}} <> acc} : P.Near}, ft(Equal.sym(Bool, True{}, False{}, h)))
+    case False{}:
+      {==}
+
+def q.back_same(ms: +List<P.Mark>, +n: P.Near, +h: {q.ngrew(P.back.go(ms, n)) == False{} : Bool}) -> {q.nacc(P.back.go(ms, n)) == P.rev.go(ms, q.nacc(n)) : List<&2, P.Mark>}:
+  match ms n:
+    case Nil{} _:
+      {==}
+    case Con{P.Mark{+s, True{}}, +rest} P.Near{+at, +g, +acc}:
+      q.back_same(rest, P.Near{Some{s}, g, P.Mark{s, True{}} <> acc}, h)
+    case Con{P.Mark{+s, False{}}, +rest} P.Near{+at, +g, +acc}:
+      +n2 = P.near.at(s, at, g, acc, P.after(at, s))
+      %q.nat_false(s, at, g, acc, P.after(at, s), q.back_grew_false(rest, n2, h)) : {q.nacc(P.back.go(rest, n2)) == P.rev.go(rest, q.nacc(_)) : List<&2, P.Mark>}
+      q.back_same(rest, n2, h)
+
+def q.fwd_same(ms: +List<P.Mark>, +n: P.Near, +h: {q.ngrew(P.fwd.go(ms, n)) == False{} : Bool}) -> {q.nacc(P.fwd.go(ms, n)) == P.rev.go(ms, q.nacc(n)) : List<&2, P.Mark>}:
+  match ms n:
+    case Nil{} _:
+      {==}
+    case Con{P.Mark{+s, True{}}, +rest} P.Near{+at, +g, +acc}:
+      q.fwd_same(rest, P.Near{Some{s}, g, P.Mark{s, True{}} <> acc}, h)
+    case Con{P.Mark{+s, False{}}, +rest} P.Near{+at, +g, +acc}:
+      +n2 = P.near.at(s, at, g, acc, P.before(at, s))
+      %q.nat_false(s, at, g, acc, P.before(at, s), q.fwd_grew_false(rest, n2, h)) : {q.nacc(P.fwd.go(rest, n2)) == P.rev.go(rest, q.nacc(_)) : List<&2, P.Mark>}
+      q.fwd_same(rest, n2, h)
+
+def q.Gt1(+m: P.Mark, +n: P.Mark) -> Type:
+  match m n:
+    case P.Mark{s, t} P.Mark{s2, t2}:
+      Laws.Gate(t, t2, Laws.Touches(s, s2))
+
+def q.G1all(+m: P.Mark, ns: +List<P.Mark>) -> Type:
+  match ns:
+    case Nil{}:
+      Unit
+    case Con{n, r}:
+      q.Gt1(m, n) & q.G1all(m, r)
+
+def q.G1(ms: +List<P.Mark>) -> Type:
+  match ms:
+    case Nil{}:
+      Unit
+    case Con{m, r}:
+      q.G1all(m, r) & q.G1(r)
+
+def q.NoneT(ms: +List<P.Mark>) -> Type:
+  match ms:
+    case Nil{}:
+      Unit
+    case Con{P.Mark{s, True{}}, r}:
+      Empty
+    case Con{P.Mark{s, False{}}, r}:
+      q.NoneT(r)
+
+def q.TakenFrom(ms: +List<P.Mark>, +v: Nat) -> Type:
+  match ms:
+    case Nil{}:
+      Unit
+    case Con{P.Mark{P.Span{a, b, c, d}, True{}}, r}:
+      {Nat.is_le(v, a) == True{} : Bool} & q.TakenFrom(r, v)
+    case Con{P.Mark{s, False{}}, r}:
+      q.TakenFrom(r, v)
+
+def q.StartsGe(ms: +List<P.Mark>, +v: Nat) -> Type:
+  match ms:
+    case Nil{}:
+      Unit
+    case Con{P.Mark{P.Span{a, b, c, d}, t}, r}:
+      {Nat.is_le(v, a) == True{} : Bool} & q.StartsGe(r, v)
+
+def q.AtG(at: Maybe<&2, P.Span>, +ms: +List<P.Mark>) -> Type:
+  match at:
+    case None{}:
+      q.NoneT(ms)
+    case Some{P.Span{fa, fb, fc, fd}}:
+      q.TakenFrom(ms, fa)
+
+def q.GB(+n: P.Near, +a: Nat) -> Type:
+  q.G1(q.nacc(n)) & (q.AtG(q.nat(n), q.nacc(n)) & q.StartsGe(q.nacc(n), a))
+
+def q.g1all_true(+s: P.Span, acc: +List<P.Mark>) -> q.G1all(P.Mark{s, True{}}, acc):
+  match acc:
+    case Nil{}:
+      Unit{}
+    case Con{P.Mark{s2, True{}}, +r}:
+      (Unit{}, q.g1all_true(s, r))
+    case Con{P.Mark{s2, False{}}, +r}:
+      (Unit{}, q.g1all_true(s, r))
+
+def q.g1all_none(+s: P.Span, acc: +List<P.Mark>, nt: q.NoneT(acc)) -> q.G1all(P.Mark{s, False{}}, acc):
+  match acc:
+    case Nil{}:
+      Unit{}
+    case Con{P.Mark{s2, True{}}, r}:
+      Empty.absurd(q.G1all(P.Mark{s, False{}}, P.Mark{s2, True{}} <> r), nt)
+    case Con{P.Mark{s2, False{}}, +r}:
+      (Unit{}, q.g1all_none(s, r, nt))
+
+def q.g1all_from(+sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, acc: +List<P.Mark>, +fa: Nat, +le_dfa: {Nat.is_le(sd, fa) == True{} : Bool}, tf: q.TakenFrom(acc, fa))
+  -> q.G1all(P.Mark{P.Span{sa, sb, sc, sd}, False{}}, acc):
+  match acc:
+    case Nil{}:
+      Unit{}
+    case Con{P.Mark{P.Span{+na, +nb, +nc, +nd}, True{}}, +r}:
+      (h, tr) = tf
+      +lt_f = q.le_not_lt(sd, na, le_trans(sd, fa, na, le_dfa, h))
+      +g = {
+        %Equal.sym(Bool, Nat.is_lt(na, sd), False{}, lt_f) : {Bool.and(Nat.is_lt(sc, nb), _) == False{} : Bool}
+        and_false(Nat.is_lt(sc, nb))
+      : {Bool.and(Nat.is_lt(sc, nb), Nat.is_lt(na, sd)) == False{} : Bool}}
+      (g, q.g1all_from(sa, sb, sc, sd, r, fa, le_dfa, tr))
+    case Con{P.Mark{s2, False{}}, +r}:
+      (Unit{}, q.g1all_from(sa, sb, sc, sd, r, fa, le_dfa, tf))
+
+def q.nonet_dup(ms: +List<P.Mark>, h: q.NoneT(ms)) -> q.NoneT(ms) & q.NoneT(ms):
+  match ms:
+    case Nil{}:
+      (Unit{}, Unit{})
+    case Con{P.Mark{s, True{}}, r}:
+      Empty.absurd(q.NoneT(P.Mark{s, True{}} <> r) & q.NoneT(P.Mark{s, True{}} <> r), h)
+    case Con{P.Mark{s, False{}}, +r}:
+      q.nonet_dup(r, h)
+
+def q.tf_dup.k(-v: Nat, -a: Nat, -b: Nat, -c: Nat, -d: Nat, -r: +List<P.Mark>, +x: {Nat.is_le(v, a) == True{} : Bool}, p: q.TakenFrom(r, v) & q.TakenFrom(r, v))
+  -> q.TakenFrom(P.Mark{P.Span{a, b, c, d}, True{}} <> r, v) & q.TakenFrom(P.Mark{P.Span{a, b, c, d}, True{}} <> r, v):
+  (y1, y2) = p
+  ((x, y1), (x, y2))
+
+def q.tf_dup(ms: +List<P.Mark>, +v: Nat, h: q.TakenFrom(ms, v)) -> q.TakenFrom(ms, v) & q.TakenFrom(ms, v):
+  match ms:
+    case Nil{}:
+      (Unit{}, Unit{})
+    case Con{P.Mark{P.Span{+a, +b, +c, +d}, True{}}, +r}:
+      (x, y) = h
+      q.tf_dup.k(v, a, b, c, d, r, x, q.tf_dup(r, v, y))
+    case Con{P.Mark{s, False{}}, +r}:
+      q.tf_dup(r, v, h)
+
+def q.atg_dup(at: Maybe<&2, P.Span>, +acc: +List<P.Mark>, h: q.AtG(at, acc)) -> q.AtG(at, acc) & q.AtG(at, acc):
+  match at:
+    case None{}:
+      q.nonet_dup(acc, h)
+    case Some{P.Span{+fa, fb, fc, fd}}:
+      q.tf_dup(acc, fa, h)
+
+def q.sg_weaken(ms: +List<P.Mark>, +v: Nat, +v2: Nat, +e: {Nat.is_le(v2, v) == True{} : Bool}, h: q.StartsGe(ms, v)) -> q.StartsGe(ms, v2):
+  match ms:
+    case Nil{}:
+      Unit{}
+    case Con{P.Mark{P.Span{+a, b, c, d}, t}, +r}:
+      (x, y) = h
+      (le_trans(v2, v, a, e, x), q.sg_weaken(r, v, v2, e, y))
+
+def q.sg_tf.kt(-v: Nat, -a: Nat, -b: Nat, -c: Nat, -d: Nat, -r: +List<P.Mark>, +x: {Nat.is_le(v, a) == True{} : Bool}, p: q.TakenFrom(r, v) & q.StartsGe(r, v))
+  -> q.TakenFrom(P.Mark{P.Span{a, b, c, d}, True{}} <> r, v) & q.StartsGe(P.Mark{P.Span{a, b, c, d}, True{}} <> r, v):
+  (y1, y2) = p
+  ((x, y1), (x, y2))
+
+def q.sg_tf.kf(-v: Nat, -a: Nat, -b: Nat, -c: Nat, -d: Nat, -r: +List<P.Mark>, x: {Nat.is_le(v, a) == True{} : Bool}, p: q.TakenFrom(r, v) & q.StartsGe(r, v))
+  -> q.TakenFrom(P.Mark{P.Span{a, b, c, d}, False{}} <> r, v) & q.StartsGe(P.Mark{P.Span{a, b, c, d}, False{}} <> r, v):
+  (y1, y2) = p
+  (y1, (x, y2))
+
+def q.sg_tf(ms: +List<P.Mark>, +v: Nat, h: q.StartsGe(ms, v)) -> q.TakenFrom(ms, v) & q.StartsGe(ms, v):
+  match ms:
+    case Nil{}:
+      (Unit{}, Unit{})
+    case Con{P.Mark{P.Span{+a, +b, +c, +d}, True{}}, +r}:
+      (x, y) = h
+      q.sg_tf.kt(v, a, b, c, d, r, x, q.sg_tf(r, v, y))
+    case Con{P.Mark{P.Span{+a, +b, +c, +d}, False{}}, +r}:
+      (x, y) = h
+      q.sg_tf.kf(v, a, b, c, d, r, x, q.sg_tf(r, v, y))
+
+def q.bg_true.k(+sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, +g: Bool, +acc: +List<P.Mark>, g1: q.G1(acc), p: q.TakenFrom(acc, sa) & q.StartsGe(acc, sa))
+  -> q.GB(P.Near{Some{P.Span{sa, sb, sc, sd}}, g, P.Mark{P.Span{sa, sb, sc, sd}, True{}} <> acc}, sa):
+  (tf, sg) = p
+  ((q.g1all_true(P.Span{sa, sb, sc, sd}, acc), g1), ((q.le_refl(sa), tf), (q.le_refl(sa), sg)))
+
+def q.bg_true(+sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, at: Maybe<&2, P.Span>, +g: Bool, +acc: +List<P.Mark>, +a: Nat,
+  le_ba: {Nat.is_le(sb, a) == True{} : Bool}, fr: Laws.Framed(P.Span{sa, sb, sc, sd}), inv: q.GB(P.Near{at, g, acc}, a))
+  -> q.GB(P.Near{Some{P.Span{sa, sb, sc, sd}}, g, P.Mark{P.Span{sa, sb, sc, sd}, True{}} <> acc}, sa):
+  (ca, (ab, bd)) = fr
+  (g1, (atg, st)) = inv
+  q.bg_true.k(sa, sb, sc, sd, g, acc, g1, q.sg_tf(acc, sa, q.sg_weaken(acc, a, sa, lt_imp_le(sa, a, lt_le_trans(sa, sb, a, ab, le_ba)), st)))
+
+def q.bg_false.k(+sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, at: Maybe<&2, P.Span>, +g: Bool, +acc: +List<P.Mark>,
+  he: {P.after(at, P.Span{sa, sb, sc, sd}) == False{} : Bool}, g1: q.G1(acc), p: q.AtG(at, acc) & q.AtG(at, acc), sg: q.StartsGe(acc, sa))
+  -> q.GB(P.Near{at, g, P.Mark{P.Span{sa, sb, sc, sd}, False{}} <> acc}, sa):
+  match at:
+    case None{}:
+      (a1, a2) = p
+      ((q.g1all_none(P.Span{sa, sb, sc, sd}, acc, a1), g1), (a2, (q.le_refl(sa), sg)))
+    case Some{P.Span{+fa, +fb, +fc, +fd}}:
+      (a1, a2) = p
+      ((q.g1all_from(sa, sb, sc, sd, acc, fa, ge_le(fa, sd, lt_false_ge(fa, sd, he)), a1), g1), (a2, (q.le_refl(sa), sg)))
+
+def q.bg_false(+sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, +at: Maybe<&2, P.Span>, +g: Bool, +acc: +List<P.Mark>, +a: Nat,
+  he: {P.after(at, P.Span{sa, sb, sc, sd}) == False{} : Bool}, le_ba: {Nat.is_le(sb, a) == True{} : Bool}, fr: Laws.Framed(P.Span{sa, sb, sc, sd}), inv: q.GB(P.Near{at, g, acc}, a))
+  -> q.GB(P.Near{at, g, P.Mark{P.Span{sa, sb, sc, sd}, False{}} <> acc}, sa):
+  (ca, (ab, bd)) = fr
+  (g1, (atg, st)) = inv
+  q.bg_false.k(sa, sb, sc, sd, at, g, acc, he, g1, q.atg_dup(at, acc, atg), q.sg_weaken(acc, a, sa, lt_imp_le(sa, a, lt_le_trans(sa, sb, a, ab, le_ba)), st))
+
+def q.bg_f(+sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, +at: Maybe<&2, P.Span>, +g: Bool, +acc: +List<P.Mark>, +a: Nat, e: Bool,
+  he: {P.after(at, P.Span{sa, sb, sc, sd}) == e : Bool}, hs: {q.ngrew(P.near.at(P.Span{sa, sb, sc, sd}, at, g, acc, e)) == False{} : Bool},
+  le_ba: {Nat.is_le(sb, a) == True{} : Bool}, fr: Laws.Framed(P.Span{sa, sb, sc, sd}), inv: q.GB(P.Near{at, g, acc}, a))
+  -> q.GB(P.near.at(P.Span{sa, sb, sc, sd}, at, g, acc, e), sa):
+  match e:
+    case True{}:
+      Empty.absurd(q.GB(P.Near{Some{P.Span{sa, sb, sc, sd}}, True{}, P.Mark{P.Span{sa, sb, sc, sd}, True{}} <> acc}, sa), ft(Equal.sym(Bool, True{}, False{}, hs)))
+    case False{}:
+      q.bg_false(sa, sb, sc, sd, at, g, acc, a, he, le_ba, fr, inv)
+
+def q.bg_step(+sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, t: Bool, n: P.Near, +a: Nat, hs: {q.ngrew(P.back.step(P.Mark{P.Span{sa, sb, sc, sd}, t}, n)) == False{} : Bool},
+  le_ba: {Nat.is_le(sb, a) == True{} : Bool}, fr: Laws.Framed(P.Span{sa, sb, sc, sd}), inv: q.GB(n, a))
+  -> q.GB(P.back.step(P.Mark{P.Span{sa, sb, sc, sd}, t}, n), sa):
+  match t n:
+    case True{} P.Near{at, +g, +acc}:
+      q.bg_true(sa, sb, sc, sd, at, g, acc, a, le_ba, fr, inv)
+    case False{} P.Near{+at, +g, +acc}:
+      q.bg_f(sa, sb, sc, sd, at, g, acc, a, P.after(at, P.Span{sa, sb, sc, sd}), {==}, hs, le_ba, fr, inv)
+
+def q.back_g1(ms: +List<P.Mark>, +n: P.Near, +a: Nat, +h: {q.ngrew(P.back.go(ms, n)) == False{} : Bool}, geo: q.RevFrom(a, Laws.SpansOf(ms)), inv: q.GB(n, a))
+  -> q.G1(q.nacc(P.back.go(ms, n))):
+  match ms:
+    case Nil{}:
+      (g1, rest) = inv
+      g1
+    case Con{P.Mark{P.Span{+sa, +sb, +sc, +sd}, +t}, +rest}:
+      (le_ba, (fr, geo2)) = geo
+      +n2 = P.back.step(P.Mark{P.Span{sa, sb, sc, sd}, t}, n)
+      q.back_g1(rest, n2, sa, h, geo2, q.bg_step(sa, sb, sc, sd, t, n, a, q.back_grew_false(rest, n2, h), le_ba, fr, inv))
+
+def q.TakenEnds(ms: +List<P.Mark>, +v: Nat) -> Type:
+  match ms:
+    case Nil{}:
+      Unit
+    case Con{P.Mark{P.Span{a, b, c, d}, True{}}, r}:
+      {Nat.is_le(b, v) == True{} : Bool} & q.TakenEnds(r, v)
+    case Con{P.Mark{s, False{}}, r}:
+      q.TakenEnds(r, v)
+
+def q.EndsLe(ms: +List<P.Mark>, +v: Nat) -> Type:
+  match ms:
+    case Nil{}:
+      Unit
+    case Con{P.Mark{P.Span{a, b, c, d}, t}, r}:
+      {Nat.is_le(b, v) == True{} : Bool} & q.EndsLe(r, v)
+
+def q.AtGF(at: Maybe<&2, P.Span>, +ms: +List<P.Mark>) -> Type:
+  match at:
+    case None{}:
+      q.NoneT(ms)
+    case Some{P.Span{la, lb, lc, ld}}:
+      q.TakenEnds(ms, lb)
+
+def q.GF(+n: P.Near, +a: Nat) -> Type:
+  q.G1(q.nacc(n)) & (q.AtGF(q.nat(n), q.nacc(n)) & q.EndsLe(q.nacc(n), a))
+
+def q.g1all_fromF(+sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, acc: +List<P.Mark>, +lb: Nat, +le_lc: {Nat.is_le(lb, sc) == True{} : Bool}, te: q.TakenEnds(acc, lb))
+  -> q.G1all(P.Mark{P.Span{sa, sb, sc, sd}, False{}}, acc):
+  match acc:
+    case Nil{}:
+      Unit{}
+    case Con{P.Mark{P.Span{+na, +nb, +nc, +nd}, True{}}, +r}:
+      (h, tr) = te
+      +lt_f = q.le_not_lt(nb, sc, le_trans(nb, lb, sc, h, le_lc))
+      +g = {
+        %Equal.sym(Bool, Nat.is_lt(sc, nb), False{}, lt_f) : {Bool.and(_, Nat.is_lt(na, sd)) == False{} : Bool}
+        {==}
+      : {Bool.and(Nat.is_lt(sc, nb), Nat.is_lt(na, sd)) == False{} : Bool}}
+      (g, q.g1all_fromF(sa, sb, sc, sd, r, lb, le_lc, tr))
+    case Con{P.Mark{s2, False{}}, +r}:
+      (Unit{}, q.g1all_fromF(sa, sb, sc, sd, r, lb, le_lc, te))
+
+def q.te_dup.k(-v: Nat, -a: Nat, -b: Nat, -c: Nat, -d: Nat, -r: +List<P.Mark>, +x: {Nat.is_le(b, v) == True{} : Bool}, p: q.TakenEnds(r, v) & q.TakenEnds(r, v))
+  -> q.TakenEnds(P.Mark{P.Span{a, b, c, d}, True{}} <> r, v) & q.TakenEnds(P.Mark{P.Span{a, b, c, d}, True{}} <> r, v):
+  (y1, y2) = p
+  ((x, y1), (x, y2))
+
+def q.te_dup(ms: +List<P.Mark>, +v: Nat, h: q.TakenEnds(ms, v)) -> q.TakenEnds(ms, v) & q.TakenEnds(ms, v):
+  match ms:
+    case Nil{}:
+      (Unit{}, Unit{})
+    case Con{P.Mark{P.Span{+a, +b, +c, +d}, True{}}, +r}:
+      (x, y) = h
+      q.te_dup.k(v, a, b, c, d, r, x, q.te_dup(r, v, y))
+    case Con{P.Mark{s, False{}}, +r}:
+      q.te_dup(r, v, h)
+
+def q.atgf_dup(at: Maybe<&2, P.Span>, +acc: +List<P.Mark>, h: q.AtGF(at, acc)) -> q.AtGF(at, acc) & q.AtGF(at, acc):
+  match at:
+    case None{}:
+      q.nonet_dup(acc, h)
+    case Some{P.Span{la, +lb, lc, ld}}:
+      q.te_dup(acc, lb, h)
+
+def q.el_weaken(ms: +List<P.Mark>, +v: Nat, +v2: Nat, +e: {Nat.is_le(v, v2) == True{} : Bool}, h: q.EndsLe(ms, v)) -> q.EndsLe(ms, v2):
+  match ms:
+    case Nil{}:
+      Unit{}
+    case Con{P.Mark{P.Span{a, +b, c, d}, t}, +r}:
+      (x, y) = h
+      (le_trans(b, v, v2, x, e), q.el_weaken(r, v, v2, e, y))
+
+def q.el_te.kt(-v: Nat, -a: Nat, -b: Nat, -c: Nat, -d: Nat, -r: +List<P.Mark>, +x: {Nat.is_le(b, v) == True{} : Bool}, p: q.TakenEnds(r, v) & q.EndsLe(r, v))
+  -> q.TakenEnds(P.Mark{P.Span{a, b, c, d}, True{}} <> r, v) & q.EndsLe(P.Mark{P.Span{a, b, c, d}, True{}} <> r, v):
+  (y1, y2) = p
+  ((x, y1), (x, y2))
+
+def q.el_te.kf(-v: Nat, -a: Nat, -b: Nat, -c: Nat, -d: Nat, -r: +List<P.Mark>, x: {Nat.is_le(b, v) == True{} : Bool}, p: q.TakenEnds(r, v) & q.EndsLe(r, v))
+  -> q.TakenEnds(P.Mark{P.Span{a, b, c, d}, False{}} <> r, v) & q.EndsLe(P.Mark{P.Span{a, b, c, d}, False{}} <> r, v):
+  (y1, y2) = p
+  (y1, (x, y2))
+
+def q.el_te(ms: +List<P.Mark>, +v: Nat, h: q.EndsLe(ms, v)) -> q.TakenEnds(ms, v) & q.EndsLe(ms, v):
+  match ms:
+    case Nil{}:
+      (Unit{}, Unit{})
+    case Con{P.Mark{P.Span{+a, +b, +c, +d}, True{}}, +r}:
+      (x, y) = h
+      q.el_te.kt(v, a, b, c, d, r, x, q.el_te(r, v, y))
+    case Con{P.Mark{P.Span{+a, +b, +c, +d}, False{}}, +r}:
+      (x, y) = h
+      q.el_te.kf(v, a, b, c, d, r, x, q.el_te(r, v, y))
+
+def q.fg_true.k(+sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, +g: Bool, +acc: +List<P.Mark>, g1: q.G1(acc), p: q.TakenEnds(acc, sb) & q.EndsLe(acc, sb))
+  -> q.GF(P.Near{Some{P.Span{sa, sb, sc, sd}}, g, P.Mark{P.Span{sa, sb, sc, sd}, True{}} <> acc}, sb):
+  (te, el) = p
+  ((q.g1all_true(P.Span{sa, sb, sc, sd}, acc), g1), ((q.le_refl(sb), te), (q.le_refl(sb), el)))
+
+def q.fg_true(+sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, at: Maybe<&2, P.Span>, +g: Bool, +acc: +List<P.Mark>, +a: Nat,
+  le_as: {Nat.is_le(a, sa) == True{} : Bool}, fr: Laws.Framed(P.Span{sa, sb, sc, sd}), inv: q.GF(P.Near{at, g, acc}, a))
+  -> q.GF(P.Near{Some{P.Span{sa, sb, sc, sd}}, g, P.Mark{P.Span{sa, sb, sc, sd}, True{}} <> acc}, sb):
+  (ca, (ab, bd)) = fr
+  (g1, (atg, st)) = inv
+  q.fg_true.k(sa, sb, sc, sd, g, acc, g1, q.el_te(acc, sb, q.el_weaken(acc, a, sb, lt_imp_le(a, sb, q.le_lt_trans(a, sa, sb, le_as, ab)), st)))
+
+def q.fg_false.k(+sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, at: Maybe<&2, P.Span>, +g: Bool, +acc: +List<P.Mark>,
+  he: {P.before(at, P.Span{sa, sb, sc, sd}) == False{} : Bool}, g1: q.G1(acc), p: q.AtGF(at, acc) & q.AtGF(at, acc), el: q.EndsLe(acc, sb))
+  -> q.GF(P.Near{at, g, P.Mark{P.Span{sa, sb, sc, sd}, False{}} <> acc}, sb):
+  match at:
+    case None{}:
+      (a1, a2) = p
+      ((q.g1all_none(P.Span{sa, sb, sc, sd}, acc, a1), g1), (a2, (q.le_refl(sb), el)))
+    case Some{P.Span{+la, +lb, +lc, +ld}}:
+      (a1, a2) = p
+      ((q.g1all_fromF(sa, sb, sc, sd, acc, lb, gt_false_le(lb, sc, he), a1), g1), (a2, (q.le_refl(sb), el)))
+
+def q.fg_false(+sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, +at: Maybe<&2, P.Span>, +g: Bool, +acc: +List<P.Mark>, +a: Nat,
+  he: {P.before(at, P.Span{sa, sb, sc, sd}) == False{} : Bool}, le_as: {Nat.is_le(a, sa) == True{} : Bool}, fr: Laws.Framed(P.Span{sa, sb, sc, sd}), inv: q.GF(P.Near{at, g, acc}, a))
+  -> q.GF(P.Near{at, g, P.Mark{P.Span{sa, sb, sc, sd}, False{}} <> acc}, sb):
+  (ca, (ab, bd)) = fr
+  (g1, (atg, st)) = inv
+  q.fg_false.k(sa, sb, sc, sd, at, g, acc, he, g1, q.atgf_dup(at, acc, atg), q.el_weaken(acc, a, sb, lt_imp_le(a, sb, q.le_lt_trans(a, sa, sb, le_as, ab)), st))
+
+def q.fg_f(+sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, +at: Maybe<&2, P.Span>, +g: Bool, +acc: +List<P.Mark>, +a: Nat, e: Bool,
+  he: {P.before(at, P.Span{sa, sb, sc, sd}) == e : Bool}, hs: {q.ngrew(P.near.at(P.Span{sa, sb, sc, sd}, at, g, acc, e)) == False{} : Bool},
+  le_as: {Nat.is_le(a, sa) == True{} : Bool}, fr: Laws.Framed(P.Span{sa, sb, sc, sd}), inv: q.GF(P.Near{at, g, acc}, a))
+  -> q.GF(P.near.at(P.Span{sa, sb, sc, sd}, at, g, acc, e), sb):
+  match e:
+    case True{}:
+      Empty.absurd(q.GF(P.Near{Some{P.Span{sa, sb, sc, sd}}, True{}, P.Mark{P.Span{sa, sb, sc, sd}, True{}} <> acc}, sb), ft(Equal.sym(Bool, True{}, False{}, hs)))
+    case False{}:
+      q.fg_false(sa, sb, sc, sd, at, g, acc, a, he, le_as, fr, inv)
+
+def q.fg_step(+sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, t: Bool, n: P.Near, +a: Nat, hs: {q.ngrew(P.fwd.step(P.Mark{P.Span{sa, sb, sc, sd}, t}, n)) == False{} : Bool},
+  le_as: {Nat.is_le(a, sa) == True{} : Bool}, fr: Laws.Framed(P.Span{sa, sb, sc, sd}), inv: q.GF(n, a))
+  -> q.GF(P.fwd.step(P.Mark{P.Span{sa, sb, sc, sd}, t}, n), sb):
+  match t n:
+    case True{} P.Near{at, +g, +acc}:
+      q.fg_true(sa, sb, sc, sd, at, g, acc, a, le_as, fr, inv)
+    case False{} P.Near{+at, +g, +acc}:
+      q.fg_f(sa, sb, sc, sd, at, g, acc, a, P.before(at, P.Span{sa, sb, sc, sd}), {==}, hs, le_as, fr, inv)
+
+def q.fwd_g1(ms: +List<P.Mark>, +n: P.Near, +a: Nat, +h: {q.ngrew(P.fwd.go(ms, n)) == False{} : Bool}, geo: Laws.SpansFrom(a, Laws.SpansOf(ms)), inv: q.GF(n, a))
+  -> q.G1(q.nacc(P.fwd.go(ms, n))):
+  match ms:
+    case Nil{}:
+      (g1, rest) = inv
+      g1
+    case Con{P.Mark{P.Span{+sa, +sb, +sc, +sd}, +t}, +rest}:
+      (le_as, (fr, geo2)) = geo
+      +n2 = P.fwd.step(P.Mark{P.Span{sa, sb, sc, sd}, t}, n)
+      q.fwd_g1(rest, n2, sb, h, geo2, q.fg_step(sa, sb, sc, sd, t, n, a, q.fwd_grew_false(rest, n2, h), le_as, fr, inv))
+
+def q.G2all(+m: P.Mark, ns: +List<P.Mark>) -> Type:
+  match ns:
+    case Nil{}:
+      Unit
+    case Con{n, r}:
+      q.Gt1(n, m) & q.G2all(m, r)
+
+def q.G2(ms: +List<P.Mark>) -> Type:
+  match ms:
+    case Nil{}:
+      Unit
+    case Con{m, r}:
+      q.G2all(m, r) & q.G2(r)
+
+def q.AllG(xs: +List<P.Mark>, +acc: +List<P.Mark>) -> Type:
+  match xs:
+    case Nil{}:
+      Unit
+    case Con{m, r}:
+      q.G1all(m, acc) & q.AllG(r, acc)
+
+def q.allg_split.k(+m: P.Mark, -r: +List<P.Mark>, +x: P.Mark, -acc: +List<P.Mark>, gmx: q.Gt1(m, x), gma: q.G1all(m, acc), p: q.G2all(x, r) & q.AllG(r, acc))
+  -> q.G2all(x, m <> r) & q.AllG(m <> r, acc):
+  (a, b) = p
+  ((gmx, a), (gma, b))
+
+def q.allg_split(xr: +List<P.Mark>, +x: P.Mark, +acc: +List<P.Mark>, h: q.AllG(xr, x <> acc)) -> q.G2all(x, xr) & q.AllG(xr, acc):
+  match xr:
+    case Nil{}:
+      (Unit{}, Unit{})
+    case Con{+m, +r}:
+      ((gmx, gma), rest) = h
+      q.allg_split.k(m, r, x, acc, gmx, gma, q.allg_split(r, x, acc, rest))
+
+def q.g1_rev.k2(+x: P.Mark, -xr: +List<P.Mark>, -acc: +List<P.Mark>, g2r: q.G2(xr), g1x: q.G1all(x, acc), g1a: q.G1(acc), sp: q.G2all(x, xr) & q.AllG(xr, acc))
+  -> q.G2(x <> xr) & (q.AllG(x <> xr, acc) & q.G1(acc)):
+  (g2x, ar) = sp
+  ((g2x, g2r), ((g1x, ar), g1a))
+
+def q.g1_rev.k1(+x: P.Mark, +xr: +List<P.Mark>, +acc: +List<P.Mark>, p: q.G2(xr) & (q.AllG(xr, x <> acc) & q.G1(x <> acc)))
+  -> q.G2(x <> xr) & (q.AllG(x <> xr, acc) & q.G1(acc)):
+  (g2r, (ag, (g1x, g1a))) = p
+  q.g1_rev.k2(x, xr, acc, g2r, g1x, g1a, q.allg_split(xr, x, acc, ag))
+
+def q.g1_rev(xs: +List<P.Mark>, +acc: +List<P.Mark>, h: q.G1(P.rev.go(xs, acc))) -> q.G2(xs) & (q.AllG(xs, acc) & q.G1(acc)):
+  match xs:
+    case Nil{}:
+      (Unit{}, (Unit{}, h))
+    case Con{+x, +xr}:
+      q.g1_rev.k1(x, xr, acc, q.g1_rev(xr, x <> acc, h))
+
+def q.zip_nta(+m: P.Mark, ns: +List<P.Mark>, a: q.G1all(m, ns), b: q.G2all(m, ns)) -> Laws.NoTouchAll(m, ns):
+  match m ns:
+    case P.Mark{+s, +t} Nil{}:
+      Unit{}
+    case P.Mark{+s, +t} Con{P.Mark{+s2, +t2}, +r}:
+      (a1, a2) = a
+      (b1, b2) = b
+      ((a1, b1), q.zip_nta(P.Mark{s, t}, r, a2, b2))
+
+def q.zip_un(ms: +List<P.Mark>, a: q.G1(ms), b: q.G2(ms)) -> Laws.Untouched(ms):
+  match ms:
+    case Nil{}:
+      Unit{}
+    case Con{+m, +r}:
+      (a1, a2) = a
+      (b1, b2) = b
+      (q.zip_nta(m, r, a1, b1), q.zip_un(r, a2, b2))
+
+def q.closed_of.k(+F: +List<P.Mark>, g1F: q.G1(F), p: q.G2(F) & (q.AllG(F, Nil{}) & q.G1(Nil{}))) -> Laws.Untouched(F):
+  (g2F, rest) = p
+  q.zip_un(F, g1F, g2F)
+
+def q.closed_of(+F: +List<P.Mark>, g1F: q.G1(F), g1R: q.G1(P.rev.go(F, Nil{}))) -> Laws.Untouched(F):
+  q.closed_of.k(F, g1F, q.g1_rev(F, Nil{}, g1R))
+
+def q.mapp(xs: +List<P.Mark>, ys: +List<P.Mark>) -> List<&2, P.Mark>:
+  match xs:
+    case Nil{}:
+      ys
+    case Con{x, rest}:
+      x <> q.mapp(rest, ys)
+
+def q.mrev2(xs: +List<P.Mark>, +ys: +List<P.Mark>, +zs: +List<P.Mark>) -> {P.rev.go(P.rev.go(xs, ys), zs) == P.rev.go(ys, q.mapp(xs, zs)) : List<&2, P.Mark>}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+x, +rest}:
+      q.mrev2(rest, x <> ys, zs)
+
+def q.mapp_nil(xs: +List<P.Mark>) -> {q.mapp(xs, Nil{}) == xs : List<&2, P.Mark>}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+x, +rest}:
+      %q.mapp_nil(rest) : {x <> q.mapp(rest, Nil{}) == x <> _ : List<&2, P.Mark>}
+      {==}
+
+def q.mrev_mrev(+xs: +List<P.Mark>) -> {P.rev.go(P.rev.go(xs, Nil{}), Nil{}) == xs : List<&2, P.Mark>}:
+  Equal.trans(List<&2, P.Mark>, P.rev.go(P.rev.go(xs, Nil{}), Nil{}), q.mapp(xs, Nil{}), xs, q.mrev2(xs, Nil{}, Nil{}), q.mapp_nil(xs))
+
+def q.AllT(ms: +List<P.Mark>) -> Type:
+  match ms:
+    case Nil{}:
+      Unit
+    case Con{P.Mark{s, True{}}, r}:
+      q.AllT(r)
+    case Con{P.Mark{s, False{}}, r}:
+      Empty
+
+def q.cnt0_allt(ms: +List<P.Mark>, h: {q.cnt(ms) == 0n : Nat}) -> q.AllT(ms):
+  match ms:
+    case Nil{}:
+      Unit{}
+    case Con{P.Mark{s, True{}}, +r}:
+      q.cnt0_allt(r, h)
+    case Con{P.Mark{s, False{}}, +r}:
+      Empty.absurd(Empty, s_ne_z(q.cnt(r), h))
+
+def q.allt_rev(ms: +List<P.Mark>, +acc: +List<P.Mark>, a1: q.AllT(ms), a2: q.AllT(acc)) -> q.AllT(P.rev.go(ms, acc)):
+  match ms:
+    case Nil{}:
+      a2
+    case Con{P.Mark{+s, True{}}, +r}:
+      q.allt_rev(r, P.Mark{s, True{}} <> acc, a1, a2)
+    case Con{P.Mark{s, False{}}, r}:
+      Empty.absurd(q.AllT(P.rev.go(P.Mark{s, False{}} <> r, acc)), a1)
+
+def q.allt_nta(+s: P.Span, ns: +List<P.Mark>, h: q.AllT(ns)) -> Laws.NoTouchAll(P.Mark{s, True{}}, ns):
+  match ns:
+    case Nil{}:
+      Unit{}
+    case Con{P.Mark{s2, True{}}, +r}:
+      ((Unit{}, Unit{}), q.allt_nta(s, r, h))
+    case Con{P.Mark{s2, False{}}, r}:
+      Empty.absurd(Laws.NoTouchAll(P.Mark{s, True{}}, P.Mark{s2, False{}} <> r), h)
+
+def q.allt_dup(ms: +List<P.Mark>, h: q.AllT(ms)) -> q.AllT(ms) & q.AllT(ms):
+  match ms:
+    case Nil{}:
+      (Unit{}, Unit{})
+    case Con{P.Mark{s, True{}}, +r}:
+      q.allt_dup(r, h)
+    case Con{P.Mark{s, False{}}, r}:
+      Empty.absurd(q.AllT(P.Mark{s, False{}} <> r) & q.AllT(P.Mark{s, False{}} <> r), h)
+
+def q.allt_un(ms: +List<P.Mark>, hp: q.AllT(ms) & q.AllT(ms)) -> Laws.Untouched(ms):
+  match ms:
+    case Nil{}:
+      Unit{}
+    case Con{P.Mark{+s, True{}}, +r}:
+      (h1, h2) = hp
+      (q.allt_nta(s, r, h1), q.allt_un(r, q.allt_dup(r, h2)))
+    case Con{P.Mark{s, False{}}, r}:
+      (h1, h2) = hp
+      Empty.absurd(Laws.Untouched(P.Mark{s, False{}} <> r), h1)
+
+def q.Inv(+u: Nat, pr: P.Pass) -> Type:
+  match pr:
+    case P.Pass{+r, True{}}:
+      {Nat.is_le(q.cnt(r), u) == True{} : Bool}
+    case P.Pass{+r, False{}}:
+      Laws.Untouched(P.rev.go(r, Nil{}))
+
+def q.cast_g1(-A: +List<P.Mark>, -B: +List<P.Mark>, e: {A == B : List<&2, P.Mark>}, h: q.G1(A)) -> q.G1(B):
+  %e : q.G1(_)
+  h
+
+def q.roundend_inv.k(+F: +List<P.Mark>, +r2: +List<P.Mark>, g1F: q.G1(F), p: {r2 == P.rev.go(F, Nil{}) : List<&2, P.Mark>} & q.G1(r2))
+  -> Laws.Untouched(P.rev.go(r2, Nil{})):
+  (+er2, g1r) = p
+  +back = Equal.trans(List<&2, P.Mark>, P.rev.go(r2, Nil{}), P.rev.go(P.rev.go(F, Nil{}), Nil{}), F,
+    Equal.cong(List<&2, P.Mark>, List<&2, P.Mark>, x => P.rev.go(x, Nil{}), r2, P.rev.go(F, Nil{}), er2), q.mrev_mrev(F))
+  %Equal.sym(List<&2, P.Mark>, P.rev.go(r2, Nil{}), F, back) : Laws.Untouched(_)
+  q.closed_of(F, g1F, q.cast_g1(r2, P.rev.go(F, Nil{}), er2, g1r))
+
+def q.roundend_inv(g1: Bool, f: P.Near, +v: Nat, +r: +List<P.Mark>, +F: +List<P.Mark>,
+  cB: {Nat.is_le(Nat.add(q.bn(g1), q.cnt(F)), q.cnt(r)) == True{} : Bool}, cR: {Nat.is_le(q.cnt(r), 1n+v) == True{} : Bool},
+  cF: {Nat.is_le(Nat.add(q.bn(q.ngrew(f)), q.cnt(q.nacc(f))), q.cnt(F)) == True{} : Bool},
+  noB: {g1 == False{} : Bool} -> q.G1(F),
+  noF: {q.ngrew(f) == False{} : Bool} -> ({q.nacc(f) == P.rev.go(F, Nil{}) : List<&2, P.Mark>} & q.G1(q.nacc(f))))
+  -> q.Inv(v, P.round.end(g1, f)):
+  match g1 f:
+    case True{} P.Near{at2, +g2, +r2}:
+      +e1 = le_trans(q.cnt(r2), Nat.add(q.bn(g2), q.cnt(r2)), q.cnt(F), q.le_bn(g2, q.cnt(r2)), cF)
+      le_trans(1n+q.cnt(r2), q.cnt(r), 1n+v, le_trans(1n+q.cnt(r2), 1n+q.cnt(F), q.cnt(r), e1, cB), cR)
+    case False{} P.Near{at2, True{}, +r2}:
+      le_trans(1n+q.cnt(r2), q.cnt(r), 1n+v, le_trans(1n+q.cnt(r2), q.cnt(F), q.cnt(r), cF, cB), cR)
+    case False{} P.Near{at2, False{}, +r2}:
+      q.roundend_inv.k(F, r2, noB({==}), noF({==}))
+
+def q.roundfwd_inv(b: P.Near, +v: Nat, +r: +List<P.Mark>,
+  cB: {Nat.is_le(Nat.add(q.bn(q.ngrew(b)), q.cnt(q.nacc(b))), q.cnt(r)) == True{} : Bool}, cR: {Nat.is_le(q.cnt(r), 1n+v) == True{} : Bool},
+  noB: {q.ngrew(b) == False{} : Bool} -> q.G1(q.nacc(b)), geo: Laws.SpansFrom(0n, Laws.SpansOf(q.nacc(b))))
+  -> q.Inv(v, P.round.fwd(b)):
+  match b:
+    case P.Near{at, +g1, +F}:
+      +n0 = {P.Near{None{}, False{}, Nil{}} : P.Near}
+      +f = P.fwd.go(F, n0)
+      +cF = q.cnt_le_eq(Nat.add(q.bn(q.ngrew(f)), q.cnt(q.nacc(f))), Nat.add(q.cnt(F), 0n), q.cnt(F), Equal.sym(Nat, q.cnt(F), Nat.add(q.cnt(F), 0n), add_zero(q.cnt(F))), q.fwd_cnt(F, n0))
+      q.roundend_inv(g1, f, v, r, F, cB, cR, cF, noB, +h => (q.fwd_same(F, n0, h), q.fwd_g1(F, n0, 0n, h, geo, (Unit{}, (Unit{}, Unit{})))))
+
+def q.round_inv(+r: +List<P.Mark>, +v: Nat, +ss: +List<P.Span>, +top: Nat, +sr: {Laws.SpansOf(r) == q.srev(ss, Nil{}) : List<&2, P.Span>},
+  cR: {Nat.is_le(q.cnt(r), 1n+v) == True{} : Bool}, gF: Laws.SpansFrom(0n, ss), gR: q.RevFrom(top, q.srev(ss, Nil{})))
+  -> q.Inv(v, P.round(r)):
+  +n0 = {P.Near{None{}, False{}, Nil{}} : P.Near}
+  +b = P.back.go(r, n0)
+  +sF = Equal.trans(List<&2, P.Span>, Laws.SpansOf(q.nacc(b)), q.srev(Laws.SpansOf(r), Nil{}), ss,
+    q.back_spans(r, n0),
+    Equal.trans(List<&2, P.Span>, q.srev(Laws.SpansOf(r), Nil{}), q.srev(q.srev(ss, Nil{}), Nil{}), ss,
+      Equal.cong(List<&2, P.Span>, List<&2, P.Span>, x => q.srev(x, Nil{}), Laws.SpansOf(r), q.srev(ss, Nil{}), sr),
+      q.srev_srev(ss)))
+  +cB = q.cnt_le_eq(Nat.add(q.bn(q.ngrew(b)), q.cnt(q.nacc(b))), Nat.add(q.cnt(r), 0n), q.cnt(r), Equal.sym(Nat, q.cnt(r), Nat.add(q.cnt(r), 0n), add_zero(q.cnt(r))), q.back_cnt(r, n0))
+  q.roundfwd_inv(b, v, r, cB, cR,
+    +h => q.back_g1(r, n0, top, h, q.cast_rev(top, Laws.SpansOf(r), q.srev(ss, Nil{}), sr, gR), (Unit{}, (Unit{}, Unit{}))),
+    q.cast_sp(0n, Laws.SpansOf(q.nacc(b)), ss, sF, gF))
+
+def q.loop_closed(u: Nat, pr: P.Pass, +ss: +List<P.Span>, +top: Nat, +sr: {Laws.SpansOf(q.pms(pr)) == q.srev(ss, Nil{}) : List<&2, P.Span>}, inv: q.Inv(u, pr),
+  gF: Laws.SpansFrom(0n, ss) & Laws.SpansFrom(0n, ss), gR: q.RevFrom(top, q.srev(ss, Nil{})) & q.RevFrom(top, q.srev(ss, Nil{})))
+  -> Laws.Untouched(P.rev.go(P.loop(u, pr), Nil{})):
+  match u pr:
+    case 0n P.Pass{+r, True{}}:
+      +rr = P.rev.go(r, Nil{})
+      q.allt_un(rr, q.allt_dup(rr, q.allt_rev(r, Nil{}, q.cnt0_allt(r, q.le_zero(q.cnt(r), inv)), Unit{})))
+    case 0n P.Pass{r, False{}}:
+      inv
+    case 1n++v P.Pass{+r, True{}}:
+      (gF1, gF2) = gF
+      (gR1, gR2) = gR
+      q.loop_closed(v, P.round(r), ss, top, Equal.trans(List<&2, P.Span>, Laws.SpansOf(q.pms(P.round(r))), Laws.SpansOf(r), q.srev(ss, Nil{}), q.round_spans(r), sr),
+        q.round_inv(r, v, ss, top, sr, inv, gF1, gR1), q.sp_dup(ss, 0n, gF2), q.rv_dup(q.srev(ss, Nil{}), top, gR2))
+    case 1n+v P.Pass{r, False{}}:
+      inv
+
+def q.l2(+bs: +List<Nat>, +ss: +List<P.Span>, ap: Laws.SpansFrom(0n, ss) & Laws.SpansFrom(0n, ss)) -> Laws.Untouched(P.taken(bs, ss)):
+  (a1, a2) = ap
+  +r0 = P.walk.go(ss, P.Walk{Nil{}, bs, Nil{}})
+  +top = q.lastend(ss, 0n)
+  +e = Equal.trans(Nat, q.cnt(r0), Nat.add(q.cnt(r0), 0n), P.untaken.go(r0, 0n), add_zero(q.cnt(r0)), Equal.sym(Nat, P.untaken.go(r0, 0n), Nat.add(q.cnt(r0), 0n), q.untaken_eq(r0, 0n)))
+  q.loop_closed(P.untaken.go(r0, 0n), P.Pass{r0, True{}}, ss, top, q.walk_spans(ss, P.Walk{Nil{}, bs, Nil{}}),
+    q.cnt_le_eq(q.cnt(r0), q.cnt(r0), P.untaken.go(r0, 0n), e, q.le_refl(q.cnt(r0))),
+    q.sp_dup(ss, 0n, a1), q.rv_dup(q.srev(ss, Nil{}), top, q.rev_geo(ss, 0n, Nil{}, a2, Unit{})))
+
+def Laws.parts_untaken_matches_touch_no_taken_span(bs, ss, apart):
+  q.l2(bs, ss, q.sp_dup(ss, 0n, apart))
+
+def q.back_fast_eq(ms: +List<P.Mark>, e: Bool, +at: Maybe<&2, P.Span>, +g: Bool, +acc: +List<P.Mark>, he: {P.hit.back(ms, at) == e : Bool})
+  -> {P.back.fast(ms, e, at, g, acc) == P.back.go(ms, P.Near{at, g, acc}) : P.Near}:
+  match ms e:
+    case Nil{} _:
+      {==}
+    case Con{P.Mark{s, True{}}, rest} True{}:
+      Empty.absurd({P.back.fast(P.Mark{s, True{}} <> rest, True{}, at, g, acc) == P.back.go(P.Mark{s, True{}} <> rest, P.Near{at, g, acc}) : P.Near}, ft(he))
+    case Con{P.Mark{+s, True{}}, +rest} False{}:
+      q.back_fast_eq(rest, P.hit.back(rest, Some{s}), Some{s}, g, P.Mark{s, True{}} <> acc, {==})
+    case Con{P.Mark{+s, False{}}, +rest} True{}:
+      %Equal.sym(Bool, P.after(at, s), True{}, he) : {P.back.fast(rest, P.hit.back(rest, Some{s}), Some{s}, True{}, P.Mark{s, True{}} <> acc) == P.back.go(rest, P.near.at(s, at, g, acc, _)) : P.Near}
+      q.back_fast_eq(rest, P.hit.back(rest, Some{s}), Some{s}, True{}, P.Mark{s, True{}} <> acc, {==})
+    case Con{P.Mark{+s, False{}}, +rest} False{}:
+      %Equal.sym(Bool, P.after(at, s), False{}, he) : {P.back.fast(rest, P.hit.back(rest, at), at, g, P.Mark{s, False{}} <> acc) == P.back.go(rest, P.near.at(s, at, g, acc, _)) : P.Near}
+      q.back_fast_eq(rest, P.hit.back(rest, at), at, g, P.Mark{s, False{}} <> acc, {==})
+
+def q.fwd_fast_eq(ms: +List<P.Mark>, e: Bool, +at: Maybe<&2, P.Span>, +g: Bool, +acc: +List<P.Mark>, he: {P.hit.fwd(ms, at) == e : Bool})
+  -> {P.fwd.fast(ms, e, at, g, acc) == P.fwd.go(ms, P.Near{at, g, acc}) : P.Near}:
+  match ms e:
+    case Nil{} _:
+      {==}
+    case Con{P.Mark{s, True{}}, rest} True{}:
+      Empty.absurd({P.fwd.fast(P.Mark{s, True{}} <> rest, True{}, at, g, acc) == P.fwd.go(P.Mark{s, True{}} <> rest, P.Near{at, g, acc}) : P.Near}, ft(he))
+    case Con{P.Mark{+s, True{}}, +rest} False{}:
+      q.fwd_fast_eq(rest, P.hit.fwd(rest, Some{s}), Some{s}, g, P.Mark{s, True{}} <> acc, {==})
+    case Con{P.Mark{+s, False{}}, +rest} True{}:
+      %Equal.sym(Bool, P.before(at, s), True{}, he) : {P.fwd.fast(rest, P.hit.fwd(rest, Some{s}), Some{s}, True{}, P.Mark{s, True{}} <> acc) == P.fwd.go(rest, P.near.at(s, at, g, acc, _)) : P.Near}
+      q.fwd_fast_eq(rest, P.hit.fwd(rest, Some{s}), Some{s}, True{}, P.Mark{s, True{}} <> acc, {==})
+    case Con{P.Mark{+s, False{}}, +rest} False{}:
+      %Equal.sym(Bool, P.before(at, s), False{}, he) : {P.fwd.fast(rest, P.hit.fwd(rest, at), at, g, P.Mark{s, False{}} <> acc) == P.fwd.go(rest, P.near.at(s, at, g, acc, _)) : P.Near}
+      q.fwd_fast_eq(rest, P.hit.fwd(rest, at), at, g, P.Mark{s, False{}} <> acc, {==})
+
+def q.roundfwd_fast_eq(b: P.Near) -> {P.round.fast.fwd(b) == P.round.fwd(b) : P.Pass}:
+  match b:
+    case P.Near{at, +g, +ms}:
+      Equal.cong(P.Near, P.Pass, f => P.round.end(g, f), P.fwd.fast(ms, P.hit.fwd(ms, None{}), None{}, False{}, Nil{}), P.fwd.go(ms, P.Near{None{}, False{}, Nil{}}),
+        q.fwd_fast_eq(ms, P.hit.fwd(ms, None{}), None{}, False{}, Nil{}, {==}))
+
+def q.round_fast_eq(+r: +List<P.Mark>) -> {P.round.fast(r) == P.round(r) : P.Pass}:
+  +bf = P.back.fast(r, P.hit.back(r, None{}), None{}, False{}, Nil{})
+  +bg = P.back.go(r, P.Near{None{}, False{}, Nil{}})
+  Equal.trans(P.Pass, P.round.fast.fwd(bf), P.round.fast.fwd(bg), P.round.fwd(bg),
+    Equal.cong(P.Near, P.Pass, b => P.round.fast.fwd(b), bf, bg, q.back_fast_eq(r, P.hit.back(r, None{}), None{}, False{}, Nil{}, {==})),
+    q.roundfwd_fast_eq(bg))
+
+def q.loop_fast_eq(u: Nat, pr: P.Pass) -> {P.loop.fast(u, pr) == P.loop(u, pr) : List<&2, P.Mark>}:
+  match u pr:
+    case 0n P.Pass{r, g}:
+      {==}
+    case 1n+v P.Pass{+r, True{}}:
+      Equal.trans(List<&2, P.Mark>, P.loop.fast(v, P.round.fast(r)), P.loop.fast(v, P.round(r)), P.loop(v, P.round(r)),
+        Equal.cong(P.Pass, List<&2, P.Mark>, p => P.loop.fast(v, p), P.round.fast(r), P.round(r), q.round_fast_eq(r)),
+        q.loop_fast_eq(v, P.round(r)))
+    case 1n+v P.Pass{r, False{}}:
+      {==}
+
+def q.AllF(ms: +List<P.Mark>) -> Type:
+  match ms:
+    case Nil{}:
+      Unit
+    case Con{P.Mark{s, True{}}, r}:
+      Empty
+    case Con{P.Mark{s, False{}}, r}:
+      q.AllF(r)
+
+def q.allf_of(ms: +List<P.Mark>, h: {P.any_taken(ms) == False{} : Bool}) -> q.AllF(ms):
+  match ms:
+    case Nil{}:
+      Unit{}
+    case Con{P.Mark{s, True{}}, r}:
+      Empty.absurd(Empty, ft(Equal.sym(Bool, True{}, False{}, h)))
+    case Con{P.Mark{s, False{}}, +r}:
+      q.allf_of(r, h)
+
+def q.allf_rev(ms: +List<P.Mark>, +acc: +List<P.Mark>, a1: q.AllF(ms), a2: q.AllF(acc)) -> q.AllF(P.rev.go(ms, acc)):
+  match ms:
+    case Nil{}:
+      a2
+    case Con{P.Mark{s, True{}}, r}:
+      Empty.absurd(q.AllF(P.rev.go(P.Mark{s, True{}} <> r, acc)), a1)
+    case Con{P.Mark{+s, False{}}, +r}:
+      q.allf_rev(r, P.Mark{s, False{}} <> acc, a1, a2)
+
+def q.allf_dup(ms: +List<P.Mark>, h: q.AllF(ms)) -> q.AllF(ms) & q.AllF(ms):
+  match ms:
+    case Nil{}:
+      (Unit{}, Unit{})
+    case Con{P.Mark{s, True{}}, r}:
+      Empty.absurd(q.AllF(P.Mark{s, True{}} <> r) & q.AllF(P.Mark{s, True{}} <> r), h)
+    case Con{P.Mark{s, False{}}, +r}:
+      q.allf_dup(r, h)
+
+def q.back_still(ms: +List<P.Mark>, +acc: +List<P.Mark>, h: q.AllF(ms)) -> {P.back.go(ms, P.Near{None{}, False{}, acc}) == P.Near{None{}, False{}, P.rev.go(ms, acc)} : P.Near}:
+  match ms:
+    case Nil{}:
+      {==}
+    case Con{P.Mark{s, True{}}, r}:
+      Empty.absurd({P.back.go(P.Mark{s, True{}} <> r, P.Near{None{}, False{}, acc}) == P.Near{None{}, False{}, P.rev.go(P.Mark{s, True{}} <> r, acc)} : P.Near}, h)
+    case Con{P.Mark{+s, False{}}, +r}:
+      q.back_still(r, P.Mark{s, False{}} <> acc, h)
+
+def q.fwd_still(ms: +List<P.Mark>, +acc: +List<P.Mark>, h: q.AllF(ms)) -> {P.fwd.go(ms, P.Near{None{}, False{}, acc}) == P.Near{None{}, False{}, P.rev.go(ms, acc)} : P.Near}:
+  match ms:
+    case Nil{}:
+      {==}
+    case Con{P.Mark{s, True{}}, r}:
+      Empty.absurd({P.fwd.go(P.Mark{s, True{}} <> r, P.Near{None{}, False{}, acc}) == P.Near{None{}, False{}, P.rev.go(P.Mark{s, True{}} <> r, acc)} : P.Near}, h)
+    case Con{P.Mark{+s, False{}}, +r}:
+      q.fwd_still(r, P.Mark{s, False{}} <> acc, h)
+
+def q.round_still.k(+r: +List<P.Mark>, hp: q.AllF(r) & q.AllF(r)) -> {P.round(r) == P.Pass{r, False{}} : P.Pass}:
+  (h1, h2) = hp
+  +f = P.rev.go(r, Nil{})
+  +n0 = {P.Near{None{}, False{}, Nil{}} : P.Near}
+  %Equal.sym(P.Near, P.back.go(r, n0), P.Near{None{}, False{}, f}, q.back_still(r, Nil{}, h1)) : {P.round.fwd(_) == P.Pass{r, False{}} : P.Pass}
+  %Equal.sym(P.Near, P.fwd.go(f, n0), P.Near{None{}, False{}, P.rev.go(f, Nil{})}, q.fwd_still(f, Nil{}, q.allf_rev(r, Nil{}, h2, Unit{}))) : {P.round.end(False{}, _) == P.Pass{r, False{}} : P.Pass}
+  %Equal.sym(List<&2, P.Mark>, P.rev.go(f, Nil{}), r, q.mrev_mrev(r)) : {P.Pass{_, False{}} == P.Pass{r, False{}} : P.Pass}
+  {==}
+
+def q.loop_still.k(v: Nat, +r: +List<P.Mark>, +e: {P.round(r) == P.Pass{r, False{}} : P.Pass}) -> {P.loop(v, P.round(r)) == r : List<&2, P.Mark>}:
+  match v:
+    case 0n:
+      %Equal.sym(P.Pass, P.round(r), P.Pass{r, False{}}, e) : {P.loop(0n, _) == r : List<&2, P.Mark>}
+      {==}
+    case 1n+w:
+      %Equal.sym(P.Pass, P.round(r), P.Pass{r, False{}}, e) : {P.loop(1n+w, _) == r : List<&2, P.Mark>}
+      {==}
+
+def q.loop_still(u: Nat, +r: +List<P.Mark>, +e: {P.round(r) == P.Pass{r, False{}} : P.Pass}) -> {P.loop(u, P.Pass{r, True{}}) == r : List<&2, P.Mark>}:
+  match u:
+    case 0n:
+      {==}
+    case 1n+v:
+      q.loop_still.k(v, r, e)
+
+def q.close_fast_eq(+r: +List<P.Mark>, e: Bool, he: {P.any_taken(r) == e : Bool}) -> {P.close.fast(r, e) == P.close(r) : List<&2, P.Mark>}:
+  match e:
+    case True{}:
+      Equal.cong(List<&2, P.Mark>, List<&2, P.Mark>, l => P.rev.go(l, Nil{}), P.loop.fast(P.untaken.go(r, 0n), P.Pass{r, True{}}), P.loop(P.untaken.go(r, 0n), P.Pass{r, True{}}),
+        q.loop_fast_eq(P.untaken.go(r, 0n), P.Pass{r, True{}}))
+    case False{}:
+      Equal.sym(List<&2, P.Mark>, P.close(r), P.rev.go(r, Nil{}),
+        Equal.cong(List<&2, P.Mark>, List<&2, P.Mark>, l => P.rev.go(l, Nil{}), P.loop(P.untaken.go(r, 0n), P.Pass{r, True{}}), r,
+          q.loop_still(P.untaken.go(r, 0n), r, q.round_still.k(r, q.allf_dup(r, q.allf_of(r, he))))))
+
+def Laws.parts_fast_version_gives_the_same_marks(bs, ss):
+  +r = P.walk.go(ss, P.Walk{Nil{}, bs, Nil{}})
+  q.close_fast_eq(r, P.any_taken(r), {==})
+

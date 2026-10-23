@@ -3,6 +3,7 @@ import ./context.bend as C
 import ./arena.bend as A
 import ./usage.bend as U
 import ./spans.bend as S
+import ./parts.bend as P
 
 def RoundedUp(r: Nat, o: Nat, q: Nat) -> Type:
   match r:
@@ -408,6 +409,91 @@ def Apart(gs: +List<S.Group>) -> Type:
     case S.Group{a, b, c, d, f, w} <> rest:
       ApartFrom(b, rest)
 
+def Crossing(bs: +List<Nat>, +c: Nat, +d: Nat) -> Bool:
+  match bs:
+    case Nil{}:
+      False{}
+    case Con{+b, rest}:
+      Bool.or(Bool.and(Nat.is_lt(c, b), Nat.is_lt(b, d)), Crossing(rest, c, d))
+
+def CrossOf(bs: +List<Nat>, s: P.Span) -> Bool:
+  match s:
+    case P.Span{a, b, c, d}:
+      Crossing(bs, c, d)
+
+def Touches(s: P.Span, t: P.Span) -> Bool:
+  match s t:
+    case P.Span{a, b, c, d} P.Span{a2, b2, c2, d2}:
+      Bool.and(Nat.is_lt(c, b2), Nat.is_lt(a2, d))
+
+def SpansOf(ms: +List<P.Mark>) -> List<&2, P.Span>:
+  match ms:
+    case Nil{}:
+      Nil{}
+    case Con{P.Mark{s, t}, rest}:
+      s <> SpansOf(rest)
+
+def CrossTaken(bs: +List<Nat>, ms: +List<P.Mark>) -> Type:
+  match ms:
+    case Nil{}:
+      Unit
+    case Con{P.Mark{s, t}, rest}:
+      ({CrossOf(bs, s) == True{} : Bool} -> {t == True{} : Bool}) & CrossTaken(bs, rest)
+
+def Gate(t: Bool, t2: Bool, x: Bool) -> Type:
+  match t t2:
+    case False{} True{}:
+      {x == False{} : Bool}
+    case _ _:
+      Unit
+
+def NoTouch(+m: P.Mark, +n: P.Mark) -> Type:
+  match m n:
+    case P.Mark{+s, +t} P.Mark{+s2, +t2}:
+      Gate(t, t2, Touches(s, s2)) & Gate(t2, t, Touches(s2, s))
+
+def NoTouchAll(+m: P.Mark, ns: +List<P.Mark>) -> Type:
+  match ns:
+    case Nil{}:
+      Unit
+    case Con{n, rest}:
+      NoTouch(m, n) & NoTouchAll(m, rest)
+
+def Untouched(ms: +List<P.Mark>) -> Type:
+  match ms:
+    case Nil{}:
+      Unit
+    case Con{m, rest}:
+      NoTouchAll(m, rest) & Untouched(rest)
+
+def TakenWithin(ms: +List<P.Mark>, xs: +List<P.Mark>) -> Type:
+  match ms xs:
+    case Nil{} Nil{}:
+      Unit
+    case Con{P.Mark{s, t}, rest} Con{P.Mark{s2, t2}, rest2}:
+      ({t == True{} : Bool} -> {t2 == True{} : Bool}) & TakenWithin(rest, rest2)
+    case _ _:
+      Empty
+
+def BsFrom(+a: Nat, bs: +List<Nat>) -> Type:
+  match bs:
+    case Nil{}:
+      Unit
+    case Con{+b, rest}:
+      {Nat.is_le(a, b) == True{} : Bool} & BsFrom(b, rest)
+
+def Framed(+s: P.Span) -> Type:
+  match s:
+    case P.Span{+a, +b, c, d}:
+      {Nat.is_le(c, a) == True{} : Bool} & ({Nat.is_lt(a, b) == True{} : Bool} & {Nat.is_le(b, d) == True{} : Bool})
+
+def SpansFrom(+e: Nat, ss: +List<P.Span>) -> Type:
+  match ss:
+    case Nil{}:
+      Unit
+    case Con{P.Span{+a, +b, +c, +d}, rest}:
+      {Nat.is_le(e, a) == True{} : Bool} & (Framed(P.Span{a, b, c, d}) & SpansFrom(b, rest))
+
 law split_sums_to_provider:
   for +p: Nat
   for +bs: +List<Nat>
@@ -489,3 +575,37 @@ law spans_mask_only_finding_bytes:
 law spans_groups_are_apart:
   for +xs: +List<S.Raw>
   Apart(S.merge(xs))
+
+law parts_keep_every_span_in_order:
+  for +bs: +List<Nat>
+  for +ss: +List<P.Span>
+  {SpansOf(P.taken(bs, ss)) == ss : List<&2, P.Span>}
+
+law parts_take_every_span_whose_match_crosses_a_part:
+  for +bs: +List<Nat>
+  for sorted: BsFrom(0n, bs)
+  for +ss: +List<P.Span>
+  for apart: SpansFrom(0n, ss)
+  CrossTaken(bs, P.taken(bs, ss))
+
+law parts_untaken_matches_touch_no_taken_span:
+  for +bs: +List<Nat>
+  for +ss: +List<P.Span>
+  for apart: SpansFrom(0n, ss)
+  Untouched(P.taken(bs, ss))
+
+law parts_take_no_span_that_crossings_do_not_force:
+  for +bs: +List<Nat>
+  for sorted: BsFrom(0n, bs)
+  for +ss: +List<P.Span>
+  for apart: SpansFrom(0n, ss)
+  for +xs: +List<P.Mark>
+  for +same: {SpansOf(xs) == ss : List<&2, P.Span>}
+  for cross: CrossTaken(bs, xs)
+  for closed: Untouched(xs)
+  TakenWithin(P.taken(bs, ss), xs)
+
+law parts_fast_version_gives_the_same_marks:
+  for +bs: +List<Nat>
+  for +ss: +List<P.Span>
+  {P.taken.fast(bs, ss) == P.taken(bs, ss) : List<&2, P.Mark>}

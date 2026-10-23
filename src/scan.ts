@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import BendParts from "./bend/parts.mjs";
 import BendSpans from "./bend/spans.mjs";
 import { bendList, fromBendList, type BendList } from "./context.js";
 
@@ -197,17 +198,8 @@ const lastWhere = (n: number, ok: (i: number) => boolean) => {
   return found;
 };
 export type SpanRange = Pick<Span, "start" | "end" | "matchStart" | "matchEnd">;
-export function takenAcrossParts(starts: number[], spans: SpanRange[]): boolean[] {
-  const part = (pos: number) => lastWhere(starts.length, (k) => starts[k] <= pos);
-  const taken = spans.map((s) => part(s.matchStart) !== part(s.matchEnd - 1));
-  for (let grew = taken.includes(true); grew;) {
-    const removed = spans.filter((_, i) => taken[i]);
-    const overlapsRemoved = (s: SpanRange) => { const k = lastWhere(removed.length, (i) => removed[i].start < s.matchEnd); return k >= 0 && removed[k].end > s.matchStart; };
-    grew = false;
-    spans.forEach((s, i) => { if (!taken[i] && overlapsRemoved(s)) taken[i] = grew = true; });
-  }
-  return taken;
-}
+export const takenAcrossParts = (starts: number[], spans: SpanRange[]): boolean[] =>
+  fromBendList(BendParts["taken.fast"](bendList(starts.slice(1)), bendList(spans.map((s) => ({ $: "Span", start: s.start, end: s.end, ms: s.matchStart, me: s.matchEnd })))) as BendList<{ t: boolean }>).map((m) => m.t);
 
 function joinParts(arr: unknown[], carnet: Allowlist | undefined, path: string, findings: Finding[]): unknown[] {
   const idx: number[] = [], texts: string[] = [];
