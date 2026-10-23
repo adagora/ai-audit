@@ -36,3 +36,4 @@ Format: Nygard (Status, Context, Decision, Consequences), at most ~40 lines, fil
 - [26. Each QDL program is stored once per log](0026-store-each-program-once.md)
 - [27. Policy versions are derived per use case from the log](0027-policy-versions-per-use-case.md)
 - [28. Credentials without a shape are found by their name](0028-named-credentials.md)
+- [29. Pure functions with proved laws are written in Bend 2 and shipped as generated JavaScript](0029-proved-pure-core-in-bend.md)

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { composeContext, promptTokens, scaleToProvider, SEGMENTS } from "../src/context.js";
+import { BEND_NAT_MAX, composeContext, promptTokens, scaleToProvider, SEGMENTS } from "../src/context.js";
 import { mockUpstream, startProxy } from "./helpers.js";
 
 const bytesOf = (body: object) => Buffer.byteLength(JSON.stringify(body));
@@ -48,6 +48,16 @@ test("scaling: tokens sum to provider prompt tokens; 'other' gets none; unknown 
   const withImage = { ...c, bytes: { ...c.bytes, attachments: 10 } };
   assert.equal(scaleToProvider(withImage, 500).tokenBasis, "unknown");
   assert.deepEqual(SEGMENTS.length, 7);
+});
+
+test("scaling: an exact tie goes to the earlier segment; a split past Bend's Nat range stays unknown", () => {
+  const bytes = { system: 1, tools: 3, user: 10, assistant: 0, toolResults: 0, attachments: 0, other: 0 };
+  assert.deepEqual(scaleToProvider({ bytes, totalBytes: 14, tokenBasis: "unknown" }, 2).tokens, { system: 0, tools: 1, user: 1, assistant: 0, toolResults: 0, attachments: 0, other: 0 });
+  const big = { ...bytes, user: 32 * 1024 * 1024 }, edge = 2 ** 23 - 1;
+  assert.ok(edge * (32 * 1024 * 1024 + 4) <= BEND_NAT_MAX && (edge + 1) * (32 * 1024 * 1024 + 4) > BEND_NAT_MAX);
+  const atEdge = scaleToProvider({ bytes: big, totalBytes: 0, tokenBasis: "unknown" }, edge);
+  assert.equal(atEdge.tokenBasis, "provider-scaled"); assert.equal(sum(atEdge.tokens!), edge);
+  assert.equal(scaleToProvider({ bytes: big, totalBytes: 0, tokenBasis: "unknown" }, edge + 1).tokenBasis, "unknown");
 });
 
 test("anthropic prompt tokens include cache reads and writes; missing input stays unknown", () => {

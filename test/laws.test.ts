@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuditLog, anchor, verifyAnchors } from "../src/audit.js";
-import { composeContext, KIND_CODES, scaleToProvider, SEGMENTS, type ArenaBlock, type ContextBlock } from "../src/context.js";
+import { BEND_NAT_MAX, composeContext, KIND_CODES, scaleToProvider, SEGMENTS, type ArenaBlock, type ContextBlock } from "../src/context.js";
 import type { Api } from "../src/extract.js";
 import { decide, inspect, redactText, scanText, type Mode } from "../src/scan.js";
 import { SessionIndex, type SessionLink } from "../src/session.js";
@@ -200,7 +200,7 @@ test("law: provider tokens split across segments add up exactly, each segment ge
     if (!total) return undefined;
     const t = scaleToProvider({ bytes, totalBytes: total + 5, tokenBasis: "unknown" }, provider).tokens!;
     if (SEGMENTS.reduce((a, s) => a + t[s], 0) !== provider || t.other !== 0) return "sum";
-    return text.find((s, i) => { const low = Math.floor((provider * sizes[i]) / total); return (sizes[i] === 0 && t[s] !== 0) || (t[s] !== low && t[s] !== low + 1); });
+    return text.find((s, i) => { const rest = (provider * sizes[i]) % total, low = (provider * sizes[i] - rest) / total; return (sizes[i] === 0 && t[s] !== 0) || (t[s] !== low && (t[s] !== low + 1 || rest === 0)); });
   };
   const sizes = [0, 0, 0, 0, 0];
   for (let provider = 0; provider <= 12; provider++) for (let k = 0; k < 5 ** 5; k++) {
@@ -211,6 +211,26 @@ test("law: provider tokens split across segments add up exactly, each segment ge
     const provider = g.int(2_000_001), random = sizes.map(() => (g.int(3) ? g.int(33_554_433) : 0));
     assert.equal(broken(provider, random), undefined, JSON.stringify({ provider, random }));
   }
+});
+
+test("law: leftover provider tokens go to the largest exact remainders, ties to the earlier segment (the laws above are also proved in bend/PROOF.bend; this one is not)", () => {
+  const text = SEGMENTS.filter((s) => s !== "other" && s !== "attachments"), g = gen(17);
+  const expected = (provider: number, sizes: number[]) => {
+    const total = sizes.reduce((a, b) => a + b, 0), rest = sizes.map((b) => (provider * b) % total), base = sizes.map((b, i) => (provider * b - rest[i]) / total);
+    let left = provider - base.reduce((a, b) => a + b, 0);
+    for (const i of sizes.map((_, i) => i).sort((i, j) => rest[j] - rest[i] || i - j)) if (left-- > 0) base[i]++;
+    return base;
+  };
+  const check = (provider: number, sizes: number[]) => {
+    if (!sizes.some((b) => b)) return;
+    const bytes = Object.fromEntries(SEGMENTS.map((s) => [s, 0])) as Record<(typeof SEGMENTS)[number], number>;
+    text.forEach((s, i) => (bytes[s] = sizes[i])); bytes.other = 5;
+    const scaled = scaleToProvider({ bytes, totalBytes: 0, tokenBasis: "unknown" }, provider);
+    if (provider * sizes.reduce((a, b) => a + b, 0) > BEND_NAT_MAX) return assert.equal(scaled.tokens, undefined);
+    assert.deepEqual(text.map((s) => scaled.tokens![s]), expected(provider, sizes), JSON.stringify({ provider, sizes }));
+  };
+  for (let provider = 0; provider <= 12; provider++) for (let k = 0; k < 5 ** 5; k++) check(provider, text.map((_, i) => Math.floor(k / 5 ** i) % 5));
+  for (let i = 0; i < 20_000; i++) check(g.int(2_000_001), text.map(() => (g.int(3) ? g.int(33_554_433) : 0)));
 });
 
 test("law: context composition never attributes more bytes than the request has, for every API (ADR 0017)", () => {

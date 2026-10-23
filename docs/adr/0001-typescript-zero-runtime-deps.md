@@ -1,5 +1,5 @@
 # 1. TypeScript with zero runtime dependencies
-Status: Accepted (2026-10-20)
+Status: Accepted (2026-10-20); "TypeScript only" superseded for the modules under `bend/` by [0029](0029-proved-pure-core-in-bend.md)
 ## Context
 Target users write TS/Node. We need the OpenAI and Anthropic wire formats plus an audit log, in a tool that is easy to drop in front of any client.
 ## Decision

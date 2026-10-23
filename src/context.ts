@@ -1,4 +1,5 @@
 import type { Api, Usage } from "./extract.js";
+import Bend from "./bend/context.mjs";
 
 export const SEGMENTS = ["system", "tools", "user", "assistant", "toolResults", "attachments", "other"] as const;
 export type Segment = (typeof SEGMENTS)[number];
@@ -120,15 +121,18 @@ export function promptTokens(api: Api, usage: Usage | undefined): number | undef
   return api === "anthropic-messages" ? usage.input + (usage.cached ?? 0) + (usage.cacheWrite ?? 0) : usage.input;
 }
 
+export const BEND_NAT_MAX = 2 ** 48 - 1;
+type NatList = { $: "Nil" } | { $: "Con"; head: number; tail: NatList };
+const natList = (xs: number[]) => xs.reduceRight<NatList>((tail, head) => ({ $: "Con", head, tail }), { $: "Nil" });
+const fromNatList = (list: NatList) => { const out: number[] = []; for (let l = list; l.$ === "Con"; l = l.tail) out.push(l.head); return out; };
+
 export function scaleToProvider(c: ContextComposition, providerPromptTokens: number | undefined): ContextComposition {
   if (providerPromptTokens == null || c.bytes.attachments > 0) return c;
   const scaled = SEGMENTS.filter((s) => s !== "other");
   const textBytes = scaled.reduce((a, s) => a + c.bytes[s], 0);
-  if (textBytes === 0) return c;
+  if (textBytes === 0 || providerPromptTokens * textBytes > BEND_NAT_MAX) return c;
+  const split = fromNatList(Bend.split(providerPromptTokens, natList(scaled.map((s) => c.bytes[s]))));
   const tokens = Object.fromEntries(SEGMENTS.map((s) => [s, 0])) as Record<Segment, number>;
-  const shares = scaled.map((s) => ({ s, exact: (providerPromptTokens * c.bytes[s]) / textBytes }));
-  shares.forEach(({ s, exact }) => (tokens[s] = Math.floor(exact)));
-  let remainder = providerPromptTokens - SEGMENTS.reduce((a, s) => a + tokens[s], 0);
-  for (const { s } of [...shares].sort((a, b) => (b.exact % 1) - (a.exact % 1))) { if (remainder-- <= 0) break; tokens[s]++; }
+  scaled.forEach((s, i) => (tokens[s] = split[i]));
   return { ...c, tokens, tokenBasis: "provider-scaled" };
 }

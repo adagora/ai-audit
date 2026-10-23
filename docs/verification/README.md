@@ -1,4 +1,4 @@
-# Formal verification (TLA+ / TLC)
+# Formal verification (TLA+ / TLC, Bend 2)
 
 Run: `npm run verify:formal`. Procedure, coverage and sync commit: `.agents/skills/verify-audit-log/SKILL.md`.
 Specs `spec/AuditChain.tla`, `spec/RequestLifecycle.tla`; configs `spec/*.cfg`; runner `spec/run.sh` (tla2tools v1.8.0).
@@ -24,3 +24,16 @@ The questions were about the order of steps between processes and between a requ
 Real-code mutations caught by `verify:formal`: append without `withLock` (multi-process test fails), outer catch without `res.writableEnded` (late-failure test fails), both `ensureWritable()` checks removed (torn-tail 503 test fails).
 
 Not modelled: attachment cache vs inspection profile (reviewed: key includes `profile.id`, profile frozen per instance; no stale path).
+
+## Proofs in Bend 2 (ADR 0029)
+Run: `npm run verify:bend` (needs Bend 2.0.38 on PATH). Code `bend/context.bend`, laws `bend/LAWS.bend`, proofs `bend/PROOF.bend`, runner `bend/run.sh`. The committed `src/bend/context.mjs` must match the code; `bash bend/run.sh --write` regenerates it.
+
+| Check | Expected | Result |
+|---|---|---|
+| Laws in LAWS.bend: the split sums to the provider total; each part is its floor, or one more only when the share is not whole; an empty segment gets 0 | pass | ALL PROOFS CHECK, 0.2 s |
+| Mutant: one leftover token too many | fail | fail |
+| Mutant: a raised share gets two tokens | fail | fail |
+| Mutant: an exact share gets a remainder | fail | fail |
+| `--verdict` (Lean-checked kernel) | pass | skipped, Lean v4.34.0 not installed |
+
+Not proved: which segments get the leftover tokens (largest remainder, ties to the earlier segment). `test/laws.test.ts` checks it against an exact-integer reference.
