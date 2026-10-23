@@ -83,7 +83,7 @@ export const RULES_DIGEST = createHash("sha256").update(JSON.stringify({
 })).digest("hex");
 
 export interface Finding { rule: string; path: string; inKey?: boolean; unredactable?: boolean }
-interface Span { start: number; end: number; matchStart: number; matchEnd: number; rule: string; value: string }
+export interface Span { start: number; end: number; matchStart: number; matchEnd: number; rule: string; value: string }
 
 const allowed = (value: string, carnet?: Allowlist) => carnet?.has(createHash("sha256").update(value).digest("hex")) === true;
 const validBeforeSpace = (r: Rule, text: string, start: number, end: number) => {
@@ -120,9 +120,12 @@ export function scanText(text: string, carnet?: Allowlist): Span[] {
       if (!allowed(j[2], carnet)) spans.push({ start, end, matchStart: start, matchEnd: end, rule: "jwt", value: j[2] });
     }
   }
-  spans.sort((a, b) => a.start - b.start || b.end - a.end);
-  const out: Span[] = [];
-  for (const s of spans) {
+  return mergeSpans(text, spans);
+}
+
+export function mergeSpans(text: string, spans: Span[]): Span[] {
+  const sorted = [...spans].sort((a, b) => a.start - b.start || b.end - a.end), out: Span[] = [];
+  for (const s of sorted) {
     const prev = out.at(-1);
     if (!prev || s.start >= prev.end) { out.push({ ...s }); continue; }
     if (s.end > prev.end) { prev.end = s.end; prev.value = text.slice(prev.start, prev.end); }
