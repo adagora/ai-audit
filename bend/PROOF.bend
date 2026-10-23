@@ -6,6 +6,7 @@ import ./usage.bend as U
 import ./spans.bend as S
 import ./parts.bend as P
 import ./mask.bend as K
+import ./decide.bend as D
 
 def add_zero(a: Nat) -> {a == Nat.add(a, 0n) : Nat}:
   match a:
@@ -5348,3 +5349,43 @@ def m.law.k(bs: +List<Nat>, +ss: +List<K.Cut>, sp: Laws.BsFrom(0n, bs) & Laws.Bs
 
 def Laws.mask_keeps_each_byte_outside_findings_and_marks_each_finding_once(bs, sorted, ss, apart):
   m.law.k(bs, ss, q.bs_dup(bs, 0n, sorted), m.cf_dup(ss, 0n, apart))
+
+def dc.all_eq(fs: +List<Bool>) -> {D.all_maskable(fs) == Laws.Maskable(fs) : Bool}:
+  match fs:
+    case Nil{}:
+      {==}
+    case Con{True{}, +rest}:
+      dc.all_eq(rest)
+    case Con{False{}, rest}:
+      {==}
+
+def dc.redact_pick(b: Bool) -> {D.decide.redact(b) == Bool.pick(D.Action, b, D.Masked{}, D.Unmaskable{}) : D.Action}:
+  match b:
+    case True{}:
+      {==}
+    case False{}:
+      {==}
+
+def Laws.decide_forwards_the_original_when_nothing_is_found(mode):
+  match mode:
+    case D.Redact{}:
+      {==}
+    case D.NoGo{}:
+      {==}
+    case D.Advisory{}:
+      {==}
+
+def Laws.decide_forwards_the_original_in_advisory_mode(fs):
+  match fs:
+    case Nil{}:
+      {==}
+    case Con{f, rest}:
+      {==}
+
+def Laws.decide_blocks_every_finding_in_no_go_mode(f, fs):
+  {==}
+
+def Laws.decide_masks_in_redact_mode_only_when_every_finding_can_be_masked(f, fs):
+  Equal.trans(D.Action, D.decide.redact(D.all_maskable(f <> fs)), D.decide.redact(Laws.Maskable(f <> fs)), Bool.pick(D.Action, Laws.Maskable(f <> fs), D.Masked{}, D.Unmaskable{}),
+    Equal.cong(Bool, D.Action, b => D.decide.redact(b), D.all_maskable(f <> fs), Laws.Maskable(f <> fs), dc.all_eq(f <> fs)),
+    dc.redact_pick(Laws.Maskable(f <> fs)))

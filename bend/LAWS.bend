@@ -5,6 +5,7 @@ import ./usage.bend as U
 import ./spans.bend as S
 import ./parts.bend as P
 import ./mask.bend as K
+import ./decide.bend as D
 
 def RoundedUp(r: Nat, o: Nat, q: Nat) -> Type:
   match r:
@@ -757,3 +758,28 @@ law mask_keeps_each_byte_outside_findings_and_marks_each_finding_once:
   for +ss: +List<K.Cut>
   for apart: CutsFrom(0n, ss)
   {ShownParts(K.cut(bs, ss)) == MaskedParts(bs, 0n, ss, 0n) : List<&2, List<&2, Item>>}
+
+def Maskable(fs: +List<Bool>) -> Bool:
+  match fs:
+    case Nil{}:
+      True{}
+    case Con{f, rest}:
+      Bool.and(f, Maskable(rest))
+
+law decide_forwards_the_original_when_nothing_is_found:
+  for mode: D.Mode
+  {D.decide(mode, []) == D.Original{} : D.Action}
+
+law decide_forwards_the_original_in_advisory_mode:
+  for +fs: +List<Bool>
+  {D.decide(D.Advisory{}, fs) == D.Original{} : D.Action}
+
+law decide_blocks_every_finding_in_no_go_mode:
+  for f: Bool
+  for +fs: +List<Bool>
+  {D.decide(D.NoGo{}, f <> fs) == D.Blocked{} : D.Action}
+
+law decide_masks_in_redact_mode_only_when_every_finding_can_be_masked:
+  for +f: Bool
+  for +fs: +List<Bool>
+  {D.decide(D.Redact{}, f <> fs) == Bool.pick(D.Action, Maskable(f <> fs), D.Masked{}, D.Unmaskable{}) : D.Action}

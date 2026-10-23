@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import BendDecide from "./bend/decide.mjs";
 import BendMask from "./bend/mask.mjs";
 import BendParts from "./bend/parts.mjs";
 import BendSpans from "./bend/spans.mjs";
@@ -249,9 +250,10 @@ export function hasDuplicateKeys(t: string): boolean {
 }
 
 export type Decision = { action: "forward-original" | "forward-redacted" | "block"; findings: Finding[]; status?: number; code?: string };
+const BEND_MODES: Readonly<Record<string, { $: string }>> = Object.freeze({ redact: { $: "Redact" }, "no-go": { $: "NoGo" }, advisory: { $: "Advisory" } });
 export function decide(mode: Mode, findings: Finding[]): Decision {
-  if (!findings.length || mode === "advisory") return { action: "forward-original", findings };
-  if (mode === "no-go") return { action: "block", findings, status: 409, code: "audit_findings_blocked" };
-  if (findings.some((f) => f.inKey || f.unredactable)) return { action: "block", findings, status: 409, code: "audit_unredactable_finding" };
-  return { action: "forward-redacted", findings };
+  const action = (BendDecide.decide(BEND_MODES[mode] ?? BEND_MODES.redact, bendListOf(findings, (f) => !(f.inKey || f.unredactable))) as { $: "Original" | "Masked" | "Blocked" | "Unmaskable" }).$;
+  if (action === "Original") return { action: "forward-original", findings };
+  if (action === "Masked") return { action: "forward-redacted", findings };
+  return { action: "block", findings, status: 409, code: action === "Blocked" ? "audit_findings_blocked" : "audit_unredactable_finding" };
 }

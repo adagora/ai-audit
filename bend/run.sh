@@ -7,7 +7,7 @@ found=$("$BEND" version 2>/dev/null)
 [ "$found" = "bend $BEND_VERSION" ] || { echo "FAIL need bend $BEND_VERSION, found '${found:-no bend}'"; exit 1; }
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 rc=0; ran=""
-MODULES="context arena usage spans parts mask"
+MODULES="context arena usage spans parts mask decide"
 
 verdict() {
   if (cd "$1" && "$BEND" "$2" 2>&1) | grep -qx "ALL PROOFS CHECK"; then echo pass; else echo fail; fi
@@ -74,6 +74,10 @@ mutant keep-into-finding mask 's/Hide\{i\} <> \(Keep\{pos, a\} <> acc\)/Hide{i} 
 mutant marker-dropped mask 's/1n\+i, b, hi, Hide\{i\} <> \(Keep\{pos, a\} <> acc\)\)/1n+i, b, hi, Keep{pos, a} <> acc)/'
 mutant remark-continued mask 's/1n\+i, b, hi, acc\)/1n+i, b, hi, Hide{i} <> acc)/'
 mutant index-not-advanced mask 's/1n\+i, b, hi, Hide\{i\}/i, b, hi, Hide{i}/'
+mutant empty-blocks decide 's/case _ Nil\{\}:\n      Original\{\}/case _ Nil{}:\n      Blocked{}/'
+mutant advisory-blocks decide 's/case Advisory\{\} Con\{f, rest\}:\n      Original\{\}/case Advisory{} Con{f, rest}:\n      Blocked{}/'
+mutant no-go-forwards decide 's/case NoGo\{\} Con\{f, rest\}:\n      Blocked\{\}/case NoGo{} Con{f, rest}:\n      Masked{}/'
+mutant unmaskable-masked decide 's/case Con\{False\{\}, rest\}:\n      False\{\}/case Con{False{}, rest}:\n      all_maskable(rest)/'
 for f in stops/*.bend; do case "$ran" in *" $(basename "$f" .bend) "*) ;; *) echo "FAIL $f has no mutant"; rc=1;; esac; done
 
 if command -v lean >/dev/null 2>&1; then
