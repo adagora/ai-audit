@@ -213,7 +213,7 @@ test("law: provider tokens split across segments add up exactly, each segment ge
   }
 });
 
-test("law: leftover provider tokens go to the largest exact remainders, ties to the earlier segment (the laws above are also proved in bend/PROOF.bend; this one is not)", () => {
+test("law: leftover provider tokens go to the largest exact remainders, ties to the earlier segment (proved in bend/PROOF.bend; checked here on the generated JavaScript)", () => {
   const text = SEGMENTS.filter((s) => s !== "other" && s !== "attachments"), g = gen(17);
   const expected = (provider: number, sizes: number[]) => {
     const total = sizes.reduce((a, b) => a + b, 0), rest = sizes.map((b) => (provider * b) % total), base = sizes.map((b, i) => (provider * b - rest[i]) / total);

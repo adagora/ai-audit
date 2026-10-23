@@ -30,10 +30,19 @@ Run: `npm run verify:bend` (needs Bend 2.0.38 on PATH). Code `bend/context.bend`
 
 | Check | Expected | Result |
 |---|---|---|
-| Laws in LAWS.bend: the split sums to the provider total; each part is its floor, or one more only when the share is not whole; an empty segment gets 0 | pass | ALL PROOFS CHECK, 0.2 s |
-| Mutant: one leftover token too many | fail | fail |
-| Mutant: a raised share gets two tokens | fail | fail |
-| Mutant: an exact share gets a remainder | fail | fail |
+| Laws in LAWS.bend: the split sums to the provider total; each part is its floor, or one more only when the share is not whole; an empty segment gets 0; leftover tokens go to the largest remainders, ties to the earlier segment | pass | ALL PROOFS CHECK |
 | `--verdict` (Lean-checked kernel) | pass | skipped, Lean v4.34.0 not installed |
 
-Not proved: which segments get the leftover tokens (largest remainder, ties to the earlier segment). `test/laws.test.ts` checks it against an exact-integer reference.
+Each mutant must fail `PROOF.bend`, and its counterexample in `bend/stops/` must check against the mutant and fail against the real code. A failing proof alone can come from the proof's wording; the counterexample shows that a named law rejects the mutant's output.
+
+| Mutant | Change | Counterexample breaks | At |
+|---|---|---|---|
+| leftover | one leftover token too many | `split_sums_to_provider` | p=1, sizes [1, 1] |
+| double-bump | a raised share gets two tokens | `split_rounds_each_share` | p=1, sizes [1, 1] |
+| empty-segment | an empty segment competes for a leftover token | `split_gives_empty_none`, `split_rounds_each_share` | p=1, sizes [0, 1, 1] |
+| tie-to-later | a tie goes to the later segment | `split_leftover_to_largest_remainders` | p=1, sizes [1, 1] |
+| smallest-first | the smallest remainder gets the leftover token | `split_leftover_to_largest_remainders` | p=1, sizes [1, 2] |
+
+The empty-segment counterexample fails against the earlier quota law, which allowed one more token for a whole share. The tie-to-later and smallest-first mutants satisfy the first three laws; only the fourth rejects them. An earlier `zero-remainder` mutant added 1 to every remainder; it changed 0 of 28,125 outputs and has no counterexample, so it was removed.
+
+The four laws together fix the split: the sum fixes how many segments get one more token, the quota law limits them to shares that are not whole, and the fourth law makes them the largest remainders. `test/laws.test.ts` still compares the generated JavaScript with an exact-integer reference, because a proof covers the Bend code, not the JS backend.

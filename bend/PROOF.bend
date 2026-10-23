@@ -765,3 +765,571 @@ def Laws.split_rounds_each_share(p, bs):
 
 def Laws.split_gives_empty_none(p, bs):
   zeros_of(p, C.total(bs), bs, C.rounds(Nat.sub(p, C.sum_q(C.shares(p, C.total(bs), bs))), C.shares(p, C.total(bs), bs)), rounds_inv(p, C.total(bs), Nat.sub(p, C.sum_q(C.shares(p, C.total(bs), bs))), bs, C.shares(p, C.total(bs), bs), shares_inv(p, C.total(bs), bs)))
+
+def zip2(-A: Type, -B: Type, a: A & A, b: B & B) -> (A & B) & (A & B):
+  (a1, a2) = a
+  (b1, b2) = b
+  ((a1, b1), (a2, b2))
+
+def dup_n(-a: Nat, -b: Nat, +e: {a == b : Nat}) -> {a == b : Nat} & {a == b : Nat}:
+  (e, e)
+
+def dup_b(-a: Bool, -b: Bool, +e: {a == b : Bool}) -> {a == b : Bool} & {a == b : Bool}:
+  (e, e)
+
+def ft(e: {False{} == True{} : Bool}) -> Empty:
+  %e : Bool.pick(Type, _, Empty, Unit)
+  Unit{}
+
+def ge_zero(a: Nat) -> {Nat.is_ge(a, 0n) == True{} : Bool}:
+  match a:
+    case 0n:
+      {==}
+    case 1n+p:
+      {==}
+
+def cmp_ge_lt(c: Cmp, e: {Cmp.is_ge(c) == False{} : Bool}) -> {Cmp.is_lt(c) == True{} : Bool}:
+  match c:
+    case LT{}:
+      {==}
+    case EQ{}:
+      Empty.absurd({False{} == True{} : Bool}, ft(Equal.sym(Bool, True{}, False{}, e)))
+    case GT{}:
+      Empty.absurd({False{} == True{} : Bool}, ft(Equal.sym(Bool, True{}, False{}, e)))
+
+def ge_false_lt(a: Nat, b: Nat, e: {Nat.is_ge(a, b) == False{} : Bool}) -> {Nat.is_lt(a, b) == True{} : Bool}:
+  cmp_ge_lt(Nat.cmp(a, b), e)
+
+def ge_trans(a: Nat, b: Nat, c: Nat, e1: {Nat.is_ge(a, b) == True{} : Bool}, e2: {Nat.is_ge(b, c) == True{} : Bool}) -> {Nat.is_ge(a, c) == True{} : Bool}:
+  match a b c:
+    case 0n 0n 0n:
+      {==}
+    case 0n 0n 1n+cc:
+      e2
+    case 0n 1n+bb 0n:
+      {==}
+    case 0n 1n+bb 1n+cc:
+      e1
+    case 1n+aa 0n 0n:
+      {==}
+    case 1n+aa 0n 1n+cc:
+      Empty.absurd({Nat.is_ge(aa, cc) == True{} : Bool}, ft(e2))
+    case 1n+aa 1n+bb 0n:
+      {==}
+    case 1n+aa 1n+bb 1n+cc:
+      ge_trans(aa, bb, cc, e1, e2)
+
+def lt_ge(a: Nat, b: Nat, e: {Nat.is_lt(a, b) == True{} : Bool}) -> {Nat.is_ge(b, a) == True{} : Bool}:
+  match a b:
+    case 0n 0n:
+      {==}
+    case 0n 1n+bb:
+      {==}
+    case 1n+aa 0n:
+      e
+    case 1n+aa 1n+bb:
+      lt_ge(aa, bb, e)
+
+def gt_self(n: Nat) -> {Nat.is_gt(n, n) == False{} : Bool}:
+  match n:
+    case 0n:
+      {==}
+    case 1n+p:
+      gt_self(p)
+
+def gt_succ(n: Nat) -> {Nat.is_gt(1n+n, n) == True{} : Bool}:
+  match n:
+    case 0n:
+      {==}
+    case 1n+p:
+      gt_succ(p)
+
+def s.up(y: C.Share) -> Bool:
+  match y:
+    case C.Share{q, r, up}:
+      up
+
+def s.r(y: C.Share) -> Nat:
+  match y:
+    case C.Share{q, r, up}:
+      r
+
+def SAhead(+y: C.Share, xs: +List<C.Share>) -> Type:
+  match xs:
+    case Nil{}:
+      Unit
+    case +z <> rest:
+      Laws.Fair.pair(s.up(y), s.up(z), s.r(y), s.r(z)) & SAhead(y, rest)
+
+def SFair(xs: +List<C.Share>) -> Type:
+  match xs:
+    case Nil{}:
+      Unit
+    case +y <> +rest:
+      SAhead(y, rest) & SFair(rest)
+
+def Under(v: Nat, y: C.Share) -> Type:
+  match y:
+    case C.Share{q, r, up}:
+      match r up:
+        case 0n _:
+          Unit
+        case 1n+w True{}:
+          Unit
+        case 1n+w False{}:
+          {Nat.is_lt(1n+w, v) == True{} : Bool}
+
+def Over(v: Nat, y: C.Share) -> Type:
+  match y:
+    case C.Share{q, r, up}:
+      match r up:
+        case 0n _:
+          Unit
+        case 1n+w True{}:
+          Unit
+        case 1n+w False{}:
+          {Nat.is_ge(v, 1n+w) == True{} : Bool}
+
+def Top(v: Nat, y: C.Share) -> Type:
+  match y:
+    case C.Share{q, r, up}:
+      match r up:
+        case 0n _:
+          Empty
+        case 1n+w True{}:
+          Empty
+        case 1n+w False{}:
+          {1n+w == v : Nat}
+
+def NoCand.at(y: C.Share) -> Type:
+  match y:
+    case C.Share{q, r, up}:
+      match r up:
+        case 0n _:
+          Unit
+        case 1n+w True{}:
+          Unit
+        case 1n+w False{}:
+          Empty
+
+def Below(+v: Nat, xs: +List<C.Share>) -> Type:
+  match xs:
+    case Nil{}:
+      Unit
+    case y <> rest:
+      Over(v, y) & Below(v, rest)
+
+def NoCand(xs: +List<C.Share>) -> Type:
+  match xs:
+    case Nil{}:
+      Unit
+    case y <> rest:
+      NoCand.at(y) & NoCand(rest)
+
+def Max(i: Nat, +v: Nat, xs: +List<C.Share>) -> Type:
+  match i xs:
+    case _ Nil{}:
+      Empty
+    case 0n y <> rest:
+      Top(v, y) & Below(v, rest)
+    case 1n+j y <> rest:
+      Under(v, y) & Max(j, v, rest)
+
+def PickMax(xs: +List<C.Share>, f: Maybe<&2, C.Pick>) -> Type:
+  match f:
+    case None{}:
+      NoCand(xs)
+    case Some{C.Pick{i, v}}:
+      Max(i, v, xs)
+
+def below_none(+v: Nat, xs: +List<C.Share>, h: NoCand(xs)) -> Below(v, xs):
+  match xs:
+    case Nil{}:
+      Unit{}
+    case C.Share{q, r, up} <> rest:
+      match r up:
+        case 0n _:
+          (n, hr) = h
+          (Unit{}, below_none(v, rest, hr))
+        case 1n+w True{}:
+          (n, hr) = h
+          (Unit{}, below_none(v, rest, hr))
+        case 1n+w False{}:
+          (n, hr) = h
+          match n:
+
+def below_mono(+v: Nat, +u: Nat, xs: +List<C.Share>, h: Below(v, xs), +e: {Nat.is_ge(u, v) == True{} : Bool}) -> Below(u, xs):
+  match xs:
+    case Nil{}:
+      Unit{}
+    case C.Share{q, r, up} <> rest:
+      match r up:
+        case 0n _:
+          (o, hr) = h
+          (Unit{}, below_mono(v, u, rest, hr, e))
+        case 1n+w True{}:
+          (o, hr) = h
+          (Unit{}, below_mono(v, u, rest, hr, e))
+        case 1n+w False{}:
+          (o, hr) = h
+          (ge_trans(u, v, 1n+w, e, o), below_mono(v, u, rest, hr, e))
+
+def ge_eq(-u: Nat, -a: Nat, -v: Nat, t: {a == v : Nat}, e: {Nat.is_ge(u, v) == True{} : Bool}) -> {Nat.is_ge(u, a) == True{} : Bool}:
+  %Equal.sym(Nat, a, v, t) : {Nat.is_ge(u, _) == True{} : Bool}
+  e
+
+def below_of_max(j: Nat, +v: Nat, xs: +List<C.Share>, h: Max(j, v, xs), +u: Nat, +e: {Nat.is_ge(u, v) == True{} : Bool}) -> Below(u, xs):
+  match j xs:
+    case _ Nil{}:
+      match h:
+    case 0n y <> rest:
+      match y:
+        case C.Share{q, r, up}:
+          match r up:
+            case 0n _:
+              (t, b) = h
+              match t:
+            case 1n+w True{}:
+              (t, b) = h
+              match t:
+            case 1n+w False{}:
+              (t, b) = h
+              (ge_eq(u, 1n+w, v, t, e), below_mono(v, u, rest, b, e))
+    case 1n+k y <> rest:
+      match y:
+        case C.Share{q, r, up}:
+          match r up:
+            case 0n _:
+              (n, m) = h
+              (Unit{}, below_of_max(k, v, rest, m, u, e))
+            case 1n+w True{}:
+              (n, m) = h
+              (Unit{}, below_of_max(k, v, rest, m, u, e))
+            case 1n++w False{}:
+              (n, m) = h
+              (ge_trans(u, v, 1n+w, e, lt_ge(1n+w, v, n)), below_of_max(k, v, rest, m, u, e))
+
+def choose_max(-q: Nat, +w: Nat, +rest: +List<C.Share>, j: Nat, +v: Nat, b: Bool, e: {Nat.is_ge(1n+w, v) == b : Bool}, h: Max(j, v, rest))
+  -> PickMax(C.Share{q, 1n+w, False{}} <> rest, C.pick.choose(1n+w, j, v, b)):
+  match b:
+    case True{}:
+      ({==}, below_of_max(j, v, rest, h, 1n+w, e))
+    case False{}:
+      (ge_false_lt(1n+w, v, e), h)
+
+def vs_max(-q: Nat, +w: Nat, +rest: +List<C.Share>, f: Maybe<&2, C.Pick>, h: PickMax(rest, f))
+  -> PickMax(C.Share{q, 1n+w, False{}} <> rest, C.pick.vs(1n+w, f)):
+  match f:
+    case None{}:
+      ({==}, below_none(1n+w, rest, h))
+    case Some{C.Pick{j, +v}}:
+      choose_max(q, w, rest, j, v, Nat.is_ge(1n+w, v), {==}, h)
+
+def at_max(y: C.Share, +rest: +List<C.Share>, f: Maybe<&2, C.Pick>, h: PickMax(rest, f)) -> PickMax(y <> rest, C.pick.at(y, f)):
+  match y:
+    case C.Share{q, r, up}:
+      match r up:
+        case 0n _:
+          match f:
+            case None{}:
+              (Unit{}, h)
+            case Some{C.Pick{j, v}}:
+              (Unit{}, h)
+        case 1n+w True{}:
+          match f:
+            case None{}:
+              (Unit{}, h)
+            case Some{C.Pick{j, v}}:
+              (Unit{}, h)
+        case 1n+w False{}:
+          vs_max(q, w, rest, f, h)
+
+def pick_max(+xs: +List<C.Share>) -> PickMax(xs, C.pick(xs)):
+  match xs:
+    case Nil{}:
+      Unit{}
+    case y <> +rest:
+      at_max(y, rest, C.pick(rest), pick_max(rest))
+
+def dup_top(-v: Nat, y: C.Share, t: Top(v, y)) -> Top(v, y) & Top(v, y):
+  match y:
+    case C.Share{q, r, up}:
+      match r up:
+        case 0n _:
+          match t:
+        case 1n+w True{}:
+          match t:
+        case 1n+w False{}:
+          dup_n(1n+w, v, t)
+
+def dup_under(-v: Nat, y: C.Share, u: Under(v, y)) -> Under(v, y) & Under(v, y):
+  match y:
+    case C.Share{q, r, up}:
+      match r up:
+        case 0n _:
+          (Unit{}, Unit{})
+        case 1n+w True{}:
+          (Unit{}, Unit{})
+        case 1n+w False{}:
+          dup_b(Nat.is_lt(1n+w, v), True{}, u)
+
+def dup_over(-v: Nat, y: C.Share, o: Over(v, y)) -> Over(v, y) & Over(v, y):
+  match y:
+    case C.Share{q, r, up}:
+      match r up:
+        case 0n _:
+          (Unit{}, Unit{})
+        case 1n+w True{}:
+          (Unit{}, Unit{})
+        case 1n+w False{}:
+          dup_b(Nat.is_ge(v, 1n+w), True{}, o)
+
+def dup_below(-v: Nat, xs: +List<C.Share>, b: Below(v, xs)) -> Below(v, xs) & Below(v, xs):
+  match xs:
+    case Nil{}:
+      (Unit{}, Unit{})
+    case y <> rest:
+      (o, br) = b
+      zip2(Over(v, y), Below(v, rest), dup_over(v, y, o), dup_below(v, rest, br))
+
+def dup_max(j: Nat, -v: Nat, xs: +List<C.Share>, m: Max(j, v, xs)) -> Max(j, v, xs) & Max(j, v, xs):
+  match j xs:
+    case _ Nil{}:
+      match m:
+    case 0n y <> rest:
+      (t, b) = m
+      zip2(Top(v, y), Below(v, rest), dup_top(v, y, t), dup_below(v, rest, b))
+    case 1n+k y <> rest:
+      (u, mk) = m
+      zip2(Under(v, y), Max(k, v, rest), dup_under(v, y, u), dup_max(k, v, rest, mk))
+
+def raise_ahead(-q: Nat, +r: Nat, xs: +List<C.Share>, h: Below(r, xs)) -> SAhead(C.Share{q, r, True{}}, xs):
+  match xs:
+    case Nil{}:
+      Unit{}
+    case C.Share{q2, r2, up2} <> rest:
+      match r2 up2:
+        case 0n True{}:
+          (o, hr) = h
+          (Unit{}, raise_ahead(q, r, rest, hr))
+        case 0n False{}:
+          (o, hr) = h
+          (ge_zero(r), raise_ahead(q, r, rest, hr))
+        case 1n+w True{}:
+          (o, hr) = h
+          (Unit{}, raise_ahead(q, r, rest, hr))
+        case 1n+w False{}:
+          (o, hr) = h
+          (o, raise_ahead(q, r, rest, hr))
+
+def below_eq(-a: Nat, -v: Nat, -xs: +List<C.Share>, t: {a == v : Nat}, b: Below(v, xs)) -> Below(a, xs):
+  %Equal.sym(Nat, a, v, t) : Below(_, xs)
+  b
+
+def new_pair(+y: C.Share, -w: Nat, -v: Nat, u: Under(v, y), t: {1n+w == v : Nat}) -> Laws.Fair.pair(s.up(y), True{}, s.r(y), 1n+w):
+  match y:
+    case C.Share{q, r, up}:
+      match r up:
+        case 0n True{}:
+          Unit{}
+        case 0n False{}:
+          {==}
+        case 1n+rr True{}:
+          Unit{}
+        case 1n+rr False{}:
+          %Equal.sym(Nat, 1n+w, v, t) : {Nat.is_lt(1n+rr, _) == True{} : Bool}
+          u
+
+def ahead_bump(+y: C.Share, j: Nat, +v: Nat, xs: +List<C.Share>, a: SAhead(y, xs), u: Under(v, y), m: Max(j, v, xs)) -> SAhead(y, C.bump_at(j, xs)):
+  match j xs:
+    case _ Nil{}:
+      match m:
+    case 0n z <> rest:
+      match z:
+        case C.Share{q2, r2, up2}:
+          match r2 up2:
+            case 0n _:
+              (t, b) = m
+              match t:
+            case 1n+w True{}:
+              (t, b) = m
+              match t:
+            case 1n+w False{}:
+              (pz, ar) = a
+              (t, b) = m
+              (new_pair(y, w, v, u, t), ar)
+    case 1n+k z <> rest:
+      (pz, ar) = a
+      (uz, mk) = m
+      (pz, ahead_bump(y, k, v, rest, ar, u, mk))
+
+def bump_fair(i: Nat, +v: Nat, xs: +List<C.Share>, mm: Max(i, v, xs) & Max(i, v, xs), f: SFair(xs)) -> SFair(C.bump_at(i, xs)):
+  match i xs:
+    case _ Nil{}:
+      (m1, m2) = mm
+      match m1:
+    case 0n y <> rest:
+      match y:
+        case C.Share{q, r, up}:
+          match r up:
+            case 0n _:
+              (m1, m2) = mm
+              (t, b) = m1
+              match t:
+            case 1n+w True{}:
+              (m1, m2) = mm
+              (t, b) = m1
+              match t:
+            case 1n+w False{}:
+              (m1, m2) = mm
+              (t, b) = m1
+              (a, fr) = f
+              (raise_ahead(q, 1n+w, rest, below_eq(1n+w, v, rest, t, b)), fr)
+    case 1n++j +y <> +rest:
+      (m1, m2) = mm
+      (u, mj) = m1
+      (u2, mj2) = m2
+      (a, fr) = f
+      (ahead_bump(y, j, v, rest, a, u, mj), bump_fair(j, v, rest, dup_max(j, v, rest, mj2), fr))
+
+def go_fair(+xs: +List<C.Share>, f: Maybe<&2, C.Pick>, m: PickMax(xs, f), h: SFair(xs)) -> SFair(C.step.go(xs, f)):
+  match f:
+    case None{}:
+      h
+    case Some{C.Pick{+i, +v}}:
+      bump_fair(i, v, xs, dup_max(i, v, xs, m), h)
+
+def step_fair(+xs: +List<C.Share>, h: SFair(xs)) -> SFair(C.step(xs)):
+  go_fair(xs, C.pick(xs), pick_max(xs), h)
+
+def rounds_fair(k: Nat, +xs: +List<C.Share>, h: SFair(xs)) -> SFair(C.rounds(k, xs)):
+  match k:
+    case 0n:
+      h
+    case 1n+j:
+      rounds_fair(j, C.step(xs), step_fair(xs, h))
+
+def shares_ahead(-q0: Nat, -r0: Nat, +p: Nat, +t: Nat, bs: +List<Nat>) -> SAhead(C.Share{q0, r0, False{}}, C.shares(p, t, bs)):
+  match bs:
+    case Nil{}:
+      Unit{}
+    case b <> rest:
+      (Unit{}, shares_ahead(q0, r0, p, t, rest))
+
+def shares_fair(+p: Nat, +t: Nat, bs: +List<Nat>) -> SFair(C.shares(p, t, bs)):
+  match bs:
+    case Nil{}:
+      Unit{}
+    case b <> +rest:
+      (shares_ahead(Nat.div(Nat.mul(b, p), t), Nat.mod(Nat.mul(b, p), t), p, t, rest), shares_fair(p, t, rest))
+
+def got_false(+q: Nat, -d: Nat, eq: {q == d : Nat}) -> {False{} == Nat.is_gt(q, d) : Bool}:
+  %eq : {False{} == Nat.is_gt(q, _) : Bool}
+  Equal.sym(Bool, Nat.is_gt(q, q), False{}, gt_self(q))
+
+def got_true(+q: Nat, -d: Nat, eq: {q == d : Nat}) -> {True{} == Nat.is_gt(1n+q, d) : Bool}:
+  %eq : {True{} == Nat.is_gt(1n+q, _) : Bool}
+  Equal.sym(Bool, Nat.is_gt(1n+q, q), True{}, gt_succ(q))
+
+def pair_of(-g1: Bool, -g2: Bool, -r1: Nat, -r2: Nat, -h1: Bool, -h2: Bool, -s1: Nat, -s2: Nat,
+  e1: {h1 == g1 : Bool}, e2: {h2 == g2 : Bool}, e3: {s1 == r1 : Nat}, e4: {s2 == r2 : Nat}, pa: Laws.Fair.pair(h1, h2, s1, s2))
+  -> Laws.Fair.pair(g1, g2, r1, r2):
+  %e1 : Laws.Fair.pair(_, g2, r1, r2)
+  %e2 : Laws.Fair.pair(h1, _, r1, r2)
+  %e3 : Laws.Fair.pair(h1, h2, _, r2)
+  %e4 : Laws.Fair.pair(h1, h2, s1, _)
+  pa
+
+def pair_hd(-p: Nat, -t: Nat, -b: Nat, -b2: Nat, -y: C.Share, +eg: {s.up(y) == Laws.Got(p, t, b, C.token(y)) : Bool}, +er: {s.r(y) == Nat.mod(Nat.mul(b, p), t) : Nat},
+  z: C.Share, hz: Inv.at(p, t, b2, z), pa: Laws.Fair.pair(s.up(y), s.up(z), s.r(y), s.r(z)))
+  -> Laws.Fair.pair(Laws.Got(p, t, b, C.token(y)), Laws.Got(p, t, b2, C.token(z)), Nat.mod(Nat.mul(b, p), t), Nat.mod(Nat.mul(b2, p), t)):
+  match z:
+    case C.Share{+q, r, up}:
+      match up:
+        case False{}:
+          (eq, er2, u) = hz
+          pair_of(Laws.Got(p, t, b, C.token(y)), Laws.Got(p, t, b2, q), Nat.mod(Nat.mul(b, p), t), Nat.mod(Nat.mul(b2, p), t), s.up(y), False{}, s.r(y), r,
+            eg, got_false(q, Nat.div(Nat.mul(b2, p), t), eq), er, er2, pa)
+        case True{}:
+          (eq, er2, u) = hz
+          pair_of(Laws.Got(p, t, b, C.token(y)), Laws.Got(p, t, b2, 1n+q), Nat.mod(Nat.mul(b, p), t), Nat.mod(Nat.mul(b2, p), t), s.up(y), True{}, s.r(y), r,
+            eg, got_true(q, Nat.div(Nat.mul(b2, p), t), eq), er, er2, pa)
+
+def ahead_of(-p: Nat, -t: Nat, -b: Nat, +y: C.Share, +eg: {s.up(y) == Laws.Got(p, t, b, C.token(y)) : Bool}, +er: {s.r(y) == Nat.mod(Nat.mul(b, p), t) : Nat},
+  bs: +List<Nat>, xs: +List<C.Share>, h: Inv(p, t, bs, xs), a: SAhead(y, xs)) -> Laws.Fair.ahead(p, t, b, C.token(y), bs, C.tokens(xs)):
+  match bs xs:
+    case Nil{} Nil{}:
+      Unit{}
+    case Nil{} Con{z, zt}:
+      match h:
+    case Con{b2, bt} Nil{}:
+      match h:
+    case Con{b2, bt} Con{z, zt}:
+      (hz, ht) = h
+      (pa, at) = a
+      (pair_hd(p, t, b, b2, y, eg, er, z, hz, pa), ahead_of(p, t, b, y, eg, er, bt, zt, ht, at))
+
+def ahead_hd(-p: Nat, -t: Nat, -b: Nat, y: C.Share, hd: Inv.at(p, t, b, y), bs: +List<Nat>, xs: +List<C.Share>, h: Inv(p, t, bs, xs), a: SAhead(y, xs))
+  -> Laws.Fair.ahead(p, t, b, C.token(y), bs, C.tokens(xs)):
+  match y:
+    case C.Share{+q, +r, up}:
+      match up:
+        case False{}:
+          (eq, er, u) = hd
+          ahead_of(p, t, b, C.Share{q, r, False{}}, got_false(q, Nat.div(Nat.mul(b, p), t), eq), er, bs, xs, h, a)
+        case True{}:
+          (eq, er, u) = hd
+          ahead_of(p, t, b, C.Share{q, r, True{}}, got_true(q, Nat.div(Nat.mul(b, p), t), eq), er, bs, xs, h, a)
+
+def dup_eqs(-a: Nat, -b: Nat, -c: Nat, -d: Nat, +e1: {a == b : Nat}, +e2: {c == d : Nat})
+  -> ({a == b : Nat} & {c == d : Nat} & Unit) & ({a == b : Nat} & {c == d : Nat} & Unit):
+  ((e1, e2, Unit{}), (e1, e2, Unit{}))
+
+def dup_at(-p: Nat, -t: Nat, -b: Nat, y: C.Share, hd: Inv.at(p, t, b, y)) -> Inv.at(p, t, b, y) & Inv.at(p, t, b, y):
+  match y:
+    case C.Share{q, r, up}:
+      match r up:
+        case 0n False{}:
+          (eq, er, u) = hd
+          dup_eqs(q, Nat.div(Nat.mul(b, p), t), 0n, Nat.mod(Nat.mul(b, p), t), eq, er)
+        case 0n True{}:
+          (eq, er, u) = hd
+          match u:
+        case 1n+w False{}:
+          (eq, er, u) = hd
+          dup_eqs(q, Nat.div(Nat.mul(b, p), t), 1n+w, Nat.mod(Nat.mul(b, p), t), eq, er)
+        case 1n+w True{}:
+          (eq, er, u) = hd
+          dup_eqs(q, Nat.div(Nat.mul(b, p), t), 1n+w, Nat.mod(Nat.mul(b, p), t), eq, er)
+
+def dup_inv(-p: Nat, -t: Nat, bs: +List<Nat>, xs: +List<C.Share>, h: Inv(p, t, bs, xs)) -> Inv(p, t, bs, xs) & Inv(p, t, bs, xs):
+  match bs xs:
+    case Nil{} Nil{}:
+      (Unit{}, Unit{})
+    case Nil{} Con{y, yt}:
+      match h:
+    case Con{b, bt} Nil{}:
+      match h:
+    case Con{b, bt} Con{y, yt}:
+      (hd, tl) = h
+      zip2(Inv.at(p, t, b, y), Inv(p, t, bt, yt), dup_at(p, t, b, y, hd), dup_inv(p, t, bt, yt, tl))
+
+def fair_of(-p: Nat, -t: Nat, bs: +List<Nat>, xs: +List<C.Share>, hh: Inv(p, t, bs, xs) & Inv(p, t, bs, xs), f: SFair(xs)) -> Laws.Fair(p, t, bs, C.tokens(xs)):
+  match bs xs:
+    case Nil{} Nil{}:
+      Unit{}
+    case Nil{} Con{y, yt}:
+      (h1, h2) = hh
+      match h1:
+    case Con{b, bt} Nil{}:
+      (h1, h2) = hh
+      match h1:
+    case Con{b, +bt} Con{+y, +yt}:
+      (h1, h2) = hh
+      (hd, ht) = h1
+      (hd2, ht2) = h2
+      (a, fr) = f
+      (ahead_hd(p, t, b, y, hd, bt, yt, ht, a), fair_of(p, t, bt, yt, dup_inv(p, t, bt, yt, ht2), fr))
+
+def Laws.split_leftover_to_largest_remainders(p, bs):
+  fair_of(p, C.total(bs), bs, C.rounds(Nat.sub(p, C.sum_q(C.shares(p, C.total(bs), bs))), C.shares(p, C.total(bs), bs)), dup_inv(p, C.total(bs), bs, C.rounds(Nat.sub(p, C.sum_q(C.shares(p, C.total(bs), bs))), C.shares(p, C.total(bs), bs)), rounds_inv(p, C.total(bs), Nat.sub(p, C.sum_q(C.shares(p, C.total(bs), bs))), bs, C.shares(p, C.total(bs), bs), shares_inv(p, C.total(bs), bs))), rounds_fair(Nat.sub(p, C.sum_q(C.shares(p, C.total(bs), bs))), C.shares(p, C.total(bs), bs), shares_fair(p, C.total(bs), bs)))
