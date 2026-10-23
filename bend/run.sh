@@ -7,7 +7,7 @@ found=$("$BEND" version 2>/dev/null)
 [ "$found" = "bend $BEND_VERSION" ] || { echo "FAIL need bend $BEND_VERSION, found '${found:-no bend}'"; exit 1; }
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 rc=0; ran=""
-MODULES="context arena usage"
+MODULES="context arena usage spans"
 
 verdict() {
   if (cd "$1" && "$BEND" "$2" 2>&1) | grep -qx "ALL PROOFS CHECK"; then echo pass; else echo fail; fi
@@ -62,6 +62,9 @@ mutant unknown-as-zero usage 's/        case None\{\}:\n          Turn\{None\{\}
 mutant threshold-off usage 's/Nat\.is_ge\(e, 1024n\)/Nat.is_ge(e, 1023n)/'
 mutant half-wrong usage 's/Nat\.is_lt\(Nat\.add\(c, c\), e\)/Nat.is_lt(c, e)/'
 mutant unknown-not-counted usage 's/Nat\.add\(ui, unknown\(i\)\)/ui/'
+mutant lost-extension spans 's/Group\{a, sb, Nat\.min\(c, sc\), Nat\.max\(d, sd\), f, True\{\}\}/Group{a, b, Nat.min(c, sc), Nat.max(d, sd), f, True{}}/'
+mutant over-mask spans 's/Group\{a, b, c, d, i, False\{\}\}/Group{a, 1n+b, c, d, i, False{}}/'
+mutant overlap-opens spans 's/Nat\.is_ge\(raw\.start\(s\), group\.end\(g\)\)/Nat.is_ge(raw.end(s), group.end(g))/'
 for f in stops/*.bend; do case "$ran" in *" $(basename "$f" .bend) "*) ;; *) echo "FAIL $f has no mutant"; rc=1;; esac; done
 
 if command -v lean >/dev/null 2>&1; then

@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import BendSpans from "./bend/spans.mjs";
+import { bendList, fromBendList, type BendList } from "./context.js";
 
 export type Mode = "redact" | "no-go" | "advisory";
 export type Allowlist = Pick<ReadonlySet<string>, "has">;
@@ -123,15 +125,15 @@ export function scanText(text: string, carnet?: Allowlist): Span[] {
   return mergeSpans(text, spans);
 }
 
+type BendGroup = { start: number; end: number; ms: number; me: number; first: number; grown: boolean };
+
 export function mergeSpans(text: string, spans: Span[]): Span[] {
-  const sorted = [...spans].sort((a, b) => a.start - b.start || b.end - a.end), out: Span[] = [];
-  for (const s of sorted) {
-    const prev = out.at(-1);
-    if (!prev || s.start >= prev.end) { out.push({ ...s }); continue; }
-    if (s.end > prev.end) { prev.end = s.end; prev.value = text.slice(prev.start, prev.end); }
-    prev.matchStart = Math.min(prev.matchStart, s.matchStart); prev.matchEnd = Math.max(prev.matchEnd, s.matchEnd);
-  }
-  return out;
+  const sorted = [...spans].sort((a, b) => a.start - b.start || b.end - a.end);
+  const groups = fromBendList(BendSpans.merge(bendList(sorted.map((s, id) => ({ $: "Raw", start: s.start, end: s.end, ms: s.matchStart, me: s.matchEnd, id })))) as BendList<BendGroup>);
+  return groups.map((g) => {
+    const first = sorted[g.first];
+    return { start: g.start, end: g.end, matchStart: g.ms, matchEnd: g.me, rule: first.rule, value: g.grown ? text.slice(g.start, g.end) : first.value };
+  });
 }
 
 export const redactText = (text: string, spans: Span[]) =>

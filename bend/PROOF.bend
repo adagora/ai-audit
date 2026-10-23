@@ -3,6 +3,7 @@ import ./context.bend as C
 import ./LAWS.bend as Laws
 import ./arena.bend as A
 import ./usage.bend as U
+import ./spans.bend as S
 
 def add_zero(a: Nat) -> {a == Nat.add(a, 0n) : Nat}:
   match a:
@@ -1935,3 +1936,478 @@ def go_spec(cs: +List<U.Call>, t: U.Totals) -> {U.totals.go(cs, t) == Merge(t, L
 def Laws.usage_totals_count_unknown_apart(cs):
   Equal.trans(U.Totals, U.totals.go(cs, U.Totals{0n, 0n, 0n, 0n, 0n}), Merge(U.Totals{0n, 0n, 0n, 0n, 0n}, Laws.ExpectedTotals(cs)), Laws.ExpectedTotals(cs),
     go_spec(cs, U.Totals{0n, 0n, 0n, 0n, 0n}), merge_zero(Laws.ExpectedTotals(cs)))
+
+def cmp_lt_le(c: Cmp, e: {Cmp.is_lt(c) == True{} : Bool}) -> {Cmp.is_le(c) == True{} : Bool}:
+  match c:
+    case LT{}:
+      {==}
+    case EQ{}:
+      {==}
+    case GT{}:
+      e
+
+def lt_imp_le(a: Nat, b: Nat, e: {Nat.is_lt(a, b) == True{} : Bool}) -> {Nat.is_le(a, b) == True{} : Bool}:
+  cmp_lt_le(Nat.cmp(a, b), e)
+
+def cmp_gt_false_le(c: Cmp, e: {Cmp.is_gt(c) == False{} : Bool}) -> {Cmp.is_le(c) == True{} : Bool}:
+  match c:
+    case LT{}:
+      {==}
+    case EQ{}:
+      {==}
+    case GT{}:
+      Equal.sym(Bool, True{}, False{}, e)
+
+def gt_false_le(a: Nat, b: Nat, e: {Nat.is_gt(a, b) == False{} : Bool}) -> {Nat.is_le(a, b) == True{} : Bool}:
+  cmp_gt_false_le(Nat.cmp(a, b), e)
+
+def cmp_lt_false_ge(c: Cmp, e: {Cmp.is_lt(c) == False{} : Bool}) -> {Cmp.is_ge(c) == True{} : Bool}:
+  match c:
+    case LT{}:
+      Equal.sym(Bool, True{}, False{}, e)
+    case EQ{}:
+      {==}
+    case GT{}:
+      {==}
+
+def lt_false_ge(a: Nat, b: Nat, e: {Nat.is_lt(a, b) == False{} : Bool}) -> {Nat.is_ge(a, b) == True{} : Bool}:
+  cmp_lt_false_ge(Nat.cmp(a, b), e)
+
+def ge_le(a: Nat, b: Nat, e: {Nat.is_ge(a, b) == True{} : Bool}) -> {Nat.is_le(b, a) == True{} : Bool}:
+  match a b:
+    case 0n 0n:
+      {==}
+    case 0n 1n+bb:
+      e
+    case 1n+aa 0n:
+      {==}
+    case 1n+aa 1n+bb:
+      ge_le(aa, bb, e)
+
+def gt_lt(a: Nat, b: Nat, e: {Nat.is_gt(a, b) == True{} : Bool}) -> {Nat.is_lt(b, a) == True{} : Bool}:
+  match a b:
+    case 0n 0n:
+      e
+    case 0n 1n+bb:
+      e
+    case 1n+aa 0n:
+      {==}
+    case 1n+aa 1n+bb:
+      gt_lt(aa, bb, e)
+
+def le_trans(a: Nat, b: Nat, c: Nat, e1: {Nat.is_le(a, b) == True{} : Bool}, e2: {Nat.is_le(b, c) == True{} : Bool}) -> {Nat.is_le(a, c) == True{} : Bool}:
+  match a b c:
+    case 0n 0n 0n:
+      {==}
+    case 0n 0n 1n+cc:
+      {==}
+    case 0n 1n+bb 0n:
+      {==}
+    case 0n 1n+bb 1n+cc:
+      {==}
+    case 1n+aa 0n 0n:
+      e1
+    case 1n+aa 0n 1n+cc:
+      Empty.absurd({Nat.is_le(aa, cc) == True{} : Bool}, ft(e1))
+    case 1n+aa 1n+bb 0n:
+      e2
+    case 1n+aa 1n+bb 1n+cc:
+      le_trans(aa, bb, cc, e1, e2)
+
+def lt_le_trans(a: Nat, b: Nat, c: Nat, e1: {Nat.is_lt(a, b) == True{} : Bool}, e2: {Nat.is_le(b, c) == True{} : Bool}) -> {Nat.is_lt(a, c) == True{} : Bool}:
+  match a b c:
+    case 0n 0n 0n:
+      e1
+    case 0n 0n 1n+cc:
+      {==}
+    case 0n 1n+bb 0n:
+      e2
+    case 0n 1n+bb 1n+cc:
+      {==}
+    case 1n+aa 0n 0n:
+      e1
+    case 1n+aa 0n 1n+cc:
+      Empty.absurd({Nat.is_lt(aa, cc) == True{} : Bool}, ft(e1))
+    case 1n+aa 1n+bb 0n:
+      e2
+    case 1n+aa 1n+bb 1n+cc:
+      lt_le_trans(aa, bb, cc, e1, e2)
+
+def rev_in.k(+p: Nat, +a: Nat, +b: Nat, -c: Nat, -d: Nat, -f: Nat, -w: Bool, -rest: +List<S.Group>, -ys: +List<S.Group>,
+  r: Laws.InGroups(p, rest) | Laws.InGroups(p, S.Group{a, b, c, d, f, w} <> ys))
+  -> Laws.InGroups(p, S.Group{a, b, c, d, f, w} <> rest) | Laws.InGroups(p, ys):
+  match r:
+    case Inl{x}:
+      Inl{Inr{x}}
+    case Inr{y}:
+      match y:
+        case Inl{v}:
+          Inl{Inl{v}}
+        case Inr{z}:
+          Inr{z}
+
+def rev_in(xs: +List<S.Group>, +ys: +List<S.Group>, +p: Nat, h: Laws.InGroups(p, S.rev.groups(xs, ys))) -> Laws.InGroups(p, xs) | Laws.InGroups(p, ys):
+  match xs:
+    case Nil{}:
+      Inr{h}
+    case S.Group{+a, +b, +c, +d, +f, +w} <> +rest:
+      rev_in.k(p, a, b, c, d, f, w, rest, ys, rev_in(rest, S.Group{a, b, c, d, f, w} <> ys, p, h))
+
+def rev_out.k(+p: Nat, +a: Nat, +b: Nat, -c: Nat, -d: Nat, -f: Nat, -w: Bool, -rest: +List<S.Group>, -ys: +List<S.Group>,
+  h: Laws.InGroups(p, S.Group{a, b, c, d, f, w} <> rest) | Laws.InGroups(p, ys))
+  -> Laws.InGroups(p, rest) | Laws.InGroups(p, S.Group{a, b, c, d, f, w} <> ys):
+  match h:
+    case Inl{x}:
+      match x:
+        case Inl{v}:
+          Inr{Inl{v}}
+        case Inr{r}:
+          Inl{r}
+    case Inr{y}:
+      Inr{Inr{y}}
+
+def rev_out(xs: +List<S.Group>, +ys: +List<S.Group>, +p: Nat, h: Laws.InGroups(p, xs) | Laws.InGroups(p, ys)) -> Laws.InGroups(p, S.rev.groups(xs, ys)):
+  match xs:
+    case Nil{}:
+      match h:
+        case Inl{x}:
+          match x:
+        case Inr{y}:
+          y
+    case S.Group{+a, +b, +c, +d, +f, +w} <> +rest:
+      rev_out(rest, S.Group{a, b, c, d, f, w} <> ys, p, rev_out.k(p, a, b, c, d, f, w, rest, ys, h))
+
+def only.gt_lt(+p: Nat, +sa: Nat, +sb: Nat, +ga: Nat, +gb: Nat, -gc: Nat, -gd: Nat, -gf: Nat, -gw: Bool, -rest: +List<S.Group>, lt: Bool,
+  el: {Nat.is_lt(p, gb) == lt : Bool}, ef: {Nat.is_ge(sa, gb) == False{} : Bool},
+  wl: {Nat.is_le(ga, p) == True{} : Bool}, wr: {Nat.is_lt(p, sb) == True{} : Bool})
+  -> Laws.Within(p, sa, sb) | Laws.InGroups(p, S.Group{ga, gb, gc, gd, gf, gw} <> rest):
+  match lt:
+    case True{}:
+      Inr{Inl{(wl, el)}}
+    case False{}:
+      Inl{(lt_imp_le(sa, p, lt_le_trans(sa, gb, p, ge_false_lt(sa, gb, ef), ge_le(p, gb, lt_false_ge(p, gb, el)))), wr)}
+
+def only.gt(+p: Nat, +sa: Nat, +sb: Nat, -sc: Nat, -sd: Nat, -si: Nat, +ga: Nat, +gb: Nat, -gc: Nat, -gd: Nat, -gf: Nat, -gw: Bool, -rest: +List<S.Group>,
+  gt: Bool, ef: {Nat.is_ge(sa, gb) == False{} : Bool}, h: Laws.InGroups(p, S.absorb(S.Group{ga, gb, gc, gd, gf, gw}, S.Raw{sa, sb, sc, sd, si}, gt) <> rest))
+  -> Laws.Within(p, sa, sb) | Laws.InGroups(p, S.Group{ga, gb, gc, gd, gf, gw} <> rest):
+  match gt:
+    case True{}:
+      match h:
+        case Inl{w}:
+          (wl, wr) = w
+          only.gt_lt(p, sa, sb, ga, gb, gc, gd, gf, gw, rest, Nat.is_lt(p, gb), {==}, ef, wl, wr)
+        case Inr{r}:
+          Inr{Inr{r}}
+    case False{}:
+      Inr{h}
+
+def only.fresh(+p: Nat, +sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, +si: Nat, +ga: Nat, +gb: Nat, +gc: Nat, +gd: Nat, +gf: Nat, +gw: Bool, +rest: +List<S.Group>,
+  fresh: Bool, ef: {Nat.is_ge(sa, gb) == fresh : Bool}, h: Laws.InGroups(p, S.step.at(S.Raw{sa, sb, sc, sd, si}, S.Group{ga, gb, gc, gd, gf, gw}, rest, fresh)))
+  -> Laws.Within(p, sa, sb) | Laws.InGroups(p, S.Group{ga, gb, gc, gd, gf, gw} <> rest):
+  match fresh:
+    case True{}:
+      h
+    case False{}:
+      only.gt(p, sa, sb, sc, sd, si, ga, gb, gc, gd, gf, gw, rest, Nat.is_gt(sb, gb), ef, h)
+
+def step_only(+p: Nat, +sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, +si: Nat, acc: +List<S.Group>, h: Laws.InGroups(p, S.step(S.Raw{sa, sb, sc, sd, si}, acc)))
+  -> Laws.Within(p, sa, sb) | Laws.InGroups(p, acc):
+  match acc:
+    case Nil{}:
+      match h:
+        case Inl{w}:
+          Inl{w}
+        case Inr{x}:
+          match x:
+    case S.Group{+ga, +gb, +gc, +gd, +gf, +gw} <> +rest:
+      only.fresh(p, sa, sb, sc, sd, si, ga, gb, gc, gd, gf, gw, rest, Nat.is_ge(sa, gb), {==}, h)
+
+def go_only.nil(acc: +List<S.Group>, +p: Nat, h: Laws.InGroups(p, acc) | Laws.InGroups(p, Nil{})) -> Laws.InRaws(p, Nil{}) | Laws.InGroups(p, acc):
+  match h:
+    case Inl{a}:
+      Inr{a}
+    case Inr{x}:
+      match x:
+
+def go_only.cons2(+p: Nat, +sa: Nat, +sb: Nat, -sc: Nat, -sd: Nat, -si: Nat, -rest: +List<S.Raw>, -acc: +List<S.Group>, h: Laws.Within(p, sa, sb) | Laws.InGroups(p, acc))
+  -> Laws.InRaws(p, S.Raw{sa, sb, sc, sd, si} <> rest) | Laws.InGroups(p, acc):
+  match h:
+    case Inl{w}:
+      Inl{Inl{w}}
+    case Inr{a}:
+      Inr{a}
+
+def go_only.cons(+p: Nat, +sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, +si: Nat, -rest: +List<S.Raw>, +acc: +List<S.Group>,
+  h: Laws.InRaws(p, rest) | Laws.InGroups(p, S.step(S.Raw{sa, sb, sc, sd, si}, acc)))
+  -> Laws.InRaws(p, S.Raw{sa, sb, sc, sd, si} <> rest) | Laws.InGroups(p, acc):
+  match h:
+    case Inl{r}:
+      Inl{Inr{r}}
+    case Inr{st}:
+      go_only.cons2(p, sa, sb, sc, sd, si, rest, acc, step_only(p, sa, sb, sc, sd, si, acc, st))
+
+def go_only(xs: +List<S.Raw>, +acc: +List<S.Group>, +p: Nat, h: Laws.InGroups(p, S.merge.go(xs, acc))) -> Laws.InRaws(p, xs) | Laws.InGroups(p, acc):
+  match xs:
+    case Nil{}:
+      go_only.nil(acc, p, rev_in(acc, Nil{}, p, h))
+    case S.Raw{+sa, +sb, +sc, +sd, +si} <> +rest:
+      go_only.cons(p, sa, sb, sc, sd, si, rest, acc, go_only(rest, S.step(S.Raw{sa, sb, sc, sd, si}, acc), p, h))
+
+def only.top(+p: Nat, -xs: +List<S.Raw>, h: Laws.InRaws(p, xs) | Laws.InGroups(p, Nil{})) -> Laws.InRaws(p, xs):
+  match h:
+    case Inl{r}:
+      r
+    case Inr{x}:
+      match x:
+
+def Laws.spans_mask_only_finding_bytes(xs, p, h):
+  only.top(p, xs, go_only(xs, Nil{}, p, h))
+
+def HeadLe(acc: +List<S.Group>, x: Nat) -> Type:
+  match acc:
+    case Nil{}:
+      Unit
+    case S.Group{a, b, c, d, f, w} <> rest:
+      {Nat.is_le(a, x) == True{} : Bool}
+
+def Chain(acc: +List<S.Group>, xs: +List<S.Raw>) -> Type:
+  match xs:
+    case Nil{}:
+      Unit
+    case S.Raw{+s, e, c, d, i} <> rest:
+      (HeadLe(acc, s) & HeadLe(acc, s)) & Laws.SortedFrom(s, rest)
+
+def keeps.gt(+p: Nat, +sa: Nat, +sb: Nat, -sc: Nat, -sd: Nat, -si: Nat, +ga: Nat, +gb: Nat, -gc: Nat, -gd: Nat, -gf: Nat, -gw: Bool, -rest: +List<S.Group>,
+  gt: Bool, eg: {Nat.is_gt(sb, gb) == gt : Bool}, h: Laws.InGroups(p, S.Group{ga, gb, gc, gd, gf, gw} <> rest))
+  -> Laws.InGroups(p, S.absorb(S.Group{ga, gb, gc, gd, gf, gw}, S.Raw{sa, sb, sc, sd, si}, gt) <> rest):
+  match gt:
+    case True{}:
+      match h:
+        case Inl{w}:
+          (wl, wr) = w
+          Inl{(wl, lt_le_trans(p, gb, sb, wr, lt_imp_le(gb, sb, gt_lt(sb, gb, eg))))}
+        case Inr{r}:
+          Inr{r}
+    case False{}:
+      h
+
+def keeps.fresh(+p: Nat, +sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, +si: Nat, +ga: Nat, +gb: Nat, +gc: Nat, +gd: Nat, +gf: Nat, +gw: Bool, +rest: +List<S.Group>,
+  fresh: Bool, h: Laws.InGroups(p, S.Group{ga, gb, gc, gd, gf, gw} <> rest))
+  -> Laws.InGroups(p, S.step.at(S.Raw{sa, sb, sc, sd, si}, S.Group{ga, gb, gc, gd, gf, gw}, rest, fresh)):
+  match fresh:
+    case True{}:
+      Inr{h}
+    case False{}:
+      keeps.gt(p, sa, sb, sc, sd, si, ga, gb, gc, gd, gf, gw, rest, Nat.is_gt(sb, gb), {==}, h)
+
+def step_keeps(+p: Nat, +sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, +si: Nat, acc: +List<S.Group>, h: Laws.InGroups(p, acc)) -> Laws.InGroups(p, S.step(S.Raw{sa, sb, sc, sd, si}, acc)):
+  match acc:
+    case Nil{}:
+      match h:
+    case S.Group{+ga, +gb, +gc, +gd, +gf, +gw} <> +rest:
+      keeps.fresh(p, sa, sb, sc, sd, si, ga, gb, gc, gd, gf, gw, rest, Nat.is_ge(sa, gb), h)
+
+def covers.gt(+p: Nat, +sa: Nat, +sb: Nat, -sc: Nat, -sd: Nat, -si: Nat, +ga: Nat, +gb: Nat, -gc: Nat, -gd: Nat, -gf: Nat, -gw: Bool, -rest: +List<S.Group>,
+  gt: Bool, eg: {Nat.is_gt(sb, gb) == gt : Bool}, start: {Nat.is_le(ga, p) == True{} : Bool}, wr: {Nat.is_lt(p, sb) == True{} : Bool})
+  -> Laws.InGroups(p, S.absorb(S.Group{ga, gb, gc, gd, gf, gw}, S.Raw{sa, sb, sc, sd, si}, gt) <> rest):
+  match gt:
+    case True{}:
+      Inl{(start, wr)}
+    case False{}:
+      Inl{(start, lt_le_trans(p, sb, gb, wr, gt_false_le(sb, gb, eg)))}
+
+def covers.fresh(+p: Nat, +sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, +si: Nat, +ga: Nat, +gb: Nat, +gc: Nat, +gd: Nat, +gf: Nat, +gw: Bool, +rest: +List<S.Group>,
+  fresh: Bool, w: Laws.Within(p, sa, sb), hd: {Nat.is_le(ga, sa) == True{} : Bool})
+  -> Laws.InGroups(p, S.step.at(S.Raw{sa, sb, sc, sd, si}, S.Group{ga, gb, gc, gd, gf, gw}, rest, fresh)):
+  match fresh:
+    case True{}:
+      Inl{w}
+    case False{}:
+      (wl, wr) = w
+      covers.gt(p, sa, sb, sc, sd, si, ga, gb, gc, gd, gf, gw, rest, Nat.is_gt(sb, gb), {==}, le_trans(ga, sa, p, hd, wl), wr)
+
+def step_covers(+p: Nat, +sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, +si: Nat, acc: +List<S.Group>, w: Laws.Within(p, sa, sb), hd: HeadLe(acc, sa))
+  -> Laws.InGroups(p, S.step(S.Raw{sa, sb, sc, sd, si}, acc)):
+  match acc:
+    case Nil{}:
+      Inl{w}
+    case S.Group{+ga, +gb, +gc, +gd, +gf, +gw} <> +rest:
+      covers.fresh(p, sa, sb, sc, sd, si, ga, gb, gc, gd, gf, gw, rest, Nat.is_ge(sa, gb), w, hd)
+
+def head.gt(+sa: Nat, +sb: Nat, -sc: Nat, -sd: Nat, -si: Nat, +ga: Nat, +gb: Nat, -gc: Nat, -gd: Nat, -gf: Nat, -gw: Bool, -rest: +List<S.Group>, -nxt: Nat,
+  gt: Bool, le: {Nat.is_le(ga, nxt) == True{} : Bool})
+  -> HeadLe(S.absorb(S.Group{ga, gb, gc, gd, gf, gw}, S.Raw{sa, sb, sc, sd, si}, gt) <> rest, nxt):
+  match gt:
+    case True{}:
+      le
+    case False{}:
+      le
+
+def head.fresh(+sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, +si: Nat, +ga: Nat, +gb: Nat, +gc: Nat, +gd: Nat, +gf: Nat, +gw: Bool, +rest: +List<S.Group>, +nxt: Nat,
+  fresh: Bool, hd: {Nat.is_le(ga, sa) == True{} : Bool}, le: {Nat.is_le(sa, nxt) == True{} : Bool})
+  -> HeadLe(S.step.at(S.Raw{sa, sb, sc, sd, si}, S.Group{ga, gb, gc, gd, gf, gw}, rest, fresh), nxt):
+  match fresh:
+    case True{}:
+      le
+    case False{}:
+      head.gt(sa, sb, sc, sd, si, ga, gb, gc, gd, gf, gw, rest, nxt, Nat.is_gt(sb, gb), le_trans(ga, sa, nxt, hd, le))
+
+def head_after(+sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, +si: Nat, acc: +List<S.Group>, hd: HeadLe(acc, sa), +nxt: Nat, le: {Nat.is_le(sa, nxt) == True{} : Bool})
+  -> HeadLe(S.step(S.Raw{sa, sb, sc, sd, si}, acc), nxt):
+  match acc:
+    case Nil{}:
+      le
+    case S.Group{+ga, +gb, +gc, +gd, +gf, +gw} <> +rest:
+      head.fresh(sa, sb, sc, sd, si, ga, gb, gc, gd, gf, gw, rest, nxt, Nat.is_ge(sa, gb), hd, le)
+
+def dup_head(acc: +List<S.Group>, +x: Nat, h: HeadLe(acc, x)) -> HeadLe(acc, x) & HeadLe(acc, x):
+  match acc:
+    case Nil{}:
+      (Unit{}, Unit{})
+    case S.Group{a, b, c, d, f, w} <> rest:
+      dup_b(Nat.is_le(a, x), True{}, h)
+
+def chain_next(+sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, +si: Nat, +acc: +List<S.Group>, rest: +List<S.Raw>, hd: HeadLe(acc, sa), sf: Laws.SortedFrom(sa, rest))
+  -> Chain(S.step(S.Raw{sa, sb, sc, sd, si}, acc), rest):
+  match rest:
+    case Nil{}:
+      Unit{}
+    case S.Raw{+s2, e2, c2, d2, i2} <> rest2:
+      (le, sf2) = sf
+      (dup_head(S.step(S.Raw{sa, sb, sc, sd, si}, acc), s2, head_after(sa, sb, sc, sd, si, acc, hd, s2, le)), sf2)
+
+def covers.k(+p: Nat, +sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, +si: Nat, +acc: +List<S.Group>, -rest: +List<S.Raw>, hd: HeadLe(acc, sa),
+  h: Laws.InRaws(p, S.Raw{sa, sb, sc, sd, si} <> rest) | Laws.InGroups(p, acc))
+  -> Laws.InRaws(p, rest) | Laws.InGroups(p, S.step(S.Raw{sa, sb, sc, sd, si}, acc)):
+  match h:
+    case Inl{x}:
+      match x:
+        case Inl{w}:
+          Inr{step_covers(p, sa, sb, sc, sd, si, acc, w, hd)}
+        case Inr{r}:
+          Inl{r}
+    case Inr{a}:
+      Inr{step_keeps(p, sa, sb, sc, sd, si, acc, a)}
+
+def covers.nil(acc: +List<S.Group>, +p: Nat, h: Laws.InRaws(p, Nil{}) | Laws.InGroups(p, acc)) -> Laws.InGroups(p, acc) | Laws.InGroups(p, Nil{}):
+  match h:
+    case Inl{x}:
+      match x:
+    case Inr{a}:
+      Inl{a}
+
+def go_covers(xs: +List<S.Raw>, +acc: +List<S.Group>, +p: Nat, c: Chain(acc, xs), h: Laws.InRaws(p, xs) | Laws.InGroups(p, acc)) -> Laws.InGroups(p, S.merge.go(xs, acc)):
+  match xs:
+    case Nil{}:
+      rev_out(acc, Nil{}, p, covers.nil(acc, p, h))
+    case S.Raw{+sa, +sb, +sc, +sd, +si} <> +rest:
+      (hh, sf) = c
+      (hd1, hd2) = hh
+      go_covers(rest, S.step(S.Raw{sa, sb, sc, sd, si}, acc), p, chain_next(sa, sb, sc, sd, si, acc, rest, hd1, sf), covers.k(p, sa, sb, sc, sd, si, acc, rest, hd2, h))
+
+def chain0(xs: +List<S.Raw>, sorted: Laws.Sorted(xs)) -> Chain(Nil{}, xs):
+  match xs:
+    case Nil{}:
+      Unit{}
+    case S.Raw{s, e, c, d, i} <> rest:
+      ((Unit{}, Unit{}), sorted)
+
+def Laws.spans_mask_every_finding_byte(xs, sorted, p, h):
+  go_covers(xs, Nil{}, p, chain0(xs, sorted), Inl{h})
+
+def RevApart(acc: +List<S.Group>) -> Type:
+  match acc:
+    case Nil{}:
+      Unit
+    case S.Group{+a, b, c, d, f, w} <> rest:
+      match rest:
+        case Nil{}:
+          Unit
+        case S.Group{a2, +b2, c2, d2, f2, w2} <> r2:
+          {Nat.is_le(b2, a) == True{} : Bool} & RevApart(S.Group{a2, b2, c2, d2, f2, w2} <> r2)
+
+def apart.same(+ga: Nat, -gb: Nat, -gc: Nat, -gd: Nat, -gf: Nat, -gw: Bool, -nb: Nat, -nc: Nat, -nd: Nat, -nw: Bool, rest: +List<S.Group>,
+  ra: RevApart(S.Group{ga, gb, gc, gd, gf, gw} <> rest)) -> RevApart(S.Group{ga, nb, nc, nd, gf, nw} <> rest):
+  match rest:
+    case Nil{}:
+      Unit{}
+    case S.Group{a2, b2, c2, d2, f2, w2} <> r2:
+      ra
+
+def apart.gt(+sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, -si: Nat, +ga: Nat, +gb: Nat, +gc: Nat, +gd: Nat, +gf: Nat, +gw: Bool, +rest: +List<S.Group>,
+  gt: Bool, ra: RevApart(S.Group{ga, gb, gc, gd, gf, gw} <> rest))
+  -> RevApart(S.absorb(S.Group{ga, gb, gc, gd, gf, gw}, S.Raw{sa, sb, sc, sd, si}, gt) <> rest):
+  match gt:
+    case True{}:
+      apart.same(ga, gb, gc, gd, gf, gw, sb, Nat.min(gc, sc), Nat.max(gd, sd), True{}, rest, ra)
+    case False{}:
+      apart.same(ga, gb, gc, gd, gf, gw, gb, Nat.min(gc, sc), Nat.max(gd, sd), gw, rest, ra)
+
+def apart.fresh(+sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, +si: Nat, +ga: Nat, +gb: Nat, +gc: Nat, +gd: Nat, +gf: Nat, +gw: Bool, +rest: +List<S.Group>,
+  fresh: Bool, ef: {Nat.is_ge(sa, gb) == fresh : Bool}, ra: RevApart(S.Group{ga, gb, gc, gd, gf, gw} <> rest))
+  -> RevApart(S.step.at(S.Raw{sa, sb, sc, sd, si}, S.Group{ga, gb, gc, gd, gf, gw}, rest, fresh)):
+  match fresh:
+    case True{}:
+      (ge_le(sa, gb, ef), ra)
+    case False{}:
+      apart.gt(sa, sb, sc, sd, si, ga, gb, gc, gd, gf, gw, rest, Nat.is_gt(sb, gb), ra)
+
+def step_apart(+sa: Nat, +sb: Nat, +sc: Nat, +sd: Nat, +si: Nat, acc: +List<S.Group>, ra: RevApart(acc)) -> RevApart(S.step(S.Raw{sa, sb, sc, sd, si}, acc)):
+  match acc:
+    case Nil{}:
+      Unit{}
+    case S.Group{+ga, +gb, +gc, +gd, +gf, +gw} <> +rest:
+      apart.fresh(sa, sb, sc, sd, si, ga, gb, gc, gd, gf, gw, rest, Nat.is_ge(sa, gb), {==}, ra)
+
+def Link(acc: +List<S.Group>, ys: +List<S.Group>) -> Type:
+  match acc:
+    case Nil{}:
+      Unit
+    case S.Group{a, +b, c, d, f, w} <> rest:
+      match ys:
+        case Nil{}:
+          Unit
+        case S.Group{a2, b2, c2, d2, f2, w2} <> r:
+          {Nat.is_le(b, a2) == True{} : Bool}
+
+def apart_cons(+a: Nat, +b: Nat, -c: Nat, -d: Nat, -f: Nat, -w: Bool, -rest: +List<S.Group>, ys: +List<S.Group>,
+  lk: Link(S.Group{a, b, c, d, f, w} <> rest, ys), ay: Laws.Apart(ys)) -> Laws.Apart(S.Group{a, b, c, d, f, w} <> ys):
+  match ys:
+    case Nil{}:
+      Unit{}
+    case S.Group{a2, b2, c2, d2, f2, w2} <> r:
+      (lk, ay)
+
+def next_pair(+a: Nat, -b: Nat, -c: Nat, -d: Nat, -f: Nat, -w: Bool, rest: +List<S.Group>, -ys: +List<S.Group>, ra: RevApart(S.Group{a, b, c, d, f, w} <> rest))
+  -> RevApart(rest) & Link(rest, S.Group{a, b, c, d, f, w} <> ys):
+  match rest:
+    case Nil{}:
+      (Unit{}, Unit{})
+    case S.Group{a2, b2, c2, d2, f2, w2} <> r2:
+      (le, ra2) = ra
+      (ra2, le)
+
+def rev_apart(acc: +List<S.Group>, +ys: +List<S.Group>, pr: RevApart(acc) & Link(acc, ys), ay: Laws.Apart(ys)) -> Laws.Apart(S.rev.groups(acc, ys)):
+  match acc:
+    case Nil{}:
+      ay
+    case S.Group{+a, +b, +c, +d, +f, +w} <> +rest:
+      (ra, lk) = pr
+      rev_apart(rest, S.Group{a, b, c, d, f, w} <> ys, next_pair(a, b, c, d, f, w, rest, ys, ra), apart_cons(a, b, c, d, f, w, rest, ys, lk, ay))
+
+def pair_nil(acc: +List<S.Group>, ra: RevApart(acc)) -> RevApart(acc) & Link(acc, Nil{}):
+  match acc:
+    case Nil{}:
+      (ra, Unit{})
+    case S.Group{a, b, c, d, f, w} <> rest:
+      (ra, Unit{})
+
+def go_apart(xs: +List<S.Raw>, +acc: +List<S.Group>, ra: RevApart(acc)) -> Laws.Apart(S.merge.go(xs, acc)):
+  match xs:
+    case Nil{}:
+      rev_apart(acc, Nil{}, pair_nil(acc, ra), Unit{})
+    case S.Raw{+sa, +sb, +sc, +sd, +si} <> rest:
+      go_apart(rest, S.step(S.Raw{sa, sb, sc, sd, si}, acc), step_apart(sa, sb, sc, sd, si, acc, ra))
+
+def Laws.spans_groups_are_apart(xs):
+  go_apart(xs, Nil{}, Unit{})

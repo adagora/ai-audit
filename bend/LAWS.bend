@@ -2,6 +2,7 @@ import Base
 import ./context.bend as C
 import ./arena.bend as A
 import ./usage.bend as U
+import ./spans.bend as S
 
 def RoundedUp(r: Nat, o: Nat, q: Nat) -> Type:
   match r:
@@ -362,6 +363,51 @@ def ExpectedTotals(cs: +List<U.Call>) -> U.Totals:
         case True{}:
           Plus(i, o, ExpectedTotals(rest))
 
+def Within(+p: Nat, a: Nat, b: Nat) -> Type:
+  {Nat.is_le(a, p) == True{} : Bool} & {Nat.is_lt(p, b) == True{} : Bool}
+
+def InRaws(+p: Nat, xs: +List<S.Raw>) -> Type:
+  match xs:
+    case Nil{}:
+      Empty
+    case S.Raw{a, b, c, d, i} <> rest:
+      Within(p, a, b) | InRaws(p, rest)
+
+def InGroups(+p: Nat, gs: +List<S.Group>) -> Type:
+  match gs:
+    case Nil{}:
+      Empty
+    case S.Group{a, b, c, d, f, w} <> rest:
+      Within(p, a, b) | InGroups(p, rest)
+
+def SortedFrom(+a: Nat, xs: +List<S.Raw>) -> Type:
+  match xs:
+    case Nil{}:
+      Unit
+    case S.Raw{+s, e, c, d, i} <> rest:
+      {Nat.is_le(a, s) == True{} : Bool} & SortedFrom(s, rest)
+
+def Sorted(xs: +List<S.Raw>) -> Type:
+  match xs:
+    case Nil{}:
+      Unit
+    case S.Raw{s, e, c, d, i} <> rest:
+      SortedFrom(s, rest)
+
+def ApartFrom(+e: Nat, gs: +List<S.Group>) -> Type:
+  match gs:
+    case Nil{}:
+      Unit
+    case S.Group{a, +b, c, d, f, w} <> rest:
+      {Nat.is_le(e, a) == True{} : Bool} & ApartFrom(b, rest)
+
+def Apart(gs: +List<S.Group>) -> Type:
+  match gs:
+    case Nil{}:
+      Unit
+    case S.Group{a, b, c, d, f, w} <> rest:
+      ApartFrom(b, rest)
+
 law split_sums_to_provider:
   for +p: Nat
   for +bs: +List<Nat>
@@ -426,3 +472,20 @@ law usage_cache_drop_only_from_evidence:
 law usage_totals_count_unknown_apart:
   for +cs: +List<U.Call>
   {U.totals(cs) == ExpectedTotals(cs) : U.Totals}
+
+law spans_mask_every_finding_byte:
+  for +xs: +List<S.Raw>
+  for sorted: Sorted(xs)
+  for +p: Nat
+  for h: InRaws(p, xs)
+  InGroups(p, S.merge(xs))
+
+law spans_mask_only_finding_bytes:
+  for +xs: +List<S.Raw>
+  for +p: Nat
+  for h: InGroups(p, S.merge(xs))
+  InRaws(p, xs)
+
+law spans_groups_are_apart:
+  for +xs: +List<S.Raw>
+  Apart(S.merge(xs))
