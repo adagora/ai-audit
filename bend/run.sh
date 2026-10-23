@@ -56,6 +56,8 @@ mutant ages-reset arena 's/ages\.go\(pt, bt, same\(pt, bt\), turn, a <> acc\)/ag
 mutant bytes-lost arena 's/Run\{k, Nat\.add\(m, n\), a\} <> rest/Run{k, m, a} <> rest/'
 mutant kind-lost arena 's/\+acc2 = push\(k, n, a, acc\)/+acc2 = push(0n, n, a, acc)/'
 mutant age-lost arena 's/\+acc2 = push\(k, n, a, acc\)/+acc2 = push(k, n, 0n, acc)/'
+mutant never-merge arena 's/Bool\.and\(Nat\.is_eq\(k, k2\), Nat\.is_eq\(a, a2\)\)/False{}/'
+mutant merge-across-change arena 's/                case 0n:\n                  False\{\}/                case 0n:\n                  joins.head(k, a, acc)/'
 for f in stops/*.bend; do case "$ran" in *" $(basename "$f" .bend) "*) ;; *) echo "FAIL $f has no mutant"; rc=1;; esac; done
 
 if command -v lean >/dev/null 2>&1; then

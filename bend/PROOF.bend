@@ -1678,3 +1678,140 @@ def runs_go_labels(bs: +List<A.Block>, ags: +List<Nat>, j: Bool, +acc: +List<A.R
 def Laws.arena_runs_keep_every_byte_with_its_kind_and_age(prev, bs, turn, tracked):
   %Laws.arena_ages_keep_the_unchanged_prefix(prev, bs, turn, tracked) : {Laws.Expand(Laws.RunsOf(A.arena(prev, bs, turn, tracked))) == Laws.Labels(bs, _) : List<&2, Laws.Label>}
   runs_go_labels(bs, A.ages(prev, bs, turn, tracked), A.joins(bs, A.ages(prev, bs, turn, tracked), A.cut.of(A.first(prev, bs)), Nil{}), Nil{}, A.cut.of(A.first(prev, bs)), {==}, samelen_ages(prev, bs, turn, tracked))
+
+def D(c: A.Cut) -> Maybe<&2, Nat>:
+  match c:
+    case A.NoCut{}:
+      None{}
+    case A.CutIn{n}:
+      Some{n}
+
+def OpenOf(acc: +List<A.Run>) -> Maybe<&2, A.Run>:
+  match acc:
+    case Nil{}:
+      None{}
+    case r <> rest:
+      Some{r}
+
+def Closed(acc: +List<A.Run>) -> +List<A.Run>:
+  match acc:
+    case Nil{}:
+      Nil{}
+    case r <> rest:
+      rest
+
+def d_tick(c: A.Cut) -> {D(A.cut.next(c)) == Laws.Tick(D(c)) : Maybe<&2, Nat>}:
+  match c:
+    case A.NoCut{}:
+      {==}
+    case A.CutIn{n}:
+      match n:
+        case 0n:
+          {==}
+        case 1n+m:
+          {==}
+
+def before_d(f: Maybe<&2, A.First>) -> {D(A.cut.of(f)) == Laws.Before(f) : Maybe<&2, Nat>}:
+  match f:
+    case None{}:
+      {==}
+    case Some{A.First{b, o}}:
+      {==}
+
+def closed_grow(acc: +List<A.Run>, +n: Nat) -> {Closed(A.grow(acc, n)) == Closed(acc) : List<&2, A.Run>}:
+  match acc:
+    case Nil{}:
+      {==}
+    case A.Run{k, m, a} <> rest:
+      {==}
+
+def open_grow(acc: +List<A.Run>, +n: Nat) -> {OpenOf(A.grow(acc, n)) == Laws.Grow(OpenOf(acc), n) : Maybe<&2, A.Run>}:
+  match acc:
+    case Nil{}:
+      {==}
+    case A.Run{k, m, a} <> rest:
+      {==}
+
+def close_rev(acc: +List<A.Run>, +x: +List<A.Run>) -> {A.rev.runs(Closed(acc), Laws.Close(OpenOf(acc), x)) == A.rev.runs(acc, x) : List<&2, A.Run>}:
+  match acc:
+    case Nil{}:
+      {==}
+    case r <> rest:
+      {==}
+
+def joins_fits(bs: +List<A.Block>, ags: +List<Nat>, c: A.Cut, acc: +List<A.Run>) -> {A.joins(bs, ags, c, acc) == Laws.NextFits(bs, ags, OpenOf(acc), D(c)) : Bool}:
+  match bs:
+    case Nil{}:
+      {==}
+    case A.Block{h, k, n} <> bt:
+      match ags:
+        case Nil{}:
+          {==}
+        case a <> at:
+          match c:
+            case A.NoCut{}:
+              match acc:
+                case Nil{}:
+                  {==}
+                case A.Run{k2, n2, a2} <> rest:
+                  {==}
+            case A.CutIn{m}:
+              match m:
+                case 0n:
+                  match acc:
+                    case Nil{}:
+                      {==}
+                    case A.Run{k2, n2, a2} <> rest:
+                      {==}
+                case 1n+d:
+                  match acc:
+                    case Nil{}:
+                      {==}
+                    case A.Run{k2, n2, a2} <> rest:
+                      {==}
+
+def grouped_cong(-bt: +List<A.Block>, -at: +List<Nat>, -c1: +List<A.Run>, -c2: +List<A.Run>, -o1: Maybe<&2, A.Run>, -o2: Maybe<&2, A.Run>, -d1: Maybe<&2, Nat>, -d2: Maybe<&2, Nat>,
+  ec: {c1 == c2 : List<&2, A.Run>}, eo: {o1 == o2 : Maybe<&2, A.Run>}, ed: {d1 == d2 : Maybe<&2, Nat>})
+  -> {A.rev.runs(c1, Laws.Grouped(bt, at, o1, d1, Laws.NextFits(bt, at, o1, d1))) == A.rev.runs(c2, Laws.Grouped(bt, at, o2, d2, Laws.NextFits(bt, at, o2, d2))) : List<&2, A.Run>}:
+  %ec : {A.rev.runs(c1, Laws.Grouped(bt, at, o1, d1, Laws.NextFits(bt, at, o1, d1))) == A.rev.runs(_, Laws.Grouped(bt, at, o2, d2, Laws.NextFits(bt, at, o2, d2))) : List<&2, A.Run>}
+  %eo : {A.rev.runs(c1, Laws.Grouped(bt, at, o1, d1, Laws.NextFits(bt, at, o1, d1))) == A.rev.runs(c1, Laws.Grouped(bt, at, _, d2, Laws.NextFits(bt, at, _, d2))) : List<&2, A.Run>}
+  %ed : {A.rev.runs(c1, Laws.Grouped(bt, at, o1, d1, Laws.NextFits(bt, at, o1, d1))) == A.rev.runs(c1, Laws.Grouped(bt, at, o1, _, Laws.NextFits(bt, at, o1, _))) : List<&2, A.Run>}
+  {==}
+
+def runs_spec(bs: +List<A.Block>, ags: +List<Nat>, j: Bool, -js: Bool, +acc: +List<A.Run>, +c: A.Cut, e: {j == js : Bool})
+  -> {A.runs.go(bs, ags, c, acc, j) == A.rev.runs(Closed(acc), Laws.Grouped(bs, ags, OpenOf(acc), D(c), js)) : List<&2, A.Run>}:
+  match bs:
+    case Nil{}:
+      Equal.sym(List<&2, A.Run>, A.rev.runs(Closed(acc), Laws.Close(OpenOf(acc), Nil{})), A.rev.runs(acc, Nil{}), close_rev(acc, Nil{}))
+    case A.Block{h, +k, +n} <> +bt:
+      match ags:
+        case Nil{}:
+          Equal.sym(List<&2, A.Run>, A.rev.runs(Closed(acc), Laws.Close(OpenOf(acc), Nil{})), A.rev.runs(acc, Nil{}), close_rev(acc, Nil{}))
+        case +a <> +at:
+          match j:
+            case True{}:
+              %e : {A.runs.go(A.Block{h, k, n} <> bt, a <> at, c, acc, True{}) == A.rev.runs(Closed(acc), Laws.Grouped(A.Block{h, k, n} <> bt, a <> at, OpenOf(acc), D(c), _)) : List<&2, A.Run>}
+              Equal.trans(List<&2, A.Run>, A.runs.go(bt, at, A.cut.next(c), A.grow(acc, n), A.joins(bt, at, A.cut.next(c), A.grow(acc, n))),
+                A.rev.runs(Closed(A.grow(acc, n)), Laws.Grouped(bt, at, OpenOf(A.grow(acc, n)), D(A.cut.next(c)), Laws.NextFits(bt, at, OpenOf(A.grow(acc, n)), D(A.cut.next(c))))),
+                A.rev.runs(Closed(acc), Laws.Grouped(bt, at, Laws.Grow(OpenOf(acc), n), Laws.Tick(D(c)), Laws.NextFits(bt, at, Laws.Grow(OpenOf(acc), n), Laws.Tick(D(c))))),
+                runs_spec(bt, at, A.joins(bt, at, A.cut.next(c), A.grow(acc, n)), Laws.NextFits(bt, at, OpenOf(A.grow(acc, n)), D(A.cut.next(c))), A.grow(acc, n), A.cut.next(c), joins_fits(bt, at, A.cut.next(c), A.grow(acc, n))),
+                grouped_cong(bt, at, Closed(A.grow(acc, n)), Closed(acc), OpenOf(A.grow(acc, n)), Laws.Grow(OpenOf(acc), n), D(A.cut.next(c)), Laws.Tick(D(c)), closed_grow(acc, n), open_grow(acc, n), d_tick(c)))
+            case False{}:
+              %e : {A.runs.go(A.Block{h, k, n} <> bt, a <> at, c, acc, False{}) == A.rev.runs(Closed(acc), Laws.Grouped(A.Block{h, k, n} <> bt, a <> at, OpenOf(acc), D(c), _)) : List<&2, A.Run>}
+              Equal.trans(List<&2, A.Run>, A.runs.go(bt, at, A.cut.next(c), A.Run{k, n, a} <> acc, A.joins(bt, at, A.cut.next(c), A.Run{k, n, a} <> acc)),
+                A.rev.runs(acc, Laws.Grouped(bt, at, Some{A.Run{k, n, a}}, D(A.cut.next(c)), Laws.NextFits(bt, at, Some{A.Run{k, n, a}}, D(A.cut.next(c))))),
+                A.rev.runs(Closed(acc), Laws.Close(OpenOf(acc), Laws.Grouped(bt, at, Some{A.Run{k, n, a}}, Laws.Tick(D(c)), Laws.NextFits(bt, at, Some{A.Run{k, n, a}}, Laws.Tick(D(c)))))),
+                runs_spec(bt, at, A.joins(bt, at, A.cut.next(c), A.Run{k, n, a} <> acc), Laws.NextFits(bt, at, Some{A.Run{k, n, a}}, D(A.cut.next(c))), A.Run{k, n, a} <> acc, A.cut.next(c), joins_fits(bt, at, A.cut.next(c), A.Run{k, n, a} <> acc)),
+                Equal.trans(List<&2, A.Run>,
+                  A.rev.runs(acc, Laws.Grouped(bt, at, Some{A.Run{k, n, a}}, D(A.cut.next(c)), Laws.NextFits(bt, at, Some{A.Run{k, n, a}}, D(A.cut.next(c))))),
+                  A.rev.runs(acc, Laws.Grouped(bt, at, Some{A.Run{k, n, a}}, Laws.Tick(D(c)), Laws.NextFits(bt, at, Some{A.Run{k, n, a}}, Laws.Tick(D(c))))),
+                  A.rev.runs(Closed(acc), Laws.Close(OpenOf(acc), Laws.Grouped(bt, at, Some{A.Run{k, n, a}}, Laws.Tick(D(c)), Laws.NextFits(bt, at, Some{A.Run{k, n, a}}, Laws.Tick(D(c)))))),
+                  grouped_cong(bt, at, acc, acc, Some{A.Run{k, n, a}}, Some{A.Run{k, n, a}}, D(A.cut.next(c)), Laws.Tick(D(c)), {==}, {==}, d_tick(c)),
+                  Equal.sym(List<&2, A.Run>, A.rev.runs(Closed(acc), Laws.Close(OpenOf(acc), Laws.Grouped(bt, at, Some{A.Run{k, n, a}}, Laws.Tick(D(c)), Laws.NextFits(bt, at, Some{A.Run{k, n, a}}, Laws.Tick(D(c)))))),
+                    A.rev.runs(acc, Laws.Grouped(bt, at, Some{A.Run{k, n, a}}, Laws.Tick(D(c)), Laws.NextFits(bt, at, Some{A.Run{k, n, a}}, Laws.Tick(D(c))))),
+                    close_rev(acc, Laws.Grouped(bt, at, Some{A.Run{k, n, a}}, Laws.Tick(D(c)), Laws.NextFits(bt, at, Some{A.Run{k, n, a}}, Laws.Tick(D(c))))))))
+
+def Laws.arena_runs_merge_neighbours_of_one_kind_and_age(prev, bs, turn, tracked):
+  %Laws.arena_ages_keep_the_unchanged_prefix(prev, bs, turn, tracked) : {Laws.RunsOf(A.arena(prev, bs, turn, tracked)) == Laws.ExpectedRuns(bs, _, A.first(prev, bs)) : List<&2, A.Run>}
+  %before_d(A.first(prev, bs)) : {Laws.RunsOf(A.arena(prev, bs, turn, tracked)) == Laws.Grouped(bs, A.ages(prev, bs, turn, tracked), None{}, _, Laws.NextFits(bs, A.ages(prev, bs, turn, tracked), None{}, _)) : List<&2, A.Run>}
+  runs_spec(bs, A.ages(prev, bs, turn, tracked), A.joins(bs, A.ages(prev, bs, turn, tracked), A.cut.of(A.first(prev, bs)), Nil{}), Laws.NextFits(bs, A.ages(prev, bs, turn, tracked), None{}, D(A.cut.of(A.first(prev, bs)))), Nil{}, A.cut.of(A.first(prev, bs)), joins_fits(bs, A.ages(prev, bs, turn, tracked), A.cut.of(A.first(prev, bs)), Nil{}))

@@ -211,6 +211,82 @@ def Labels(bs: +List<A.Block>, ags: +List<Nat>) -> +List<Label>:
         case a <> at:
           Cat(Copies(n, k, a), Labels(bt, at))
 
+def Before(f: Maybe<&2, A.First>) -> Maybe<&2, Nat>:
+  match f:
+    case None{}:
+      None{}
+    case Some{A.First{b, o}}:
+      Some{b}
+
+def Tick(d: Maybe<&2, Nat>) -> Maybe<&2, Nat>:
+  match d:
+    case None{}:
+      None{}
+    case Some{n}:
+      match n:
+        case 0n:
+          None{}
+        case 1n+m:
+          Some{m}
+
+def Fits(open: Maybe<&2, A.Run>, d: Maybe<&2, Nat>, +k: Nat, +a: Nat) -> Bool:
+  match open:
+    case None{}:
+      False{}
+    case Some{A.Run{k2, n2, a2}}:
+      match d:
+        case None{}:
+          Bool.and(Nat.is_eq(k, k2), Nat.is_eq(a, a2))
+        case Some{c}:
+          match c:
+            case 0n:
+              False{}
+            case 1n+m:
+              Bool.and(Nat.is_eq(k, k2), Nat.is_eq(a, a2))
+
+def NextFits(bs: +List<A.Block>, ags: +List<Nat>, open: Maybe<&2, A.Run>, d: Maybe<&2, Nat>) -> Bool:
+  match bs:
+    case Nil{}:
+      False{}
+    case A.Block{g, k, n} <> bt:
+      match ags:
+        case Nil{}:
+          False{}
+        case a <> at:
+          Fits(open, d, k, a)
+
+def Grow(open: Maybe<&2, A.Run>, +n: Nat) -> Maybe<&2, A.Run>:
+  match open:
+    case None{}:
+      None{}
+    case Some{A.Run{k, m, a}}:
+      Some{A.Run{k, Nat.add(m, n), a}}
+
+def Close(open: Maybe<&2, A.Run>, +rest: +List<A.Run>) -> +List<A.Run>:
+  match open:
+    case None{}:
+      rest
+    case Some{r}:
+      r <> rest
+
+def Grouped(bs: +List<A.Block>, ags: +List<Nat>, +open: Maybe<&2, A.Run>, +d: Maybe<&2, Nat>, fits: Bool) -> +List<A.Run>:
+  match bs:
+    case Nil{}:
+      Close(open, Nil{})
+    case A.Block{g, +k, +n} <> +bt:
+      match ags:
+        case Nil{}:
+          Close(open, Nil{})
+        case +a <> +at:
+          match fits:
+            case True{}:
+              Grouped(bt, at, Grow(open, n), Tick(d), NextFits(bt, at, Grow(open, n), Tick(d)))
+            case False{}:
+              Close(open, Grouped(bt, at, Some{A.Run{k, n, a}}, Tick(d), NextFits(bt, at, Some{A.Run{k, n, a}}, Tick(d))))
+
+def ExpectedRuns(+bs: +List<A.Block>, +ags: +List<Nat>, +f: Maybe<&2, A.First>) -> +List<A.Run>:
+  Grouped(bs, ags, None{}, Before(f), NextFits(bs, ags, None{}, Before(f)))
+
 def RunsOf(x: A.Arena) -> +List<A.Run>:
   match x:
     case A.Arena{ags, f, rs}:
@@ -256,3 +332,10 @@ law arena_runs_keep_every_byte_with_its_kind_and_age:
   for +turn: Nat
   for +tracked: Bool
   {Expand(RunsOf(A.arena(prev, bs, turn, tracked))) == Labels(bs, ExpectedAges(prev, bs, turn, tracked)) : List<&2, Label>}
+
+law arena_runs_merge_neighbours_of_one_kind_and_age:
+  for +prev: A.Prev
+  for +bs: +List<A.Block>
+  for +turn: Nat
+  for +tracked: Bool
+  {RunsOf(A.arena(prev, bs, turn, tracked)) == ExpectedRuns(bs, ExpectedAges(prev, bs, turn, tracked), A.first(prev, bs)) : List<&2, A.Run>}
