@@ -4,6 +4,7 @@ import ./arena.bend as A
 import ./usage.bend as U
 import ./spans.bend as S
 import ./parts.bend as P
+import ./mask.bend as K
 
 def RoundedUp(r: Nat, o: Nat, q: Nat) -> Type:
   match r:
@@ -670,3 +671,89 @@ law arena_reads_hashes_only_position_by_position:
   for +turn: Nat
   for +tracked: Bool
   {A.arena(PosPrev(prev), PosBlocksOf(prev, bs), turn, tracked) == A.arena(prev, bs, turn, tracked) : A.Arena}
+
+type Item is Data:
+  Byte{p: Nat}
+  Marker{i: Nat}
+
+def Inside(+p: Nat, ss: +List<K.Cut>) -> Bool:
+  match ss:
+    case Nil{}:
+      False{}
+    case Con{K.Cut{+a, +b}, rest}:
+      Bool.or(Bool.and(Nat.is_le(a, p), Nat.is_lt(p, b)), Inside(p, rest))
+
+def Opens(+p: Nat, ss: +List<K.Cut>) -> Bool:
+  match ss:
+    case Nil{}:
+      False{}
+    case Con{K.Cut{a, b}, rest}:
+      Bool.or(Nat.is_eq(a, p), Opens(p, rest))
+
+def OpenIndex(+p: Nat, ss: +List<K.Cut>, +i: Nat) -> Nat:
+  match ss:
+    case Nil{}:
+      i
+    case Con{K.Cut{a, b}, rest}:
+      Bool.pick(Nat, Nat.is_eq(a, p), i, OpenIndex(p, rest, 1n+i))
+
+def At(+p: Nat, +ss: +List<K.Cut>, +i: Nat) -> List<&2, Item>:
+  Bool.pick(List<&2, Item>, Inside(p, ss), Bool.pick(List<&2, Item>, Opens(p, ss), [Marker{OpenIndex(p, ss, i)}], []), [Byte{p}])
+
+def Join(xs: +List<Item>, ys: +List<Item>) -> List<&2, Item>:
+  match xs:
+    case Nil{}:
+      ys
+    case Con{x, rest}:
+      x <> Join(rest, ys)
+
+def Items(n: Nat, +p: Nat, +ss: +List<K.Cut>, +i: Nat) -> List<&2, Item>:
+  match n:
+    case 0n:
+      []
+    case 1n+m:
+      Join(At(p, ss, i), Items(m, 1n+p, ss, i))
+
+def MaskedParts(bs: +List<Nat>, +lo: Nat, +ss: +List<K.Cut>, +i: Nat) -> List<&2, List<&2, Item>>:
+  match bs:
+    case Nil{}:
+      []
+    case Con{+hi, rest}:
+      Items(Nat.sub(hi, lo), lo, ss, i) <> MaskedParts(rest, hi, ss, i)
+
+def Bytes(n: Nat, +a: Nat) -> List<&2, Item>:
+  match n:
+    case 0n:
+      []
+    case 1n+m:
+      Byte{a} <> Bytes(m, 1n+a)
+
+def Shown(ps: +List<K.Piece>) -> List<&2, Item>:
+  match ps:
+    case Nil{}:
+      []
+    case Con{K.Keep{+a, b}, rest}:
+      Join(Bytes(Nat.sub(b, a), a), Shown(rest))
+    case Con{K.Hide{i}, rest}:
+      Marker{i} <> Shown(rest)
+
+def ShownParts(xs: +List<List<&2, K.Piece>>) -> List<&2, List<&2, Item>>:
+  match xs:
+    case Nil{}:
+      []
+    case Con{x, rest}:
+      Shown(x) <> ShownParts(rest)
+
+def CutsFrom(+e: Nat, ss: +List<K.Cut>) -> Type:
+  match ss:
+    case Nil{}:
+      Unit
+    case Con{K.Cut{+a, +b}, rest}:
+      {Nat.is_le(e, a) == True{} : Bool} & ({Nat.is_lt(a, b) == True{} : Bool} & CutsFrom(b, rest))
+
+law mask_keeps_each_byte_outside_findings_and_marks_each_finding_once:
+  for +bs: +List<Nat>
+  for sorted: BsFrom(0n, bs)
+  for +ss: +List<K.Cut>
+  for apart: CutsFrom(0n, ss)
+  {ShownParts(K.cut(bs, ss)) == MaskedParts(bs, 0n, ss, 0n) : List<&2, List<&2, Item>>}

@@ -5,6 +5,7 @@ import ./arena.bend as A
 import ./usage.bend as U
 import ./spans.bend as S
 import ./parts.bend as P
+import ./mask.bend as K
 
 def add_zero(a: Nat) -> {a == Nat.add(a, 0n) : Nat}:
   match a:
@@ -4669,3 +4670,681 @@ def Laws.arena_reads_hashes_only_position_by_position(prev, bs, turn, tracked):
   %Equal.sym(Maybe<&2, A.First>, f1, f0, ar.first_top(prev, bs)) : {A.Arena{ag0, _, A.runs(pb, ag0, _)} == A.Arena{ag0, f0, A.runs(bs, ag0, f0)} : A.Arena}
   %Equal.sym(List<&2, A.Run>, A.runs(pb, ag0, f0), A.runs(bs, ag0, f0), ar.runs_top(prev, bs, ag0, f0)) : {A.Arena{ag0, f0, _} == A.Arena{ag0, f0, A.runs(bs, ag0, f0)} : A.Arena}
   {==}
+
+def m.join_nil(xs: +List<Laws.Item>) -> {Laws.Join(xs, []) == xs : List<&2, Laws.Item>}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+x, +rest}:
+      %m.join_nil(rest) : {x <> Laws.Join(rest, []) == x <> _ : List<&2, Laws.Item>}
+      {==}
+
+def m.join_assoc(xs: +List<Laws.Item>, +ys: +List<Laws.Item>, +zs: +List<Laws.Item>) -> {Laws.Join(Laws.Join(xs, ys), zs) == Laws.Join(xs, Laws.Join(ys, zs)) : List<&2, Laws.Item>}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+x, +rest}:
+      %m.join_assoc(rest, ys, zs) : {x <> Laws.Join(Laws.Join(rest, ys), zs) == x <> _ : List<&2, Laws.Item>}
+      {==}
+
+def m.shown_one(x: K.Piece, +ys: +List<K.Piece>) -> {Laws.Shown(x <> ys) == Laws.Join(Laws.Shown([x]), Laws.Shown(ys)) : List<&2, Laws.Item>}:
+  match x:
+    case K.Keep{+a, +b}:
+      %m.join_nil(Laws.Bytes(Nat.sub(b, a), a)) : {Laws.Join(_, Laws.Shown(ys)) == Laws.Join(Laws.Join(Laws.Bytes(Nat.sub(b, a), a), []), Laws.Shown(ys)) : List<&2, Laws.Item>}
+      {==}
+    case K.Hide{i}:
+      {==}
+
+def m.shown_rev(acc: +List<K.Piece>, +ys: +List<K.Piece>) -> {Laws.Shown(K.rev.pieces(acc, ys)) == Laws.Join(Laws.Shown(K.rev.pieces(acc, Nil{})), Laws.Shown(ys)) : List<&2, Laws.Item>}:
+  match acc:
+    case Nil{}:
+      {==}
+    case Con{+x, +r}:
+      +z = Laws.Shown(K.rev.pieces(r, Nil{}))
+      -T = List<&2, Laws.Item>
+      Equal.trans(T, Laws.Shown(K.rev.pieces(r, x <> ys)), Laws.Join(z, Laws.Shown(x <> ys)), Laws.Join(Laws.Shown(K.rev.pieces(r, [x])), Laws.Shown(ys)),
+        m.shown_rev(r, x <> ys),
+        Equal.trans(T, Laws.Join(z, Laws.Shown(x <> ys)), Laws.Join(z, Laws.Join(Laws.Shown([x]), Laws.Shown(ys))), Laws.Join(Laws.Shown(K.rev.pieces(r, [x])), Laws.Shown(ys)),
+          Equal.cong(T, T, l => Laws.Join(z, l), Laws.Shown(x <> ys), Laws.Join(Laws.Shown([x]), Laws.Shown(ys)), m.shown_one(x, ys)),
+          Equal.trans(T, Laws.Join(z, Laws.Join(Laws.Shown([x]), Laws.Shown(ys))), Laws.Join(Laws.Join(z, Laws.Shown([x])), Laws.Shown(ys)), Laws.Join(Laws.Shown(K.rev.pieces(r, [x])), Laws.Shown(ys)),
+            Equal.sym(T, Laws.Join(Laws.Join(z, Laws.Shown([x])), Laws.Shown(ys)), Laws.Join(z, Laws.Join(Laws.Shown([x]), Laws.Shown(ys))), m.join_assoc(z, Laws.Shown([x]), Laws.Shown(ys))),
+            Equal.cong(T, T, l => Laws.Join(l, Laws.Shown(ys)), Laws.Join(z, Laws.Shown([x])), Laws.Shown(K.rev.pieces(r, [x])),
+              Equal.sym(T, Laws.Shown(K.rev.pieces(r, [x])), Laws.Join(z, Laws.Shown([x])), m.shown_rev(r, [x]))))))
+
+def m.add_sub(p: Nat, q: Nat, h: {Nat.is_le(p, q) == True{} : Bool}) -> {Nat.add(p, Nat.sub(q, p)) == q : Nat}:
+  match p q:
+    case 0n 0n:
+      {==}
+    case 0n 1n+qq:
+      {==}
+    case 1n+pp 0n:
+      Empty.absurd({1n+Nat.add(pp, 0n) == 0n : Nat}, ft(h))
+    case 1n+pp 1n+qq:
+      Equal.cong(Nat, Nat, x => 1n+x, Nat.add(pp, Nat.sub(qq, pp)), qq, m.add_sub(pp, qq, h))
+
+def m.sub_split(p: Nat, a: Nat, q: Nat, pa: {Nat.is_le(p, a) == True{} : Bool}, aq: {Nat.is_le(a, q) == True{} : Bool}) -> {Nat.sub(q, p) == Nat.add(Nat.sub(a, p), Nat.sub(q, a)) : Nat}:
+  match p a q:
+    case 0n 0n qq:
+      {==}
+    case 0n 1n+aa 0n:
+      Empty.absurd({0n == 1n+Nat.add(aa, 0n) : Nat}, ft(aq))
+    case 0n 1n+aa 1n+qq:
+      Equal.sym(Nat, 1n+Nat.add(aa, Nat.sub(qq, aa)), 1n+qq, Equal.cong(Nat, Nat, x => 1n+x, Nat.add(aa, Nat.sub(qq, aa)), qq, m.add_sub(aa, qq, aq)))
+    case 1n+pp 0n qq:
+      Empty.absurd({Nat.sub(qq, 1n+pp) == Nat.add(0n, Nat.sub(qq, 0n)) : Nat}, ft(pa))
+    case 1n+pp 1n+aa 0n:
+      Empty.absurd({0n == Nat.add(Nat.sub(aa, pp), 0n) : Nat}, ft(aq))
+    case 1n+pp 1n+aa 1n+qq:
+      m.sub_split(pp, aa, qq, pa, aq)
+
+def m.sub_succ(a: Nat, q: Nat, h: {Nat.is_lt(a, q) == True{} : Bool}) -> {Nat.sub(q, a) == 1n+Nat.sub(q, 1n+a) : Nat}:
+  match a q:
+    case 0n 0n:
+      Empty.absurd({0n == 1n+0n : Nat}, ft(h))
+    case 1n+aa 0n:
+      Empty.absurd({0n == 1n+0n : Nat}, ft(h))
+    case 0n 1n+qq:
+      match qq:
+        case 0n:
+          {==}
+        case 1n+q3:
+          {==}
+    case 1n+aa 1n+qq:
+      m.sub_succ(aa, qq, h)
+
+def m.lt_not_le(q: Nat, a: Nat, h: {Nat.is_lt(q, a) == True{} : Bool}) -> {Nat.is_le(a, q) == False{} : Bool}:
+  match q a:
+    case 0n 0n:
+      Empty.absurd({True{} == False{} : Bool}, ft(h))
+    case 0n 1n+aa:
+      {==}
+    case 1n+qq 0n:
+      Empty.absurd({True{} == False{} : Bool}, ft(h))
+    case 1n+qq 1n+aa:
+      m.lt_not_le(qq, aa, h)
+
+def m.neq_lt(a: Nat, p: Nat, h: {Nat.is_lt(a, p) == True{} : Bool}) -> {Nat.is_eq(a, p) == False{} : Bool}:
+  match a p:
+    case 0n 0n:
+      Empty.absurd({True{} == False{} : Bool}, ft(h))
+    case 0n 1n+pp:
+      {==}
+    case 1n+aa 0n:
+      {==}
+    case 1n+aa 1n+pp:
+      m.neq_lt(aa, pp, h)
+
+def m.neq_gt(a: Nat, p: Nat, h: {Nat.is_lt(p, a) == True{} : Bool}) -> {Nat.is_eq(a, p) == False{} : Bool}:
+  match a p:
+    case 0n 0n:
+      Empty.absurd({True{} == False{} : Bool}, ft(h))
+    case 0n 1n+pp:
+      {==}
+    case 1n+aa 0n:
+      {==}
+    case 1n+aa 1n+pp:
+      m.neq_gt(aa, pp, h)
+
+def m.le_zero_l(x: Nat) -> {Nat.is_le(0n, x) == True{} : Bool}:
+  match x:
+    case 0n:
+      {==}
+    case 1n+p:
+      {==}
+
+def m.lt_le_succ(a: Nat, b: Nat, h: {Nat.is_lt(a, b) == True{} : Bool}) -> {Nat.is_le(1n+a, b) == True{} : Bool}:
+  match a b:
+    case 0n 0n:
+      Empty.absurd({False{} == True{} : Bool}, ft(h))
+    case 0n 1n+bb:
+      m.le_zero_l(bb)
+    case 1n+aa 0n:
+      Empty.absurd({False{} == True{} : Bool}, ft(h))
+    case 1n+aa 1n+bb:
+      m.lt_le_succ(aa, bb, h)
+
+def m.lt_succ(a: Nat) -> {Nat.is_lt(a, 1n+a) == True{} : Bool}:
+  match a:
+    case 0n:
+      {==}
+    case 1n+p:
+      m.lt_succ(p)
+
+def m.le_cast(-x: Nat, -y: Nat, -e: Nat, eqn: {x == y : Nat}, h: {Nat.is_le(y, e) == True{} : Bool}) -> {Nat.is_le(x, e) == True{} : Bool}:
+  %Equal.sym(Nat, x, y, eqn) : {Nat.is_le(_, e) == True{} : Bool}
+  h
+
+def m.lt_add_succ(p: Nat, -k: Nat) -> {Nat.is_lt(p, Nat.add(p, 1n+k)) == True{} : Bool}:
+  match p:
+    case 0n:
+      {==}
+    case 1n+pp:
+      m.lt_add_succ(pp, k)
+
+def m.lt_up(+a: Nat, +p: Nat, h: {Nat.is_lt(a, p) == True{} : Bool}) -> {Nat.is_lt(a, 1n+p) == True{} : Bool}:
+  q.lt_lt(a, p, 1n+p, h, m.lt_succ(p))
+
+def m.le_up(+b: Nat, +p: Nat, h: {Nat.is_le(b, p) == True{} : Bool}) -> {Nat.is_le(b, 1n+p) == True{} : Bool}:
+  le_trans(b, p, 1n+p, h, q.le_succ(p))
+
+def m.cf_dup.k(-e: Nat, -a: Nat, -b: Nat, -rest: +List<K.Cut>, +x: {Nat.is_le(e, a) == True{} : Bool}, +y: {Nat.is_lt(a, b) == True{} : Bool},
+  p: Laws.CutsFrom(b, rest) & Laws.CutsFrom(b, rest)) -> Laws.CutsFrom(e, K.Cut{a, b} <> rest) & Laws.CutsFrom(e, K.Cut{a, b} <> rest):
+  (r1, r2) = p
+  ((x, (y, r1)), (x, (y, r2)))
+
+def m.cf_dup(ss: +List<K.Cut>, +e: Nat, h: Laws.CutsFrom(e, ss)) -> Laws.CutsFrom(e, ss) & Laws.CutsFrom(e, ss):
+  match ss:
+    case Nil{}:
+      (Unit{}, Unit{})
+    case Con{K.Cut{+a, +b}, +rest}:
+      (x, (y, r)) = h
+      m.cf_dup.k(e, a, b, rest, x, y, m.cf_dup(rest, b, r))
+
+def m.in_out(+q: Nat, ss: +List<K.Cut>, +e: Nat, cf: Laws.CutsFrom(e, ss), h: {Nat.is_lt(q, e) == True{} : Bool}) -> {Laws.Inside(q, ss) == False{} : Bool}:
+  match ss:
+    case Nil{}:
+      {==}
+    case Con{K.Cut{+a, +b}, +rest}:
+      (ea, (ab, cr)) = cf
+      +qa = lt_le_trans(q, e, a, h, ea)
+      %Equal.sym(Bool, Nat.is_le(a, q), False{}, m.lt_not_le(q, a, qa)) : {Bool.or(Bool.and(_, Nat.is_lt(q, b)), Laws.Inside(q, rest)) == False{} : Bool}
+      m.in_out(q, rest, b, cr, q.lt_lt(q, a, b, qa, ab))
+
+def m.opens_out(+q: Nat, ss: +List<K.Cut>, +e: Nat, cf: Laws.CutsFrom(e, ss), h: {Nat.is_lt(q, e) == True{} : Bool}) -> {Laws.Opens(q, ss) == False{} : Bool}:
+  match ss:
+    case Nil{}:
+      {==}
+    case Con{K.Cut{+a, +b}, +rest}:
+      (ea, (ab, cr)) = cf
+      +qa = lt_le_trans(q, e, a, h, ea)
+      %Equal.sym(Bool, Nat.is_eq(a, q), False{}, m.neq_gt(a, q, qa)) : {Bool.or(_, Laws.Opens(q, rest)) == False{} : Bool}
+      m.opens_out(q, rest, b, cr, q.lt_lt(q, a, b, qa, ab))
+
+def m.at_open(+a: Nat, +b: Nat, +rest: +List<K.Cut>, +i: Nat, ab: {Nat.is_lt(a, b) == True{} : Bool}) -> {Laws.At(a, K.Cut{a, b} <> rest, i) == [Laws.Marker{i}] : List<&2, Laws.Item>}:
+  -L = List<&2, Laws.Item>
+  +ss = {K.Cut{a, b} <> rest : List<&2, K.Cut>}
+  +ins = {
+    %Equal.sym(Bool, Nat.is_le(a, a), True{}, q.le_refl(a)) : {Bool.or(Bool.and(_, Nat.is_lt(a, b)), Laws.Inside(a, rest)) == True{} : Bool}
+    %Equal.sym(Bool, Nat.is_lt(a, b), True{}, ab) : {Bool.or(Bool.and(True{}, _), Laws.Inside(a, rest)) == True{} : Bool}
+    {==}
+  : {Laws.Inside(a, ss) == True{} : Bool}}
+  +ops = {
+    %Equal.sym(Bool, Nat.is_eq(a, a), True{}, ar.eq_refl(a)) : {Bool.or(_, Laws.Opens(a, rest)) == True{} : Bool}
+    {==}
+  : {Laws.Opens(a, ss) == True{} : Bool}}
+  +idx = {
+    %Equal.sym(Bool, Nat.is_eq(a, a), True{}, ar.eq_refl(a)) : {Bool.pick(Nat, _, i, Laws.OpenIndex(a, rest, 1n+i)) == i : Nat}
+    {==}
+  : {Laws.OpenIndex(a, ss, i) == i : Nat}}
+  %Equal.sym(Bool, Laws.Inside(a, ss), True{}, ins) : {Bool.pick(L, _, Bool.pick(L, Laws.Opens(a, ss), [Laws.Marker{Laws.OpenIndex(a, ss, i)}], []), [Laws.Byte{a}]) == [Laws.Marker{i}] : L}
+  %Equal.sym(Bool, Laws.Opens(a, ss), True{}, ops) : {Bool.pick(L, _, [Laws.Marker{Laws.OpenIndex(a, ss, i)}], []) == [Laws.Marker{i}] : L}
+  %Equal.sym(Nat, Laws.OpenIndex(a, ss, i), i, idx) : {[Laws.Marker{_}] == [Laws.Marker{i}] : L}
+  {==}
+
+def m.at_gone(+q: Nat, +a: Nat, +b: Nat, +rest: +List<K.Cut>, +i: Nat, aq: {Nat.is_lt(a, q) == True{} : Bool}, qb: {Nat.is_lt(q, b) == True{} : Bool}, cf: Laws.CutsFrom(b, rest))
+  -> {Laws.At(q, K.Cut{a, b} <> rest, i) == [] : List<&2, Laws.Item>}:
+  -L = List<&2, Laws.Item>
+  +ss = {K.Cut{a, b} <> rest : List<&2, K.Cut>}
+  +aq2 = aq
+  +qb2 = qb
+  +ins = {
+    %Equal.sym(Bool, Nat.is_le(a, q), True{}, lt_imp_le(a, q, aq2)) : {Bool.or(Bool.and(_, Nat.is_lt(q, b)), Laws.Inside(q, rest)) == True{} : Bool}
+    %Equal.sym(Bool, Nat.is_lt(q, b), True{}, qb2) : {Bool.or(Bool.and(True{}, _), Laws.Inside(q, rest)) == True{} : Bool}
+    {==}
+  : {Laws.Inside(q, ss) == True{} : Bool}}
+  +ops = {
+    %Equal.sym(Bool, Nat.is_eq(a, q), False{}, m.neq_lt(a, q, aq2)) : {Bool.or(_, Laws.Opens(q, rest)) == False{} : Bool}
+    m.opens_out(q, rest, b, cf, qb2)
+  : {Laws.Opens(q, ss) == False{} : Bool}}
+  %Equal.sym(Bool, Laws.Inside(q, ss), True{}, ins) : {Bool.pick(L, _, Bool.pick(L, Laws.Opens(q, ss), [Laws.Marker{Laws.OpenIndex(q, ss, i)}], []), [Laws.Byte{q}]) == [] : L}
+  %Equal.sym(Bool, Laws.Opens(q, ss), False{}, ops) : {Bool.pick(L, _, [Laws.Marker{Laws.OpenIndex(q, ss, i)}], []) == [] : L}
+  {==}
+
+def m.at_skip(+p: Nat, +a: Nat, +b: Nat, +rest: +List<K.Cut>, +i: Nat, bp: {Nat.is_le(b, p) == True{} : Bool}, ab: {Nat.is_lt(a, b) == True{} : Bool})
+  -> {Laws.At(p, K.Cut{a, b} <> rest, i) == Laws.At(p, rest, 1n+i) : List<&2, Laws.Item>}:
+  -L = List<&2, Laws.Item>
+  +ss = {K.Cut{a, b} <> rest : List<&2, K.Cut>}
+  +bp2 = bp
+  +neq = m.neq_lt(a, p, lt_le_trans(a, b, p, ab, bp2))
+  +ins = {
+    %Equal.sym(Bool, Nat.is_lt(p, b), False{}, q.le_not_lt(b, p, bp2)) : {Bool.or(Bool.and(Nat.is_le(a, p), _), Laws.Inside(p, rest)) == Laws.Inside(p, rest) : Bool}
+    %Equal.sym(Bool, Bool.and(Nat.is_le(a, p), False{}), False{}, and_false(Nat.is_le(a, p))) : {Bool.or(_, Laws.Inside(p, rest)) == Laws.Inside(p, rest) : Bool}
+    {==}
+  : {Laws.Inside(p, ss) == Laws.Inside(p, rest) : Bool}}
+  +ops = {
+    %Equal.sym(Bool, Nat.is_eq(a, p), False{}, neq) : {Bool.or(_, Laws.Opens(p, rest)) == Laws.Opens(p, rest) : Bool}
+    {==}
+  : {Laws.Opens(p, ss) == Laws.Opens(p, rest) : Bool}}
+  +idx = {
+    %Equal.sym(Bool, Nat.is_eq(a, p), False{}, neq) : {Bool.pick(Nat, _, i, Laws.OpenIndex(p, rest, 1n+i)) == Laws.OpenIndex(p, rest, 1n+i) : Nat}
+    {==}
+  : {Laws.OpenIndex(p, ss, i) == Laws.OpenIndex(p, rest, 1n+i) : Nat}}
+  %Equal.sym(Bool, Laws.Inside(p, ss), Laws.Inside(p, rest), ins) : {Bool.pick(L, _, Bool.pick(L, Laws.Opens(p, ss), [Laws.Marker{Laws.OpenIndex(p, ss, i)}], []), [Laws.Byte{p}]) == Laws.At(p, rest, 1n+i) : L}
+  %Equal.sym(Bool, Laws.Opens(p, ss), Laws.Opens(p, rest), ops) : {Bool.pick(L, Laws.Inside(p, rest), Bool.pick(L, _, [Laws.Marker{Laws.OpenIndex(p, ss, i)}], []), [Laws.Byte{p}]) == Laws.At(p, rest, 1n+i) : L}
+  %Equal.sym(Nat, Laws.OpenIndex(p, ss, i), Laws.OpenIndex(p, rest, 1n+i), idx) : {Bool.pick(L, Laws.Inside(p, rest), Bool.pick(L, Laws.Opens(p, rest), [Laws.Marker{_}], []), [Laws.Byte{p}]) == Laws.At(p, rest, 1n+i) : L}
+  {==}
+
+def m.items_nil(n: Nat, +p: Nat, +i: Nat) -> {Laws.Items(n, p, [], i) == Laws.Bytes(n, p) : List<&2, Laws.Item>}:
+  match n:
+    case 0n:
+      {==}
+    case 1n++k:
+      %m.items_nil(k, 1n+p, i) : {Laws.Byte{p} <> Laws.Items(k, 1n+p, [], i) == Laws.Byte{p} <> _ : List<&2, Laws.Item>}
+      {==}
+
+def m.items_cat(n: Nat, +k: Nat, +p: Nat, +ss: +List<K.Cut>, +i: Nat) -> {Laws.Items(Nat.add(n, k), p, ss, i) == Laws.Join(Laws.Items(n, p, ss, i), Laws.Items(k, Nat.add(p, n), ss, i)) : List<&2, Laws.Item>}:
+  match n:
+    case 0n:
+      -T = List<&2, Laws.Item>
+      %add_zero(p) : {Laws.Items(k, p, ss, i) == Laws.Items(k, _, ss, i) : T}
+      {==}
+    case 1n++j:
+      -T = List<&2, Laws.Item>
+      +at = Laws.At(p, ss, i)
+      +x = Laws.Items(j, 1n+p, ss, i)
+      Equal.trans(T, Laws.Join(at, Laws.Items(Nat.add(j, k), 1n+p, ss, i)), Laws.Join(at, Laws.Join(x, Laws.Items(k, 1n+Nat.add(p, j), ss, i))), Laws.Join(Laws.Join(at, x), Laws.Items(k, Nat.add(p, 1n+j), ss, i)),
+        Equal.cong(T, T, l => Laws.Join(at, l), Laws.Items(Nat.add(j, k), 1n+p, ss, i), Laws.Join(x, Laws.Items(k, 1n+Nat.add(p, j), ss, i)), m.items_cat(j, k, 1n+p, ss, i)),
+        Equal.trans(T, Laws.Join(at, Laws.Join(x, Laws.Items(k, 1n+Nat.add(p, j), ss, i))), Laws.Join(at, Laws.Join(x, Laws.Items(k, Nat.add(p, 1n+j), ss, i))), Laws.Join(Laws.Join(at, x), Laws.Items(k, Nat.add(p, 1n+j), ss, i)),
+          Equal.cong(Nat, T, z => Laws.Join(at, Laws.Join(x, Laws.Items(k, z, ss, i))), 1n+Nat.add(p, j), Nat.add(p, 1n+j), add_succ(p, j)),
+          Equal.sym(T, Laws.Join(Laws.Join(at, x), Laws.Items(k, Nat.add(p, 1n+j), ss, i)), Laws.Join(at, Laws.Join(x, Laws.Items(k, Nat.add(p, 1n+j), ss, i))), m.join_assoc(at, x, Laws.Items(k, Nat.add(p, 1n+j), ss, i)))))
+
+def m.items_bytes(n: Nat, +p: Nat, +ss: +List<K.Cut>, +i: Nat, +e: Nat, cfp: Laws.CutsFrom(e, ss) & Laws.CutsFrom(e, ss), h: {Nat.is_le(Nat.add(p, n), e) == True{} : Bool})
+  -> {Laws.Items(n, p, ss, i) == Laws.Bytes(n, p) : List<&2, Laws.Item>}:
+  match n:
+    case 0n:
+      -L = List<&2, Laws.Item>
+      {==}
+    case 1n++k:
+      (c1, c2) = cfp
+      -L = List<&2, Laws.Item>
+      +h2 = h
+      +ins = m.in_out(p, ss, e, c1, lt_le_trans(p, Nat.add(p, 1n+k), e, m.lt_add_succ(p, k), h2))
+      %Equal.sym(Bool, Laws.Inside(p, ss), False{}, ins) : {Laws.Join(Bool.pick(L, _, Bool.pick(L, Laws.Opens(p, ss), [Laws.Marker{Laws.OpenIndex(p, ss, i)}], []), [Laws.Byte{p}]), Laws.Items(k, 1n+p, ss, i)) == Laws.Byte{p} <> Laws.Bytes(k, 1n+p) : L}
+      %m.items_bytes(k, 1n+p, ss, i, e, m.cf_dup(ss, e, c2), m.le_cast(1n+Nat.add(p, k), Nat.add(p, 1n+k), e, add_succ(p, k), h2)) : {Laws.Byte{p} <> Laws.Items(k, 1n+p, ss, i) == Laws.Byte{p} <> _ : L}
+      {==}
+
+def m.items_gone(n: Nat, +p: Nat, +a: Nat, +b: Nat, +rest: +List<K.Cut>, +i: Nat, ap: {Nat.is_lt(a, p) == True{} : Bool}, pb: {Nat.is_le(Nat.add(p, n), b) == True{} : Bool},
+  cfp: Laws.CutsFrom(b, rest) & Laws.CutsFrom(b, rest)) -> {Laws.Items(n, p, K.Cut{a, b} <> rest, i) == [] : List<&2, Laws.Item>}:
+  match n:
+    case 0n:
+      -L = List<&2, Laws.Item>
+      {==}
+    case 1n++k:
+      (c1, c2) = cfp
+      -L = List<&2, Laws.Item>
+      +ap2 = ap
+      +pb2 = pb
+      %Equal.sym(L, Laws.At(p, K.Cut{a, b} <> rest, i), [], m.at_gone(p, a, b, rest, i, ap2, lt_le_trans(p, Nat.add(p, 1n+k), b, m.lt_add_succ(p, k), pb2), c1)) : {Laws.Join(_, Laws.Items(k, 1n+p, K.Cut{a, b} <> rest, i)) == [] : L}
+      m.items_gone(k, 1n+p, a, b, rest, i, m.lt_up(a, p, ap2), m.le_cast(1n+Nat.add(p, k), Nat.add(p, 1n+k), b, add_succ(p, k), pb2), m.cf_dup(rest, b, c2))
+
+def m.items_skip(n: Nat, +p: Nat, +a: Nat, +b: Nat, +rest: +List<K.Cut>, +i: Nat, +bp: {Nat.is_le(b, p) == True{} : Bool}, +ab: {Nat.is_lt(a, b) == True{} : Bool})
+  -> {Laws.Items(n, p, K.Cut{a, b} <> rest, i) == Laws.Items(n, p, rest, 1n+i) : List<&2, Laws.Item>}:
+  match n:
+    case 0n:
+      -L = List<&2, Laws.Item>
+      {==}
+    case 1n++k:
+      -L = List<&2, Laws.Item>
+      %Equal.sym(L, Laws.At(p, K.Cut{a, b} <> rest, i), Laws.At(p, rest, 1n+i), m.at_skip(p, a, b, rest, i, bp, ab)) : {Laws.Join(_, Laws.Items(k, 1n+p, K.Cut{a, b} <> rest, i)) == Laws.Join(Laws.At(p, rest, 1n+i), Laws.Items(k, 1n+p, rest, 1n+i)) : L}
+      %Equal.sym(L, Laws.Items(k, 1n+p, K.Cut{a, b} <> rest, i), Laws.Items(k, 1n+p, rest, 1n+i), m.items_skip(k, 1n+p, a, b, rest, i, m.le_up(b, p, bp), ab)) : {Laws.Join(Laws.At(p, rest, 1n+i), _) == Laws.Join(Laws.At(p, rest, 1n+i), Laws.Items(k, 1n+p, rest, 1n+i)) : L}
+      {==}
+
+def m.Apart(ss: +List<K.Cut>) -> Type:
+  match ss:
+    case Nil{}:
+      Unit
+    case Con{K.Cut{+a, +b}, rest}:
+      {Nat.is_lt(a, b) == True{} : Bool} & Laws.CutsFrom(b, rest)
+
+def m.HeadAfter(ss: +List<K.Cut>, +x: Nat) -> Type:
+  match ss:
+    case Nil{}:
+      Unit
+    case Con{K.Cut{a, +b}, rest}:
+      {Nat.is_lt(x, b) == True{} : Bool}
+
+def m.kss(r: K.Part) -> List<&2, K.Cut>:
+  match r:
+    case K.Part{ss, i, ps}:
+      ss
+
+def m.ki(r: K.Part) -> Nat:
+  match r:
+    case K.Part{ss, i, ps}:
+      i
+
+def m.kps(r: K.Part) -> List<&2, K.Piece>:
+  match r:
+    case K.Part{ss, i, ps}:
+      ps
+
+def m.items_n(-n: Nat, -n2: Nat, -p: Nat, -ss: +List<K.Cut>, -i: Nat, e: {n == n2 : Nat}) -> {Laws.Items(n, p, ss, i) == Laws.Items(n2, p, ss, i) : List<&2, Laws.Item>}:
+  %e : {Laws.Items(n, p, ss, i) == Laws.Items(_, p, ss, i) : List<&2, Laws.Item>}
+  {==}
+
+def m.items_p(-n: Nat, -p: Nat, -p2: Nat, -ss: +List<K.Cut>, -i: Nat, e: {p == p2 : Nat}) -> {Laws.Items(n, p, ss, i) == Laws.Items(n, p2, ss, i) : List<&2, Laws.Item>}:
+  %e : {Laws.Items(n, p, ss, i) == Laws.Items(n, _, ss, i) : List<&2, Laws.Item>}
+  {==}
+
+def m.items_split(+p: Nat, +x: Nat, +q: Nat, +ss: +List<K.Cut>, +i: Nat, px: {Nat.is_le(p, x) == True{} : Bool}, xq: {Nat.is_le(x, q) == True{} : Bool})
+  -> {Laws.Items(Nat.sub(q, p), p, ss, i) == Laws.Join(Laws.Items(Nat.sub(x, p), p, ss, i), Laws.Items(Nat.sub(q, x), x, ss, i)) : List<&2, Laws.Item>}:
+  -T = List<&2, Laws.Item>
+  +px2 = px
+  +n1 = Nat.sub(x, p)
+  +n2 = Nat.sub(q, x)
+  Equal.trans(T, Laws.Items(Nat.sub(q, p), p, ss, i), Laws.Items(Nat.add(n1, n2), p, ss, i), Laws.Join(Laws.Items(n1, p, ss, i), Laws.Items(n2, x, ss, i)),
+    m.items_n(Nat.sub(q, p), Nat.add(n1, n2), p, ss, i, m.sub_split(p, x, q, px2, xq)),
+    Equal.trans(T, Laws.Items(Nat.add(n1, n2), p, ss, i), Laws.Join(Laws.Items(n1, p, ss, i), Laws.Items(n2, Nat.add(p, n1), ss, i)), Laws.Join(Laws.Items(n1, p, ss, i), Laws.Items(n2, x, ss, i)),
+      m.items_cat(n1, n2, p, ss, i),
+      Equal.cong(T, T, l => Laws.Join(Laws.Items(n1, p, ss, i), l), Laws.Items(n2, Nat.add(p, n1), ss, i), Laws.Items(n2, x, ss, i),
+        m.items_p(n2, Nat.add(p, n1), x, ss, i, m.add_sub(p, x, px2)))))
+
+def m.ap_dup.k(-a: Nat, -b: Nat, -rest: +List<K.Cut>, +x: {Nat.is_lt(a, b) == True{} : Bool}, p: Laws.CutsFrom(b, rest) & Laws.CutsFrom(b, rest))
+  -> m.Apart(K.Cut{a, b} <> rest) & m.Apart(K.Cut{a, b} <> rest):
+  (r1, r2) = p
+  ((x, r1), (x, r2))
+
+def m.ap_dup(ss: +List<K.Cut>, h: m.Apart(ss)) -> m.Apart(ss) & m.Apart(ss):
+  match ss:
+    case Nil{}:
+      (Unit{}, Unit{})
+    case Con{K.Cut{+a, +b}, +rest}:
+      (x, r) = h
+      m.ap_dup.k(a, b, rest, x, m.cf_dup(rest, b, r))
+
+def m.cf_apart(+e: Nat, ss: +List<K.Cut>, h: Laws.CutsFrom(e, ss)) -> m.Apart(ss):
+  match ss:
+    case Nil{}:
+      Unit{}
+    case Con{K.Cut{a, b}, rest}:
+      (x, r) = h
+      r
+
+def m.cf_head(+e: Nat, ss: +List<K.Cut>, h: Laws.CutsFrom(e, ss)) -> m.HeadAfter(ss, e):
+  match ss:
+    case Nil{}:
+      Unit{}
+    case Con{K.Cut{+a, +b}, rest}:
+      (x, (y, r)) = h
+      q.le_lt_trans(e, a, b, x, y)
+
+def m.masked_skip(bs: +List<Nat>, +x: Nat, +a: Nat, +b: Nat, +rest: +List<K.Cut>, +i: Nat, bl: Laws.BsFrom(x, bs), +bx: {Nat.is_le(b, x) == True{} : Bool}, +ab: {Nat.is_lt(a, b) == True{} : Bool})
+  -> {Laws.MaskedParts(bs, x, K.Cut{a, b} <> rest, i) == Laws.MaskedParts(bs, x, rest, 1n+i) : List<&2, List<&2, Laws.Item>>}:
+  match bs:
+    case Nil{}:
+      {==}
+    case Con{+hi, +r}:
+      (xh, br) = bl
+      -T = List<&2, List<&2, Laws.Item>>
+      %Equal.sym(List<&2, Laws.Item>, Laws.Items(Nat.sub(hi, x), x, K.Cut{a, b} <> rest, i), Laws.Items(Nat.sub(hi, x), x, rest, 1n+i), m.items_skip(Nat.sub(hi, x), x, a, b, rest, i, bx, ab)) : {_ <> Laws.MaskedParts(r, hi, K.Cut{a, b} <> rest, i) == Laws.Items(Nat.sub(hi, x), x, rest, 1n+i) <> Laws.MaskedParts(r, hi, rest, 1n+i) : T}
+      %Equal.sym(T, Laws.MaskedParts(r, hi, K.Cut{a, b} <> rest, i), Laws.MaskedParts(r, hi, rest, 1n+i), m.masked_skip(r, hi, a, b, rest, i, br, le_trans(b, x, hi, bx, xh), ab)) : {Laws.Items(Nat.sub(hi, x), x, rest, 1n+i) <> _ == Laws.Items(Nat.sub(hi, x), x, rest, 1n+i) <> Laws.MaskedParts(r, hi, rest, 1n+i) : T}
+      {==}
+
+def m.s_late(+pos: Nat, +hi: Nat, +a: Nat, +b: Nat, +rest: +List<K.Cut>, +i: Nat, ph: {Nat.is_le(pos, hi) == True{} : Bool}, ha: {Nat.is_le(hi, a) == True{} : Bool}, ap: m.Apart(K.Cut{a, b} <> rest))
+  -> {Laws.Items(Nat.sub(hi, pos), pos, K.Cut{a, b} <> rest, i) == Laws.Bytes(Nat.sub(hi, pos), pos) : List<&2, Laws.Item>}:
+  m.items_bytes(Nat.sub(hi, pos), pos, K.Cut{a, b} <> rest, i, a, m.cf_dup(K.Cut{a, b} <> rest, a, (q.le_refl(a), ap)),
+    m.le_cast(Nat.add(pos, Nat.sub(hi, pos)), hi, a, m.add_sub(pos, hi, ph), ha))
+
+def m.s_fresh_short(+pos: Nat, +hi: Nat, +a: Nat, +b: Nat, +rest: +List<K.Cut>, +i: Nat, +pa: {Nat.is_le(pos, a) == True{} : Bool}, +ab: {Nat.is_lt(a, b) == True{} : Bool},
+  +bh: {Nat.is_le(b, hi) == True{} : Bool}, cfp: Laws.CutsFrom(b, rest) & Laws.CutsFrom(b, rest))
+  -> {Laws.Items(Nat.sub(hi, pos), pos, K.Cut{a, b} <> rest, i) == Laws.Join(Laws.Bytes(Nat.sub(a, pos), pos), Laws.Marker{i} <> Laws.Items(Nat.sub(hi, b), b, rest, 1n+i)) : List<&2, Laws.Item>}:
+  (c1, c2) = cfp
+  -L = List<&2, Laws.Item>
+  +ss = {K.Cut{a, b} <> rest : List<&2, K.Cut>}
+  +ah = lt_le_trans(a, b, hi, ab, bh)
+  +bytes = Laws.Bytes(Nat.sub(a, pos), pos)
+  +sa = m.lt_le_succ(a, b, ab)
+  %Equal.sym(L, Laws.Items(Nat.sub(hi, pos), pos, ss, i), Laws.Join(Laws.Items(Nat.sub(a, pos), pos, ss, i), Laws.Items(Nat.sub(hi, a), a, ss, i)), m.items_split(pos, a, hi, ss, i, pa, lt_imp_le(a, hi, ah)))
+    : {_ == Laws.Join(bytes, Laws.Marker{i} <> Laws.Items(Nat.sub(hi, b), b, rest, 1n+i)) : L}
+  %Equal.sym(L, Laws.Items(Nat.sub(a, pos), pos, ss, i), bytes, m.items_bytes(Nat.sub(a, pos), pos, ss, i, a, m.cf_dup(ss, a, (q.le_refl(a), (ab, c1))), m.le_cast(Nat.add(pos, Nat.sub(a, pos)), a, a, m.add_sub(pos, a, pa), q.le_refl(a))))
+    : {Laws.Join(_, Laws.Items(Nat.sub(hi, a), a, ss, i)) == Laws.Join(bytes, Laws.Marker{i} <> Laws.Items(Nat.sub(hi, b), b, rest, 1n+i)) : L}
+  %Equal.sym(L, Laws.Items(Nat.sub(hi, a), a, ss, i), Laws.Items(1n+Nat.sub(hi, 1n+a), a, ss, i), m.items_n(Nat.sub(hi, a), 1n+Nat.sub(hi, 1n+a), a, ss, i, m.sub_succ(a, hi, ah)))
+    : {Laws.Join(bytes, _) == Laws.Join(bytes, Laws.Marker{i} <> Laws.Items(Nat.sub(hi, b), b, rest, 1n+i)) : L}
+  %Equal.sym(L, Laws.At(a, ss, i), [Laws.Marker{i}], m.at_open(a, b, rest, i, ab))
+    : {Laws.Join(bytes, Laws.Join(_, Laws.Items(Nat.sub(hi, 1n+a), 1n+a, ss, i))) == Laws.Join(bytes, Laws.Marker{i} <> Laws.Items(Nat.sub(hi, b), b, rest, 1n+i)) : L}
+  %Equal.sym(L, Laws.Items(Nat.sub(hi, 1n+a), 1n+a, ss, i), Laws.Join(Laws.Items(Nat.sub(b, 1n+a), 1n+a, ss, i), Laws.Items(Nat.sub(hi, b), b, ss, i)), m.items_split(1n+a, b, hi, ss, i, sa, bh))
+    : {Laws.Join(bytes, Laws.Marker{i} <> _) == Laws.Join(bytes, Laws.Marker{i} <> Laws.Items(Nat.sub(hi, b), b, rest, 1n+i)) : L}
+  %Equal.sym(L, Laws.Items(Nat.sub(b, 1n+a), 1n+a, ss, i), [], m.items_gone(Nat.sub(b, 1n+a), 1n+a, a, b, rest, i, m.lt_succ(a), m.le_cast(Nat.add(1n+a, Nat.sub(b, 1n+a)), b, b, m.add_sub(1n+a, b, sa), q.le_refl(b)), m.cf_dup(rest, b, c2)))
+    : {Laws.Join(bytes, Laws.Marker{i} <> Laws.Join(_, Laws.Items(Nat.sub(hi, b), b, ss, i))) == Laws.Join(bytes, Laws.Marker{i} <> Laws.Items(Nat.sub(hi, b), b, rest, 1n+i)) : L}
+  %Equal.sym(L, Laws.Items(Nat.sub(hi, b), b, ss, i), Laws.Items(Nat.sub(hi, b), b, rest, 1n+i), m.items_skip(Nat.sub(hi, b), b, a, b, rest, i, q.le_refl(b), ab))
+    : {Laws.Join(bytes, Laws.Marker{i} <> _) == Laws.Join(bytes, Laws.Marker{i} <> Laws.Items(Nat.sub(hi, b), b, rest, 1n+i)) : L}
+  {==}
+
+def m.s_fresh_long(+pos: Nat, +hi: Nat, +a: Nat, +b: Nat, +rest: +List<K.Cut>, +i: Nat, +pa: {Nat.is_le(pos, a) == True{} : Bool}, +ab: {Nat.is_lt(a, b) == True{} : Bool},
+  +ah: {Nat.is_lt(a, hi) == True{} : Bool}, hb: {Nat.is_lt(hi, b) == True{} : Bool}, cfp: Laws.CutsFrom(b, rest) & Laws.CutsFrom(b, rest))
+  -> {Laws.Items(Nat.sub(hi, pos), pos, K.Cut{a, b} <> rest, i) == Laws.Join(Laws.Bytes(Nat.sub(a, pos), pos), [Laws.Marker{i}]) : List<&2, Laws.Item>}:
+  (c1, c2) = cfp
+  -L = List<&2, Laws.Item>
+  +ss = {K.Cut{a, b} <> rest : List<&2, K.Cut>}
+  +bytes = Laws.Bytes(Nat.sub(a, pos), pos)
+  +sh = m.lt_le_succ(a, hi, ah)
+  %Equal.sym(L, Laws.Items(Nat.sub(hi, pos), pos, ss, i), Laws.Join(Laws.Items(Nat.sub(a, pos), pos, ss, i), Laws.Items(Nat.sub(hi, a), a, ss, i)), m.items_split(pos, a, hi, ss, i, pa, lt_imp_le(a, hi, ah)))
+    : {_ == Laws.Join(bytes, [Laws.Marker{i}]) : L}
+  %Equal.sym(L, Laws.Items(Nat.sub(a, pos), pos, ss, i), bytes, m.items_bytes(Nat.sub(a, pos), pos, ss, i, a, m.cf_dup(ss, a, (q.le_refl(a), (ab, c1))), m.le_cast(Nat.add(pos, Nat.sub(a, pos)), a, a, m.add_sub(pos, a, pa), q.le_refl(a))))
+    : {Laws.Join(_, Laws.Items(Nat.sub(hi, a), a, ss, i)) == Laws.Join(bytes, [Laws.Marker{i}]) : L}
+  %Equal.sym(L, Laws.Items(Nat.sub(hi, a), a, ss, i), Laws.Items(1n+Nat.sub(hi, 1n+a), a, ss, i), m.items_n(Nat.sub(hi, a), 1n+Nat.sub(hi, 1n+a), a, ss, i, m.sub_succ(a, hi, ah)))
+    : {Laws.Join(bytes, _) == Laws.Join(bytes, [Laws.Marker{i}]) : L}
+  %Equal.sym(L, Laws.At(a, ss, i), [Laws.Marker{i}], m.at_open(a, b, rest, i, ab))
+    : {Laws.Join(bytes, Laws.Join(_, Laws.Items(Nat.sub(hi, 1n+a), 1n+a, ss, i))) == Laws.Join(bytes, [Laws.Marker{i}]) : L}
+  %Equal.sym(L, Laws.Items(Nat.sub(hi, 1n+a), 1n+a, ss, i), [], m.items_gone(Nat.sub(hi, 1n+a), 1n+a, a, b, rest, i, m.lt_succ(a), m.le_cast(Nat.add(1n+a, Nat.sub(hi, 1n+a)), hi, b, m.add_sub(1n+a, hi, sh), lt_imp_le(hi, b, hb)), m.cf_dup(rest, b, c2)))
+    : {Laws.Join(bytes, Laws.Marker{i} <> _) == Laws.Join(bytes, [Laws.Marker{i}]) : L}
+  {==}
+
+def m.s_prog_short(+pos: Nat, +hi: Nat, +a: Nat, +b: Nat, +rest: +List<K.Cut>, +i: Nat, ap: {Nat.is_lt(a, pos) == True{} : Bool}, +pb: {Nat.is_lt(pos, b) == True{} : Bool},
+  +bh: {Nat.is_le(b, hi) == True{} : Bool}, +ab: {Nat.is_lt(a, b) == True{} : Bool}, cfp: Laws.CutsFrom(b, rest) & Laws.CutsFrom(b, rest))
+  -> {Laws.Items(Nat.sub(hi, pos), pos, K.Cut{a, b} <> rest, i) == Laws.Items(Nat.sub(hi, b), b, rest, 1n+i) : List<&2, Laws.Item>}:
+  -L = List<&2, Laws.Item>
+  +ss = {K.Cut{a, b} <> rest : List<&2, K.Cut>}
+  +pb2 = lt_imp_le(pos, b, pb)
+  %Equal.sym(L, Laws.Items(Nat.sub(hi, pos), pos, ss, i), Laws.Join(Laws.Items(Nat.sub(b, pos), pos, ss, i), Laws.Items(Nat.sub(hi, b), b, ss, i)), m.items_split(pos, b, hi, ss, i, pb2, bh))
+    : {_ == Laws.Items(Nat.sub(hi, b), b, rest, 1n+i) : L}
+  %Equal.sym(L, Laws.Items(Nat.sub(b, pos), pos, ss, i), [], m.items_gone(Nat.sub(b, pos), pos, a, b, rest, i, ap, m.le_cast(Nat.add(pos, Nat.sub(b, pos)), b, b, m.add_sub(pos, b, pb2), q.le_refl(b)), cfp))
+    : {Laws.Join(_, Laws.Items(Nat.sub(hi, b), b, ss, i)) == Laws.Items(Nat.sub(hi, b), b, rest, 1n+i) : L}
+  m.items_skip(Nat.sub(hi, b), b, a, b, rest, i, q.le_refl(b), ab)
+
+def m.s_prog_long(+pos: Nat, +hi: Nat, +a: Nat, +b: Nat, +rest: +List<K.Cut>, +i: Nat, ap: {Nat.is_lt(a, pos) == True{} : Bool}, ph: {Nat.is_le(pos, hi) == True{} : Bool},
+  hb: {Nat.is_lt(hi, b) == True{} : Bool}, cfp: Laws.CutsFrom(b, rest) & Laws.CutsFrom(b, rest))
+  -> {Laws.Items(Nat.sub(hi, pos), pos, K.Cut{a, b} <> rest, i) == [] : List<&2, Laws.Item>}:
+  m.items_gone(Nat.sub(hi, pos), pos, a, b, rest, i, ap, m.le_cast(Nat.add(pos, Nat.sub(hi, pos)), hi, b, m.add_sub(pos, hi, ph), lt_imp_le(hi, b, hb)), cfp)
+
+def m.PartOk(r: K.Part, +acc: +List<K.Piece>, +ss: +List<K.Cut>, +i: Nat, +pos: Nat, +hi: Nat, +bs: +List<Nat>) -> Type:
+  match r:
+    case K.Part{+ss2, +i2, ps}:
+      {Laws.Shown(ps) == Laws.Join(Laws.Shown(K.rev.pieces(acc, Nil{})), Laws.Items(Nat.sub(hi, pos), pos, ss, i)) : List<&2, Laws.Item>}
+      & ({Laws.MaskedParts(bs, hi, ss2, i2) == Laws.MaskedParts(bs, hi, ss, i) : List<&2, List<&2, Laws.Item>>} & (m.Apart(ss2) & m.HeadAfter(ss2, hi)))
+
+def m.ok_move(r: K.Part, +acc1: +List<K.Piece>, +ss1: +List<K.Cut>, +i1: Nat, +pos1: Nat, +acc2: +List<K.Piece>, +ss2: +List<K.Cut>, +i2: Nat, +pos2: Nat, +hi: Nat, +bs: +List<Nat>,
+  e1: {Laws.Join(Laws.Shown(K.rev.pieces(acc1, Nil{})), Laws.Items(Nat.sub(hi, pos1), pos1, ss1, i1)) == Laws.Join(Laws.Shown(K.rev.pieces(acc2, Nil{})), Laws.Items(Nat.sub(hi, pos2), pos2, ss2, i2)) : List<&2, Laws.Item>},
+  e2: {Laws.MaskedParts(bs, hi, ss1, i1) == Laws.MaskedParts(bs, hi, ss2, i2) : List<&2, List<&2, Laws.Item>>},
+  ok: m.PartOk(r, acc1, ss1, i1, pos1, hi, bs)) -> m.PartOk(r, acc2, ss2, i2, pos2, hi, bs):
+  match r:
+    case K.Part{+s3, +i3, +ps}:
+      (o1, (o2, o3)) = ok
+      (Equal.trans(List<&2, Laws.Item>, Laws.Shown(ps), Laws.Join(Laws.Shown(K.rev.pieces(acc1, Nil{})), Laws.Items(Nat.sub(hi, pos1), pos1, ss1, i1)), Laws.Join(Laws.Shown(K.rev.pieces(acc2, Nil{})), Laws.Items(Nat.sub(hi, pos2), pos2, ss2, i2)), o1, e1),
+       (Equal.trans(List<&2, List<&2, Laws.Item>>, Laws.MaskedParts(bs, hi, s3, i3), Laws.MaskedParts(bs, hi, ss1, i1), Laws.MaskedParts(bs, hi, ss2, i2), o2, e2), o3))
+
+def m.keep_tail(+acc: +List<K.Piece>, +pos: Nat, +hi: Nat, -x: +List<Laws.Item>, eb: {Laws.Bytes(Nat.sub(hi, pos), pos) == x : List<&2, Laws.Item>})
+  -> {Laws.Shown(K.rev.pieces(K.Keep{pos, hi} <> acc, Nil{})) == Laws.Join(Laws.Shown(K.rev.pieces(acc, Nil{})), x) : List<&2, Laws.Item>}:
+  -L = List<&2, Laws.Item>
+  +z = Laws.Shown(K.rev.pieces(acc, Nil{}))
+  +bytes = Laws.Bytes(Nat.sub(hi, pos), pos)
+  Equal.trans(L, Laws.Shown(K.rev.pieces(acc, [K.Keep{pos, hi}])), Laws.Join(z, Laws.Shown([K.Keep{pos, hi}])), Laws.Join(z, x),
+    m.shown_rev(acc, [K.Keep{pos, hi}]),
+    Equal.cong(L, L, l => Laws.Join(z, l), Laws.Join(bytes, []), x, Equal.trans(L, Laws.Join(bytes, []), bytes, x, m.join_nil(bytes), eb)))
+
+def m.ap_tri.k(+ss: +List<K.Cut>, p: m.Apart(ss) & m.Apart(ss)) -> m.Apart(ss) & (m.Apart(ss) & m.Apart(ss)):
+  (p1, p2) = p
+  (p1, m.ap_dup(ss, p2))
+
+def m.ap_tri(+ss: +List<K.Cut>, h: m.Apart(ss)) -> m.Apart(ss) & (m.Apart(ss) & m.Apart(ss)):
+  m.ap_tri.k(ss, m.ap_dup(ss, h))
+
+def m.part_ok(ss: +List<K.Cut>, late: Bool, fresh: Bool, short: Bool, +i: Nat, +pos: Nat, +hi: Nat, +acc: +List<K.Piece>, +bs: +List<Nat>,
+  el: {K.starts_from(ss, hi) == late : Bool}, ef: {K.starts_from(ss, pos) == fresh : Bool}, es: {K.ends_by(ss, hi) == short : Bool},
+  app: m.Apart(ss) & (m.Apart(ss) & m.Apart(ss)), ha: m.HeadAfter(ss, pos), +ph: {Nat.is_le(pos, hi) == True{} : Bool}, blp: Laws.BsFrom(hi, bs) & Laws.BsFrom(hi, bs))
+  -> m.PartOk(K.part.go(ss, late, fresh, short, i, pos, hi, acc), acc, ss, i, pos, hi, bs):
+  match ss late fresh short:
+    case Nil{} _ _ _:
+      (m.keep_tail(acc, pos, hi, Laws.Items(Nat.sub(hi, pos), pos, [], i), Equal.sym(List<&2, Laws.Item>, Laws.Items(Nat.sub(hi, pos), pos, [], i), Laws.Bytes(Nat.sub(hi, pos), pos), m.items_nil(Nat.sub(hi, pos), pos, i))),
+       ({==}, (Unit{}, Unit{})))
+    case Con{K.Cut{+a, +b}, +rest} True{} _ _:
+      (ap1, ((+ab, cr), ap3)) = app
+      +ha2 = ge_le(a, hi, el)
+      +ss2 = {K.Cut{a, b} <> rest : List<&2, K.Cut>}
+      (m.keep_tail(acc, pos, hi, Laws.Items(Nat.sub(hi, pos), pos, ss2, i), Equal.sym(List<&2, Laws.Item>, Laws.Items(Nat.sub(hi, pos), pos, ss2, i), Laws.Bytes(Nat.sub(hi, pos), pos), m.s_late(pos, hi, a, b, rest, i, ph, ha2, ap1))),
+       ({==}, ((ab, cr), q.le_lt_trans(hi, a, b, ha2, ab))))
+    case Con{K.Cut{+a, +b}, +rest} False{} True{} True{}:
+      ((+ab, cr1), ((ab2, cr2), (ab3, cr3))) = app
+      (bl1, bl2) = blp
+      -L = List<&2, Laws.Item>
+      +pa = ge_le(a, pos, ef)
+      +bh = es
+      +acc2 = {K.Hide{i} <> (K.Keep{pos, a} <> acc) : List<&2, K.Piece>}
+      +r = K.part.go(rest, K.starts_from(rest, hi), K.starts_from(rest, b), K.ends_by(rest, hi), 1n+i, b, hi, acc2)
+      +z = Laws.Shown(K.rev.pieces(acc, Nil{}))
+      +bytes = Laws.Bytes(Nat.sub(a, pos), pos)
+      +tail = Laws.Items(Nat.sub(hi, b), b, rest, 1n+i)
+      +ss2 = {K.Cut{a, b} <> rest : List<&2, K.Cut>}
+      +e1 = {
+        %Equal.sym(L, Laws.Items(Nat.sub(hi, pos), pos, ss2, i), Laws.Join(bytes, Laws.Marker{i} <> tail), m.s_fresh_short(pos, hi, a, b, rest, i, pa, ab, bh, m.cf_dup(rest, b, cr3)))
+          : {Laws.Join(Laws.Shown(K.rev.pieces(acc2, Nil{})), tail) == Laws.Join(z, _) : L}
+        %Equal.sym(L, Laws.Shown(K.rev.pieces(acc, [K.Keep{pos, a}, K.Hide{i}])), Laws.Join(z, Laws.Shown([K.Keep{pos, a}, K.Hide{i}])), m.shown_rev(acc, [K.Keep{pos, a}, K.Hide{i}]))
+          : {Laws.Join(_, tail) == Laws.Join(z, Laws.Join(bytes, Laws.Marker{i} <> tail)) : L}
+        %Equal.sym(L, Laws.Join(Laws.Join(z, Laws.Join(bytes, [Laws.Marker{i}])), tail), Laws.Join(z, Laws.Join(Laws.Join(bytes, [Laws.Marker{i}]), tail)), m.join_assoc(z, Laws.Join(bytes, [Laws.Marker{i}]), tail))
+          : {_ == Laws.Join(z, Laws.Join(bytes, Laws.Marker{i} <> tail)) : L}
+        %Equal.sym(L, Laws.Join(Laws.Join(bytes, [Laws.Marker{i}]), tail), Laws.Join(bytes, Laws.Join([Laws.Marker{i}], tail)), m.join_assoc(bytes, [Laws.Marker{i}], tail))
+          : {Laws.Join(z, _) == Laws.Join(z, Laws.Join(bytes, Laws.Marker{i} <> tail)) : L}
+        {==}
+      : {Laws.Join(Laws.Shown(K.rev.pieces(acc2, Nil{})), tail) == Laws.Join(z, Laws.Items(Nat.sub(hi, pos), pos, ss2, i)) : L}}
+      +e2 = Equal.sym(List<&2, List<&2, Laws.Item>>, Laws.MaskedParts(bs, hi, ss2, i), Laws.MaskedParts(bs, hi, rest, 1n+i), m.masked_skip(bs, hi, a, b, rest, i, bl2, bh, ab))
+      m.ok_move(r, acc2, rest, 1n+i, b, acc, ss2, i, pos, hi, bs, e1, e2,
+        m.part_ok(rest, K.starts_from(rest, hi), K.starts_from(rest, b), K.ends_by(rest, hi), 1n+i, b, hi, acc2, bs, {==}, {==}, {==},
+          m.ap_tri(rest, m.cf_apart(b, rest, cr1)), m.cf_head(b, rest, cr2), bh, q.bs_dup(bs, hi, bl1)))
+    case Con{K.Cut{+a, +b}, +rest} False{} True{} False{}:
+      (ap1, ((+ab, cr), ap3)) = app
+      -L = List<&2, Laws.Item>
+      +ah = ge_false_lt(a, hi, el)
+      +pa = ge_le(a, pos, ef)
+      +hb = q.le_false_lt(b, hi, es)
+      +z = Laws.Shown(K.rev.pieces(acc, Nil{}))
+      +bytes = Laws.Bytes(Nat.sub(a, pos), pos)
+      +ss2 = {K.Cut{a, b} <> rest : List<&2, K.Cut>}
+      +e1 = {
+        %Equal.sym(L, Laws.Items(Nat.sub(hi, pos), pos, ss2, i), Laws.Join(bytes, [Laws.Marker{i}]), m.s_fresh_long(pos, hi, a, b, rest, i, pa, ab, ah, hb, m.cf_dup(rest, b, cr)))
+          : {Laws.Shown(K.rev.pieces(K.Hide{i} <> (K.Keep{pos, a} <> acc), Nil{})) == Laws.Join(z, _) : L}
+        m.shown_rev(acc, [K.Keep{pos, a}, K.Hide{i}])
+      : {Laws.Shown(K.rev.pieces(K.Hide{i} <> (K.Keep{pos, a} <> acc), Nil{})) == Laws.Join(z, Laws.Items(Nat.sub(hi, pos), pos, ss2, i)) : L}}
+      (e1, ({==}, (ap1, hb)))
+    case Con{K.Cut{+a, +b}, +rest} False{} False{} True{}:
+      ((+ab, cr1), ((ab2, cr2), (ab3, cr3))) = app
+      (bl1, bl2) = blp
+      -L = List<&2, Laws.Item>
+      +apos = ge_false_lt(a, pos, ef)
+      +bh = es
+      +r = K.part.go(rest, K.starts_from(rest, hi), K.starts_from(rest, b), K.ends_by(rest, hi), 1n+i, b, hi, acc)
+      +z = Laws.Shown(K.rev.pieces(acc, Nil{}))
+      +ss2 = {K.Cut{a, b} <> rest : List<&2, K.Cut>}
+      +e1 = Equal.cong(L, L, l => Laws.Join(z, l), Laws.Items(Nat.sub(hi, b), b, rest, 1n+i), Laws.Items(Nat.sub(hi, pos), pos, ss2, i),
+        Equal.sym(L, Laws.Items(Nat.sub(hi, pos), pos, ss2, i), Laws.Items(Nat.sub(hi, b), b, rest, 1n+i), m.s_prog_short(pos, hi, a, b, rest, i, apos, ha, bh, ab, m.cf_dup(rest, b, cr3))))
+      +e2 = Equal.sym(List<&2, List<&2, Laws.Item>>, Laws.MaskedParts(bs, hi, ss2, i), Laws.MaskedParts(bs, hi, rest, 1n+i), m.masked_skip(bs, hi, a, b, rest, i, bl2, bh, ab))
+      m.ok_move(r, acc, rest, 1n+i, b, acc, ss2, i, pos, hi, bs, e1, e2,
+        m.part_ok(rest, K.starts_from(rest, hi), K.starts_from(rest, b), K.ends_by(rest, hi), 1n+i, b, hi, acc, bs, {==}, {==}, {==},
+          m.ap_tri(rest, m.cf_apart(b, rest, cr1)), m.cf_head(b, rest, cr2), bh, q.bs_dup(bs, hi, bl1)))
+    case Con{K.Cut{+a, +b}, +rest} False{} False{} False{}:
+      (ap1, ((ab, cr), ap3)) = app
+      -L = List<&2, Laws.Item>
+      +apos = ge_false_lt(a, pos, ef)
+      +hb = q.le_false_lt(b, hi, es)
+      +z = Laws.Shown(K.rev.pieces(acc, Nil{}))
+      +ss2 = {K.Cut{a, b} <> rest : List<&2, K.Cut>}
+      +e1 = {
+        %Equal.sym(L, Laws.Items(Nat.sub(hi, pos), pos, ss2, i), [], m.s_prog_long(pos, hi, a, b, rest, i, apos, ph, hb, m.cf_dup(rest, b, cr)))
+          : {z == Laws.Join(z, _) : L}
+        Equal.sym(L, Laws.Join(z, []), z, m.join_nil(z))
+      : {z == Laws.Join(z, Laws.Items(Nat.sub(hi, pos), pos, ss2, i)) : L}}
+      (e1, ({==}, (ap1, hb)))
+
+def m.joinp(xs: +List<List<&2, Laws.Item>>, ys: +List<List<&2, Laws.Item>>) -> List<&2, List<&2, Laws.Item>>:
+  match xs:
+    case Nil{}:
+      ys
+    case Con{x, rest}:
+      x <> m.joinp(rest, ys)
+
+def m.joinp_assoc(xs: +List<List<&2, Laws.Item>>, +ys: +List<List<&2, Laws.Item>>, +zs: +List<List<&2, Laws.Item>>) -> {m.joinp(m.joinp(xs, ys), zs) == m.joinp(xs, m.joinp(ys, zs)) : List<&2, List<&2, Laws.Item>>}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+x, +rest}:
+      %m.joinp_assoc(rest, ys, zs) : {x <> m.joinp(m.joinp(rest, ys), zs) == x <> _ : List<&2, List<&2, Laws.Item>>}
+      {==}
+
+def m.joinp_nil(xs: +List<List<&2, Laws.Item>>) -> {m.joinp(xs, []) == xs : List<&2, List<&2, Laws.Item>>}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+x, +rest}:
+      %m.joinp_nil(rest) : {x <> m.joinp(rest, []) == x <> _ : List<&2, List<&2, Laws.Item>>}
+      {==}
+
+def m.sp_rev(xs: +List<List<&2, K.Piece>>, +ys: +List<List<&2, K.Piece>>) -> {Laws.ShownParts(K.rev.parts(xs, ys)) == m.joinp(Laws.ShownParts(K.rev.parts(xs, Nil{})), Laws.ShownParts(ys)) : List<&2, List<&2, Laws.Item>>}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+x, +r}:
+      -T = List<&2, List<&2, Laws.Item>>
+      +z = Laws.ShownParts(K.rev.parts(r, Nil{}))
+      Equal.trans(T, Laws.ShownParts(K.rev.parts(r, x <> ys)), m.joinp(z, Laws.Shown(x) <> Laws.ShownParts(ys)), m.joinp(Laws.ShownParts(K.rev.parts(r, [x])), Laws.ShownParts(ys)),
+        m.sp_rev(r, x <> ys),
+        Equal.trans(T, m.joinp(z, Laws.Shown(x) <> Laws.ShownParts(ys)), m.joinp(m.joinp(z, [Laws.Shown(x)]), Laws.ShownParts(ys)), m.joinp(Laws.ShownParts(K.rev.parts(r, [x])), Laws.ShownParts(ys)),
+          Equal.sym(T, m.joinp(m.joinp(z, [Laws.Shown(x)]), Laws.ShownParts(ys)), m.joinp(z, m.joinp([Laws.Shown(x)], Laws.ShownParts(ys))), m.joinp_assoc(z, [Laws.Shown(x)], Laws.ShownParts(ys))),
+          Equal.cong(T, T, l => m.joinp(l, Laws.ShownParts(ys)), m.joinp(z, [Laws.Shown(x)]), Laws.ShownParts(K.rev.parts(r, [x])),
+            Equal.sym(T, Laws.ShownParts(K.rev.parts(r, [x])), m.joinp(z, [Laws.Shown(x)]), m.sp_rev(r, [x])))))
+
+def m.parts_ok(bs: +List<Nat>, st: K.Part, +lo: Nat, +done: +List<List<&2, K.Piece>>, +ssP: +List<K.Cut>, +iP: Nat, +loP: Nat,
+  ok: m.PartOk(st, Nil{}, ssP, iP, loP, lo, bs), blp: Laws.BsFrom(lo, bs) & Laws.BsFrom(lo, bs))
+  -> {Laws.ShownParts(K.parts.go(bs, st, lo, done)) == m.joinp(Laws.ShownParts(K.rev.parts(done, Nil{})), Laws.MaskedParts(lo <> bs, loP, ssP, iP)) : List<&2, List<&2, Laws.Item>>}:
+  match bs:
+    case Nil{}:
+      match st:
+        case K.Part{ss, i, +ps}:
+          (o1, rest) = ok
+          -T = List<&2, List<&2, Laws.Item>>
+          +z = Laws.ShownParts(K.rev.parts(done, Nil{}))
+          %o1 : {Laws.ShownParts(K.rev.parts(ps <> done, Nil{})) == m.joinp(z, [_]) : T}
+          m.sp_rev(done, [ps])
+    case Con{+hi, +rest}:
+      match st:
+        case K.Part{+ss, +i, +ps}:
+          (o1, (o2, (ap, ha))) = ok
+          ((lh, b1), (lh2, b2)) = blp
+          -T = List<&2, List<&2, Laws.Item>>
+          +z = Laws.ShownParts(K.rev.parts(done, Nil{}))
+          +st2 = K.part(ss, i, lo, hi)
+          +tailP = Laws.MaskedParts(hi <> rest, lo, ssP, iP)
+          +ih = m.parts_ok(rest, st2, hi, ps <> done, ss, i, lo,
+            m.part_ok(ss, K.starts_from(ss, hi), K.starts_from(ss, lo), K.ends_by(ss, hi), i, lo, hi, Nil{}, rest, {==}, {==}, {==}, m.ap_tri(ss, ap), ha, lh, q.bs_dup(rest, hi, b1)),
+            q.bs_dup(rest, hi, b2))
+          %o2 : {Laws.ShownParts(K.parts.go(rest, st2, hi, ps <> done)) == m.joinp(z, Laws.Items(Nat.sub(lo, loP), loP, ssP, iP) <> _) : T}
+          %o1 : {Laws.ShownParts(K.parts.go(rest, st2, hi, ps <> done)) == m.joinp(z, _ <> Laws.MaskedParts(hi <> rest, lo, ss, i)) : T}
+          Equal.trans(T, Laws.ShownParts(K.parts.go(rest, st2, hi, ps <> done)), m.joinp(Laws.ShownParts(K.rev.parts(ps <> done, Nil{})), Laws.MaskedParts(hi <> rest, lo, ss, i)), m.joinp(z, Laws.Shown(ps) <> Laws.MaskedParts(hi <> rest, lo, ss, i)),
+            ih,
+            Equal.trans(T, m.joinp(Laws.ShownParts(K.rev.parts(done, [ps])), Laws.MaskedParts(hi <> rest, lo, ss, i)), m.joinp(m.joinp(z, [Laws.Shown(ps)]), Laws.MaskedParts(hi <> rest, lo, ss, i)), m.joinp(z, Laws.Shown(ps) <> Laws.MaskedParts(hi <> rest, lo, ss, i)),
+              Equal.cong(T, T, l => m.joinp(l, Laws.MaskedParts(hi <> rest, lo, ss, i)), Laws.ShownParts(K.rev.parts(done, [ps])), m.joinp(z, [Laws.Shown(ps)]), m.sp_rev(done, [ps])),
+              m.joinp_assoc(z, [Laws.Shown(ps)], Laws.MaskedParts(hi <> rest, lo, ss, i))))
+
+def m.law.k(bs: +List<Nat>, +ss: +List<K.Cut>, sp: Laws.BsFrom(0n, bs) & Laws.BsFrom(0n, bs), cfp: Laws.CutsFrom(0n, ss) & Laws.CutsFrom(0n, ss))
+  -> {Laws.ShownParts(K.cut(bs, ss)) == Laws.MaskedParts(bs, 0n, ss, 0n) : List<&2, List<&2, Laws.Item>>}:
+  match bs:
+    case Nil{}:
+      {==}
+    case Con{+hi, +rest}:
+      ((lh, br1), (lh2, br2)) = sp
+      (c1, c2) = cfp
+      m.parts_ok(rest, K.part(ss, 0n, 0n, hi), hi, Nil{}, ss, 0n, 0n,
+        m.part_ok(ss, K.starts_from(ss, hi), K.starts_from(ss, 0n), K.ends_by(ss, hi), 0n, 0n, hi, Nil{}, rest, {==}, {==}, {==},
+          m.ap_tri(ss, m.cf_apart(0n, ss, c1)), m.cf_head(0n, ss, c2), m.le_zero_l(hi), q.bs_dup(rest, hi, br1)),
+        q.bs_dup(rest, hi, br2))
+
+def Laws.mask_keeps_each_byte_outside_findings_and_marks_each_finding_once(bs, sorted, ss, apart):
+  m.law.k(bs, ss, q.bs_dup(bs, 0n, sorted), m.cf_dup(ss, 0n, apart))

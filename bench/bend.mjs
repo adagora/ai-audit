@@ -1,6 +1,7 @@
 import { arenaOf } from "../dist/src/session.js";
 import { tokenTotals } from "../dist/src/audit.js";
-import { mergeSpans, takenAcrossParts } from "../dist/src/scan.js";
+import { mergeSpans, redactText, takenAcrossParts } from "../dist/src/scan.js";
+import { redactTextReference } from "../dist/test/maskReference.js";
 import { arenaReference } from "../dist/test/arenaReference.js";
 import { tokenTotalsReference } from "../dist/test/usageReference.js";
 import { mergeSpansReference } from "../dist/test/spanReference.js";
@@ -31,6 +32,8 @@ const two = [{ start: 3, end: 8, matchStart: 0, matchEnd: 8 }, { start: 12, end:
 row("cross-part, 2 parts, 2 spans", 100000, () => takenAcrossParts([0, 10], two), () => takenAcrossPartsReference([0, 10], two));
 const starts = Array.from({ length: 10_000 }, (_, k) => k * 40), many = Array.from({ length: 100_000 }, (_, i) => ({ start: 4 * i + 1, end: 4 * i + 3, matchStart: 4 * i, matchEnd: 4 * i + 4 + (i % 3 === 0 ? 1 : 0) }));
 row("cross-part, 100,000 spans", 3, () => takenAcrossParts(starts, many), () => takenAcrossPartsReference(starts, many));
+const page = "word ".repeat(200), found = [10, 400, 900].map((start) => ({ start, end: start + 20, matchStart: start, matchEnd: start + 20, rule: "pii-email", value: "" }));
+row("redaction, 1 KB text with 3 findings", 20000, () => redactText(page, found), () => redactTextReference(page, found));
 const calls = Array.from({ length: 200_000 }, (_, i) => ({ kind: "llm-call", upstreamStatus: 200, decision: { action: "forward-original" }, usage: i % 50 ? { input: 1000 + (i % 977), output: 200 + (i % 31) } : {} }));
 row("usage totals, 200,000 calls", 3, () => tokenTotals(calls), () => tokenTotalsReference(calls));
 

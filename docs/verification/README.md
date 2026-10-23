@@ -26,7 +26,7 @@ Real-code mutations caught by `verify:formal`: append without `withLock` (multi-
 Not modelled: attachment cache vs inspection profile (reviewed: key includes `profile.id`, profile frozen per instance; no stale path).
 
 ## Proofs in Bend 2 (ADR 0029)
-Run: `npm run verify:bend` (needs Bend 2.0.38 on PATH). Code `bend/context.bend` (token split, ADR 0017), `bend/arena.bend` (arena ages, first change and runs, ADR 0020), `bend/usage.bend` (turn tokens, the provider-cache-drop signal and report totals, ADR 0012 and ADR 0020) `bend/spans.bend` (the merge of overlapping finding spans before redaction, ADR 0007) and `bend/parts.bend` (which spans are removed from the joined text when a message has several text parts, ADR 0007), laws `bend/LAWS.bend`, proofs `bend/PROOF.bend`, runner `bend/run.sh`. The committed `src/bend/*.mjs` must match the code; `bash bend/run.sh --write` regenerates them.
+Run: `npm run verify:bend` (needs Bend 2.0.38 on PATH). Code `bend/context.bend` (token split, ADR 0017), `bend/arena.bend` (arena ages, first change and runs, ADR 0020), `bend/usage.bend` (turn tokens, the provider-cache-drop signal and report totals, ADR 0012 and ADR 0020) `bend/spans.bend` (the merge of overlapping finding spans before redaction, ADR 0007) `bend/parts.bend` (which spans are removed from the joined text when a message has several text parts, ADR 0007) and `bend/mask.bend` (which bytes of each text part the provider gets after redaction, ADR 0007), laws `bend/LAWS.bend`, proofs `bend/PROOF.bend`, runner `bend/run.sh`. The committed `src/bend/*.mjs` must match the code; `bash bend/run.sh --write` regenerates them.
 
 | Check | Expected | Result |
 |---|---|---|
@@ -35,6 +35,7 @@ Run: `npm run verify:bend` (needs Bend 2.0.38 on PATH). Code `bend/context.bend`
 | Laws in LAWS.bend: unknown input stays unknown, never 0; a provider cache drop is reported only when the previous prompt and the current cache read are known, the expected prefix is at least 1,024 tokens and the cache read is below half of it; report totals add known counts and count unknown ones apart; the fast totals loop gives the same totals | pass | ALL PROOFS CHECK |
 | Laws in LAWS.bend: when the finding spans are sorted by start, every byte inside a finding is inside a merged span; every byte inside a merged span is inside a finding; merged spans do not overlap; no span merges to nothing and one span stays as it is | pass | ALL PROOFS CHECK |
 | Laws in LAWS.bend: the result keeps every span in order; a span whose match crosses a part boundary is taken; no untaken match touches a taken span; nothing else is taken (the result is below every set with those two properties); the fast version gives the same marks | pass | ALL PROOFS CHECK |
+| Laws in LAWS.bend: for each text part, the provider gets every byte outside the findings, in order, and one marker at the first byte of each finding, and nothing else | pass | ALL PROOFS CHECK |
 | `--verdict` (Lean-checked kernel) | pass | skipped, Lean v4.34.0 not installed |
 
 Each mutant must fail `PROOF.bend`, and its counterexample in `bend/stops/` must check against the mutant and fail against the real code. A failing proof alone can come from the proof's wording; the counterexample shows that a named law rejects the mutant's output.
@@ -66,6 +67,10 @@ Each mutant must fail `PROOF.bend`, and its counterexample in `bend/stops/` must
 | over-take | every span is taken | `parts_take_no_span_that_crossings_do_not_force` | no boundary, span [0, 2) |
 | fast-skips-closure | the fast version never runs the closure | `parts_fast_version_gives_the_same_marks` | boundary 6, spans [0, 2) with match [0, 5) and [4, 8) |
 | fast-backward-blind | the fast backward pass never takes a span | `parts_fast_version_gives_the_same_marks` | boundary 6, spans [0, 2) with match [0, 5) and [4, 8) |
+| keep-into-finding | the byte after a finding's start is kept | `mask_keeps_each_byte_outside_findings_and_marks_each_finding_once` | text of 5 bytes, finding [1, 3) |
+| marker-dropped | a finding that ends inside its part gets no marker | `mask_keeps_each_byte_outside_findings_and_marks_each_finding_once` | text of 5 bytes, finding [1, 3) |
+| remark-continued | a finding that continues into the next part gets a second marker there | `mask_keeps_each_byte_outside_findings_and_marks_each_finding_once` | parts ending at 2 and 5, finding [1, 4) |
+| index-not-advanced | the second finding gets the first finding's marker | `mask_keeps_each_byte_outside_findings_and_marks_each_finding_once` | text of 6 bytes, findings [1, 2) and [3, 4) |
 
 The empty-segment counterexample fails against the earlier quota law, which allowed one more token for a whole share. The tie-to-later and smallest-first mutants satisfy the first three laws; only the fourth rejects them. An earlier `zero-remainder` mutant added 1 to every remainder; it changed 0 of 28,125 outputs and has no counterexample, so it was removed.
 
@@ -79,6 +84,8 @@ The span laws cover the step between the regex rules and `redactText`: `mergeSpa
 
 The cross-part laws cover `takenAcrossParts` in `src/scan.ts`. When an array has two or more text parts, the scanner joins them and scans the joined text; a span whose match crosses a part boundary is removed from the parts directly, and so is any span whose match touches a removed span (its regex context is gone after the removal, so a scan of one part could miss it). The other spans are left to the scan of each part. The four laws fix the result: the spans that cross are taken, the taken set is closed under "touches", and it is the smallest such set. The premises are that the boundaries are sorted and that the spans are apart and each inside its match, which `mergeSpans` and the regex groups give. Bend finds the crossing spans in one merge walk over the boundaries, with no search; the closure runs a backward and a forward pass until a round takes nothing, and the count of untaken spans bounds the rounds. In the worst case (a chain where each span touches only the one taken before it) this needs one round per span, as the TypeScript loop did: 2,000 such spans take about 60 ms in both. `test/crossParts.test.ts` replays 405 goldens captured from the TypeScript closure (`test/fixtures/cross-goldens.json`) and compares with the TypeScript kept in `test/crossReference.ts` on 20,000 generated inputs, 100,000 spans and a 300-span chain.
 
+
+The redaction law covers `redactText` and `maskParts` in `src/scan.ts`, the last step before the request leaves the proxy. Bend returns a plan for each text part: keep the bytes from one position to another, or write the marker of finding i. TypeScript only slices the text and writes `[REDACTED:rule]` for each marker. The law states the result position by position: a byte inside a finding is dropped, the first byte of each finding becomes that finding's marker, and every other byte stays, in order, in the part that holds it. A finding that continues into the next part gets no second marker. The premises are that the part ends are sorted and that the findings are sorted, apart and not empty, which `mergeSpans` and the regex groups give. With `spans_mask_every_finding_byte`, this proves the chain from a regex match to the bytes the provider gets: every byte inside a finding is inside a merged span, and no byte inside a merged span reaches the provider. `test/mask.test.ts` replays 408 goldens captured from the TypeScript (`test/fixtures/mask-goldens.json`) and compares with the TypeScript kept in `test/maskReference.ts` on 20,000 generated inputs, on 50,000 findings in one text and on 20,000 parts.
 ### Speed
 In the proxy, Bend runs as generated JavaScript, which is sequential: Bend's parallel runtime needs its native C, Metal or CUDA build. The generated loops are plain `for` loops, so most of the cost is at the boundary: each element becomes a record, an optional count becomes a `Some` or `None` object, and each list position becomes a cell; inside Bend, pure code makes a new record per step where TypeScript updates numbers in place, and each `Nat` addition checks the 2^48-1 limit. Strings are the worst case: a Bend scan of a string costs about 50 ms per MiB, 25 times a TypeScript loop, because each step slices the string. So scanning, masking and extraction stay in TypeScript (ADR 0029).
 
@@ -91,6 +98,7 @@ Where a faster form is worth it, the fast code is written next to the proved cod
 | span merge, 50,000 spans | 13 ms | 8 ms |
 | cross-part, 2 parts and 2 spans | 0.16 µs | 0.03 µs |
 | cross-part, 100,000 spans | 14 ms | 8 ms |
+| redaction, 1 KB text with 3 findings (only texts with findings) | 0.5 µs | 0.2 µs |
 | usage totals, 200,000 calls (was 18 ms) | 6 ms | 5 ms |
 
 For a 200-message request, all Bend calls together take about 20 µs, against about 9 ms for `inspect()`.

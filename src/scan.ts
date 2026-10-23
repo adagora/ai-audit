@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import BendMask from "./bend/mask.mjs";
 import BendParts from "./bend/parts.mjs";
 import BendSpans from "./bend/spans.mjs";
 import { bendList, bendListOf, fromBendList, type BendList } from "./context.js";
@@ -138,8 +139,12 @@ export function mergeSpans(text: string, spans: Span[]): Span[] {
   });
 }
 
-export const redactText = (text: string, spans: Span[]) =>
-  spans.map((s, i) => `${text.slice(i ? spans[i - 1].end : 0, s.start)}[REDACTED:${s.rule}]`).join("") + text.slice(spans.at(-1)?.end ?? 0);
+type BendPiece = { $: "Keep"; from: number; to: number } | { $: "Hide"; i: number };
+const maskPlan = (ends: number[], spans: Span[]) =>
+  fromBendList(BendMask.cut(bendList(ends), bendListOf(spans, (s) => ({ $: "Cut", start: s.start, end: s.end }))) as BendList<BendList<BendPiece>>).map((p) => fromBendList(p));
+const assemble = (joined: string, pieces: BendPiece[], spans: Span[]) => pieces.map((p) => (p.$ === "Keep" ? joined.slice(p.from, p.to) : `[REDACTED:${spans[p.i].rule}]`)).join("");
+
+export const redactText = (text: string, spans: Span[]) => assemble(text, maskPlan([text.length], spans)[0], spans);
 
 const MASKING_PASSES = 4;
 const isPayload = (s: string) => /^data:[\w.+-]+\/[\w.+-]+(?:;[^,]*)?;base64,/.test(s);
@@ -203,17 +208,9 @@ export const takenAcrossParts = (starts: number[], spans: SpanRange[]): boolean[
   fromBendList(BendParts["taken.fast"](bendList(starts.slice(1)), bendListOf(spans, (s) => ({ $: "Span", start: s.start, end: s.end, ms: s.matchStart, me: s.matchEnd }))) as BendList<{ t: boolean }>).map((m) => m.t);
 
 export function maskParts(texts: string[], spans: Span[]): string[] {
-  const starts: number[] = []; let total = 0; texts.forEach((t) => { starts.push(total); total += t.length; });
-  const part = (pos: number) => lastWhere(starts.length, (k) => starts[k] <= pos);
-  const next = texts.slice();
-  for (const s of [...spans].reverse()) {
-    const a = part(s.start), b = part(s.end - 1);
-    for (let k = b; k >= a; k--) {
-      const from = Math.max(s.start - starts[k], 0), to = Math.min(s.end - starts[k], texts[k].length);
-      next[k] = next[k].slice(0, from) + (k === a ? `[REDACTED:${s.rule}]` : "") + next[k].slice(to);
-    }
-  }
-  return next;
+  const ends: number[] = []; let total = 0; texts.forEach((t) => ends.push((total += t.length)));
+  const joined = texts.join("");
+  return maskPlan(ends, spans).map((pieces) => assemble(joined, pieces, spans));
 }
 
 function joinParts(arr: unknown[], carnet: Allowlist | undefined, path: string, findings: Finding[]): unknown[] {

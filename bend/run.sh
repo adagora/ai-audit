@@ -7,7 +7,7 @@ found=$("$BEND" version 2>/dev/null)
 [ "$found" = "bend $BEND_VERSION" ] || { echo "FAIL need bend $BEND_VERSION, found '${found:-no bend}'"; exit 1; }
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 rc=0; ran=""
-MODULES="context arena usage spans parts"
+MODULES="context arena usage spans parts mask"
 
 verdict() {
   if (cd "$1" && "$BEND" "$2" 2>&1) | grep -qx "ALL PROOFS CHECK"; then echo pass; else echo fail; fi
@@ -70,6 +70,10 @@ mutant touch-ignored parts 's/near\.at\(s, at, grew, acc, after\(at, s\)\)/near.
 mutant over-take parts 's/Bool\.or\(above\(k, c\), below\(bs, d\)\)/True{}/'
 mutant fast-skips-closure parts 's/close\.fast\(r, any_taken\(r\)\)/close.fast(r, False{})/'
 mutant fast-backward-blind parts 's/\n      after\(at, s\)\n/\n      False{}\n/'
+mutant keep-into-finding mask 's/Hide\{i\} <> \(Keep\{pos, a\} <> acc\)/Hide{i} <> (Keep{pos, 1n+a} <> acc)/'
+mutant marker-dropped mask 's/1n\+i, b, hi, Hide\{i\} <> \(Keep\{pos, a\} <> acc\)\)/1n+i, b, hi, Keep{pos, a} <> acc)/'
+mutant remark-continued mask 's/1n\+i, b, hi, acc\)/1n+i, b, hi, Hide{i} <> acc)/'
+mutant index-not-advanced mask 's/1n\+i, b, hi, Hide\{i\}/i, b, hi, Hide{i}/'
 for f in stops/*.bend; do case "$ran" in *" $(basename "$f" .bend) "*) ;; *) echo "FAIL $f has no mutant"; rc=1;; esac; done
 
 if command -v lean >/dev/null 2>&1; then
