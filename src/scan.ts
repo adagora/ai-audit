@@ -202,6 +202,20 @@ export type SpanRange = Pick<Span, "start" | "end" | "matchStart" | "matchEnd">;
 export const takenAcrossParts = (starts: number[], spans: SpanRange[]): boolean[] =>
   fromBendList(BendParts["taken.fast"](bendList(starts.slice(1)), bendListOf(spans, (s) => ({ $: "Span", start: s.start, end: s.end, ms: s.matchStart, me: s.matchEnd }))) as BendList<{ t: boolean }>).map((m) => m.t);
 
+export function maskParts(texts: string[], spans: Span[]): string[] {
+  const starts: number[] = []; let total = 0; texts.forEach((t) => { starts.push(total); total += t.length; });
+  const part = (pos: number) => lastWhere(starts.length, (k) => starts[k] <= pos);
+  const next = texts.slice();
+  for (const s of [...spans].reverse()) {
+    const a = part(s.start), b = part(s.end - 1);
+    for (let k = b; k >= a; k--) {
+      const from = Math.max(s.start - starts[k], 0), to = Math.min(s.end - starts[k], texts[k].length);
+      next[k] = next[k].slice(0, from) + (k === a ? `[REDACTED:${s.rule}]` : "") + next[k].slice(to);
+    }
+  }
+  return next;
+}
+
 function joinParts(arr: unknown[], carnet: Allowlist | undefined, path: string, findings: Finding[]): unknown[] {
   const idx: number[] = [], texts: string[] = [];
   arr.forEach((x: any, i) => { const t = typeof x === "string" ? x : x && typeof x === "object" && typeof x.text === "string" ? x.text : undefined; if (t !== undefined && !isPayload(t)) { idx.push(i); texts.push(t); } });
@@ -211,14 +225,10 @@ function joinParts(arr: unknown[], carnet: Allowlist | undefined, path: string, 
   const spans = scanText(joined, carnet), taken = takenAcrossParts(starts, spans);
   const cross = spans.filter((_, i) => taken[i]);
   if (!cross.length) return arr;
-  const out = arr.slice(), next = texts.slice();
+  const out = arr.slice(), next = maskParts(texts, cross);
   for (const s of cross.reverse()) {
-    const a = part(s.start), b = part(s.end - 1), first = idx[part(s.matchStart)], last = idx[part(s.matchEnd - 1)];
+    const first = idx[part(s.matchStart)], last = idx[part(s.matchEnd - 1)];
     findings.push({ rule: s.rule, path: first === last ? `${path}[${first}]` : `${path}[${first}..${last}]` });
-    for (let k = b; k >= a; k--) {
-      const from = Math.max(s.start - starts[k], 0), to = Math.min(s.end - starts[k], texts[k].length);
-      next[k] = next[k].slice(0, from) + (k === a ? `[REDACTED:${s.rule}]` : "") + next[k].slice(to);
-    }
   }
   idx.forEach((i, k) => { out[i] = typeof out[i] === "string" ? next[k] : { ...(out[i] as object), text: next[k] }; });
   return out;
