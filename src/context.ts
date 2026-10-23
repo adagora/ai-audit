@@ -123,10 +123,16 @@ export function promptTokens(api: Api, usage: Usage | undefined): number | undef
 
 export const BEND_NAT_MAX = 2 ** 48 - 1;
 export type BendList<T> = { $: "Nil" } | { $: "Con"; head: T; tail: BendList<T> };
-export const bendList = <T>(xs: T[]) => xs.reduceRight<BendList<T>>((tail, head) => ({ $: "Con", head, tail }), { $: "Nil" });
+export const bendListOf = <T, U>(xs: readonly T[], f: (x: T, i: number) => U): BendList<U> => {
+  let list: BendList<U> = { $: "Nil" };
+  for (let i = xs.length - 1; i >= 0; i--) list = { $: "Con", head: f(xs[i], i), tail: list };
+  return list;
+};
+export const bendList = <T>(xs: readonly T[]) => bendListOf(xs, (x) => x);
 export const fromBendList = <T>(list: BendList<T>) => { const out: T[] = []; for (let l = list; l.$ === "Con"; l = l.tail) out.push(l.head); return out; };
 export type BendMaybe<T> = { $: "None" } | { $: "Some"; value: T };
-export const bendCount = (v: unknown): BendMaybe<number> => { const n = tokenCount(v); return n !== undefined && n <= BEND_NAT_MAX ? { $: "Some", value: n } : { $: "None" }; };
+const BEND_NONE: BendMaybe<never> = Object.freeze({ $: "None" });
+export const bendCount = (v: unknown): BendMaybe<number> => { const n = tokenCount(v); return n !== undefined && n <= BEND_NAT_MAX ? { $: "Some", value: n } : BEND_NONE; };
 export const fromBendMaybe = <T>(m: BendMaybe<T>) => (m.$ === "Some" ? m.value : null);
 
 export function scaleToProvider(c: ContextComposition, providerPromptTokens: number | undefined): ContextComposition {
@@ -134,7 +140,7 @@ export function scaleToProvider(c: ContextComposition, providerPromptTokens: num
   const scaled = SEGMENTS.filter((s) => s !== "other");
   const textBytes = scaled.reduce((a, s) => a + c.bytes[s], 0);
   if (textBytes === 0 || providerPromptTokens * textBytes > BEND_NAT_MAX) return c;
-  const split = fromBendList<number>(Bend.split(providerPromptTokens, bendList(scaled.map((s) => c.bytes[s]))));
+  const split = fromBendList<number>(Bend.split(providerPromptTokens, bendListOf(scaled, (s) => c.bytes[s])));
   const tokens = Object.fromEntries(SEGMENTS.map((s) => [s, 0])) as Record<Segment, number>;
   scaled.forEach((s, i) => (tokens[s] = split[i]));
   return { ...c, tokens, tokenBasis: "provider-scaled" };

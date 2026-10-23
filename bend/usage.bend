@@ -101,3 +101,15 @@ def totals.go(cs: +List<Call>, t: Totals) -> Totals:
 
 def totals(cs: +List<Call>) -> Totals:
   totals.go(cs, Totals{0n, 0n, 0n, 0n, 0n})
+
+def totals.fast.go(cs: +List<Call>, ti: Nat, to: Nat, ui: Nat, uo: Nat, uu: Nat) -> Totals:
+  match cs:
+    case Nil{}:
+      Totals{ti, to, ui, uo, uu}
+    case Call{False{}, i, o} <> rest:
+      totals.fast.go(rest, ti, to, ui, uo, uu)
+    case Call{True{}, +i, +o} <> rest:
+      totals.fast.go(rest, Nat.add(ti, or0(i)), Nat.add(to, or0(o)), Nat.add(ui, unknown(i)), Nat.add(uo, unknown(o)), Nat.add(uu, unknown2(i, o)))
+
+def totals.fast(cs: +List<Call>) -> Totals:
+  totals.fast.go(cs, 0n, 0n, 0n, 0n, 0n)

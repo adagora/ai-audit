@@ -609,3 +609,64 @@ law parts_fast_version_gives_the_same_marks:
   for +bs: +List<Nat>
   for +ss: +List<P.Span>
   {P.taken.fast(bs, ss) == P.taken(bs, ss) : List<&2, P.Mark>}
+
+law spans_merge_of_no_span_is_empty:
+  {S.merge([]) == [] : List<&2, S.Group>}
+
+law spans_merge_of_one_span_keeps_it:
+  for +a: Nat
+  for +b: Nat
+  for +c: Nat
+  for +d: Nat
+  for +i: Nat
+  {S.merge([S.Raw{a, b, c, d, i}]) == [S.Group{a, b, c, d, i, False{}}] : List<&2, S.Group>}
+
+law usage_fast_totals_match_the_spec:
+  for +cs: +List<U.Call>
+  {U.totals.fast(cs) == U.totals(cs) : U.Totals}
+
+def PosSeen(ps: +List<A.Seen>, +i: Nat) -> List<&2, A.Seen>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case A.Seen{h, a} <> rest:
+      A.Seen{Nat.add(i, i), a} <> PosSeen(rest, 1n+i)
+
+def PosHash(e: Bool, +i: Nat) -> Nat:
+  match e:
+    case True{}:
+      Nat.add(i, i)
+    case False{}:
+      1n+Nat.add(i, i)
+
+def PosBlocks(bs: +List<A.Block>, ps: +List<A.Seen>, +i: Nat) -> List<&2, A.Block>:
+  match bs:
+    case Nil{}:
+      Nil{}
+    case A.Block{g, k, n} <> bt:
+      match ps:
+        case Nil{}:
+          A.Block{1n+Nat.add(i, i), k, n} <> PosBlocks(bt, Nil{}, 1n+i)
+        case A.Seen{h, a} <> pt:
+          A.Block{PosHash(Nat.is_eq(h, g), i), k, n} <> PosBlocks(bt, pt, 1n+i)
+
+def PosPrev(prev: A.Prev) -> A.Prev:
+  match prev:
+    case A.Fresh{}:
+      A.Fresh{}
+    case A.Known{ps}:
+      A.Known{PosSeen(ps, 0n)}
+
+def PosBlocksOf(prev: A.Prev, bs: +List<A.Block>) -> List<&2, A.Block>:
+  match prev:
+    case A.Fresh{}:
+      PosBlocks(bs, Nil{}, 0n)
+    case A.Known{ps}:
+      PosBlocks(bs, ps, 0n)
+
+law arena_reads_hashes_only_position_by_position:
+  for +prev: A.Prev
+  for +bs: +List<A.Block>
+  for +turn: Nat
+  for +tracked: Bool
+  {A.arena(PosPrev(prev), PosBlocksOf(prev, bs), turn, tracked) == A.arena(prev, bs, turn, tracked) : A.Arena}

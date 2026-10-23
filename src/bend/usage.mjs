@@ -313,6 +313,55 @@ function $totals(_cs_0) {
   return $totals_go(_cs_0, {$: "Totals", "input": 0, "output": 0, "unknownInput": 0, "unknownOutput": 0, "unknownUsage": 0});
 }
 
+function $totals_fast_go($0, $1, $2, $3, $4, $5) {
+  for (;;) {
+    {
+      const _cs_0 = $0;
+      const _ti_0 = $1;
+      const _to_0 = $2;
+      const _ui_0 = $3;
+      const _uo_0 = $4;
+      const _uu_0 = $5;
+      if (_cs_0.$ === "Nil") {
+        return {$: "Totals", "input": _ti_0, "output": _to_0, "unknownInput": _ui_0, "unknownOutput": _uo_0, "unknownUsage": _uu_0};
+      } else {
+        const _t_0 = _cs_0["head"];
+        const _t_1 = _t_0["billed"];
+        if (!_t_1) {
+          const _rest_0 = _cs_0["tail"];
+          $0 = _rest_0;
+          $1 = _ti_0;
+          $2 = _to_0;
+          $3 = _ui_0;
+          $4 = _uo_0;
+          $5 = _uu_0;
+          continue;
+        } else {
+          const _i_1 = _t_0["input"];
+          const _o_1 = _t_0["output"];
+          const _rest_1 = _cs_0["tail"];
+          const _x_0 = ($or0(_i_1));
+          const _x_1 = ($or0(_o_1));
+          const _x_2 = ($unknown(_i_1));
+          const _x_3 = ($unknown(_o_1));
+          const _x_4 = ($unknown2(_i_1, _o_1));
+          $0 = _rest_1;
+          $1 = nat_chk(_ti_0 + _x_0);
+          $2 = nat_chk(_to_0 + _x_1);
+          $3 = nat_chk(_ui_0 + _x_2);
+          $4 = nat_chk(_uo_0 + _x_3);
+          $5 = nat_chk(_uu_0 + _x_4);
+          continue;
+        }
+      }
+    }
+  }
+}
+
+function $totals_fast(_cs_0) {
+  return $totals_fast_go(_cs_0, 0, 0, 0, 0, 0);
+}
+
 function $Bool_and(_a_0, _b_0) {
   if (!_a_0) {
     return false;
@@ -345,4 +394,6 @@ export default {
   "add.call": run_lib((a0,a1) => run_loop($add_call(a0,a1)), 2),
   "totals.go": run_lib((a0,a1) => run_loop($totals_go(a0,a1)), 2),
   "totals": run_lib((a0) => run_loop($totals(a0)), 1),
+  "totals.fast.go": run_lib((a0,a1,a2,a3,a4,a5) => run_loop($totals_fast_go(a0,nat_in(a1),nat_in(a2),nat_in(a3),nat_in(a4),nat_in(a5))), 6),
+  "totals.fast": run_lib((a0) => run_loop($totals_fast(a0)), 1),
 };

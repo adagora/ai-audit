@@ -2,7 +2,7 @@ import { createHmac, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import type { Api } from "./extract.js";
 import BendArena from "./bend/arena.mjs";
-import { bendList, fromBendList, KIND_CODES, SEGMENTS, type ArenaBlock, type BendList, type ContextBlock } from "./context.js";
+import { bendListOf, fromBendList, KIND_CODES, SEGMENTS, type ArenaBlock, type BendList, type ContextBlock } from "./context.js";
 
 export interface FirstChanged { block: number; offset: number }
 export interface SessionLink { id: string; turn: number; digest: string; parent: string | null; messages: number; firstChanged?: FirstChanged | null; arena?: "tracked" | "untracked" }
@@ -40,12 +40,12 @@ export function conversationItems(api: Api, body: any): unknown[] | undefined {
 }
 
 type BendRun = { kind: number; bytes: number; age: number };
+const SEGMENT_INDEX = Object.fromEntries(SEGMENTS.map((s, i) => [s, i])) as Record<SizedBlock["kind"], number>;
 type BendFirst = { $: "None" } | { $: "Some"; value: FirstChanged };
 
 export function arenaOf(previous: ArenaState | undefined, hashes: string[], blocks: SizedBlock[], turn: number, tracked: boolean): { state: ArenaState; arena: Arena } {
-  const ids = new Map<string, number>(), id = (h: string) => { let v = ids.get(h); if (v === undefined) ids.set(h, (v = ids.size)); return v; };
-  const prev = previous ? { $: "Known", seen: bendList(previous.hashes.map((h, i) => ({ $: "Seen", hash: id(h), age: previous.ages[i] }))) } : { $: "Fresh" };
-  const out = BendArena.arena(prev, bendList(blocks.map((b, i) => ({ $: "Block", hash: id(hashes[i]), kind: SEGMENTS.indexOf(b.kind), bytes: b.bytes }))), turn, tracked);
+  const prev = previous ? { $: "Known", seen: bendListOf(previous.hashes, (_h, i) => ({ $: "Seen", hash: 2 * i, age: previous.ages[i] })) } : { $: "Fresh" };
+  const out = BendArena.arena(prev, bendListOf(blocks, (b, i) => ({ $: "Block", hash: previous?.hashes[i] === hashes[i] ? 2 * i : 2 * i + 1, kind: SEGMENT_INDEX[b.kind], bytes: b.bytes })), turn, tracked);
   const first = out.first as BendFirst, firstChanged = first.$ === "Some" ? { block: first.value.block, offset: first.value.offset } : null;
   const runs = fromBendList(out.runs as BendList<BendRun>).map((r): ArenaBlock => [KIND_CODES[SEGMENTS[r.kind]], r.bytes, r.age]);
   return { state: { hashes, ages: fromBendList(out.ages as BendList<number>) }, arena: { blocks: runs, firstChanged, tracked } };

@@ -4479,3 +4479,193 @@ def Laws.parts_fast_version_gives_the_same_marks(bs, ss):
   +r = P.walk.go(ss, P.Walk{Nil{}, bs, Nil{}})
   q.close_fast_eq(r, P.any_taken(r), {==})
 
+
+def Laws.spans_merge_of_no_span_is_empty():
+  {==}
+
+def Laws.spans_merge_of_one_span_keeps_it(a, b, c, d, i):
+  {==}
+
+def q.totals_fast_eq(cs: +List<U.Call>, +ti: Nat, +to: Nat, +ui: Nat, +uo: Nat, +uu: Nat)
+  -> {U.totals.fast.go(cs, ti, to, ui, uo, uu) == U.totals.go(cs, U.Totals{ti, to, ui, uo, uu}) : U.Totals}:
+  match cs:
+    case Nil{}:
+      {==}
+    case Con{U.Call{False{}, i, o}, +rest}:
+      q.totals_fast_eq(rest, ti, to, ui, uo, uu)
+    case Con{U.Call{True{}, +i, +o}, +rest}:
+      q.totals_fast_eq(rest, Nat.add(ti, U.or0(i)), Nat.add(to, U.or0(o)), Nat.add(ui, U.unknown(i)), Nat.add(uo, U.unknown(o)), Nat.add(uu, U.unknown2(i, o)))
+
+def Laws.usage_fast_totals_match_the_spec(cs):
+  q.totals_fast_eq(cs, 0n, 0n, 0n, 0n, 0n)
+
+def ar.eq_refl(n: Nat) -> {Nat.is_eq(n, n) == True{} : Bool}:
+  match n:
+    case 0n:
+      {==}
+    case 1n+p:
+      ar.eq_refl(p)
+
+def ar.eq_next(n: Nat) -> {Nat.is_eq(n, 1n+n) == False{} : Bool}:
+  match n:
+    case 0n:
+      {==}
+    case 1n+p:
+      ar.eq_next(p)
+
+def ar.pos_hash(e: Bool, +i: Nat) -> {Nat.is_eq(Nat.add(i, i), Laws.PosHash(e, i)) == e : Bool}:
+  match e:
+    case True{}:
+      ar.eq_refl(Nat.add(i, i))
+    case False{}:
+      ar.eq_next(Nat.add(i, i))
+
+def ar.same_pos(ps: +List<A.Seen>, bs: +List<A.Block>, +i: Nat) -> {A.same(Laws.PosSeen(ps, i), Laws.PosBlocks(bs, ps, i)) == A.same(ps, bs) : Bool}:
+  match ps bs:
+    case Nil{} Nil{}:
+      {==}
+    case Nil{} Con{A.Block{g, k, n}, bt}:
+      {==}
+    case Con{A.Seen{h, a}, pt} Nil{}:
+      {==}
+    case Con{A.Seen{+h, a}, pt} Con{A.Block{+g, k, n}, bt}:
+      ar.pos_hash(Nat.is_eq(h, g), i)
+
+def ar.first_pos(ps: +List<A.Seen>, bs: +List<A.Block>, e: Bool, +j: Nat, +off: Nat, +i: Nat)
+  -> {A.first.go(Laws.PosSeen(ps, i), Laws.PosBlocks(bs, ps, i), e, j, off) == A.first.go(ps, bs, e, j, off) : Maybe<&2, A.First>}:
+  match ps bs e:
+    case Nil{} _ _:
+      {==}
+    case Con{A.Seen{h, a}, pt} Nil{} _:
+      {==}
+    case Con{A.Seen{h, a}, +pt} Con{A.Block{g, k, +n}, +bt} True{}:
+      %Equal.sym(Bool, A.same(Laws.PosSeen(pt, 1n+i), Laws.PosBlocks(bt, pt, 1n+i)), A.same(pt, bt), ar.same_pos(pt, bt, 1n+i)) : {A.first.go(Laws.PosSeen(pt, 1n+i), Laws.PosBlocks(bt, pt, 1n+i), _, 1n+j, Nat.add(off, n)) == A.first.go(pt, bt, A.same(pt, bt), 1n+j, Nat.add(off, n)) : Maybe<&2, A.First>}
+      ar.first_pos(pt, bt, A.same(pt, bt), 1n+j, Nat.add(off, n), 1n+i)
+    case Con{A.Seen{h, a}, pt} Con{A.Block{g, k, n}, bt} False{}:
+      {==}
+
+def ar.strip(bs: +List<A.Block>) -> List<&2, A.Block>:
+  match bs:
+    case Nil{}:
+      Nil{}
+    case A.Block{g, k, n} <> bt:
+      A.Block{0n, k, n} <> ar.strip(bt)
+
+def ar.strip_pos(bs: +List<A.Block>, ps: +List<A.Seen>, +i: Nat) -> {ar.strip(Laws.PosBlocks(bs, ps, i)) == ar.strip(bs) : List<&2, A.Block>}:
+  match bs ps:
+    case Nil{} _:
+      {==}
+    case Con{A.Block{g, +k, +n}, +bt} Nil{}:
+      %ar.strip_pos(bt, Nil{}, 1n+i) : {A.Block{0n, k, n} <> ar.strip(Laws.PosBlocks(bt, Nil{}, 1n+i)) == A.Block{0n, k, n} <> _ : List<&2, A.Block>}
+      {==}
+    case Con{A.Block{g, +k, +n}, +bt} Con{A.Seen{h, a}, +pt}:
+      %ar.strip_pos(bt, pt, 1n+i) : {A.Block{0n, k, n} <> ar.strip(Laws.PosBlocks(bt, pt, 1n+i)) == A.Block{0n, k, n} <> _ : List<&2, A.Block>}
+      {==}
+
+def ar.fill_strip(bs: +List<A.Block>, +age: Nat, +acc: +List<Nat>) -> {A.fill(bs, age, acc) == A.fill(ar.strip(bs), age, acc) : List<&2, Nat>}:
+  match bs:
+    case Nil{}:
+      {==}
+    case Con{A.Block{g, k, n}, +bt}:
+      ar.fill_strip(bt, age, age <> acc)
+
+def ar.fill_pos(+bs: +List<A.Block>, +ps: +List<A.Seen>, +i: Nat, +age: Nat, +acc: +List<Nat>) -> {A.fill(Laws.PosBlocks(bs, ps, i), age, acc) == A.fill(bs, age, acc) : List<&2, Nat>}:
+  +pb = Laws.PosBlocks(bs, ps, i)
+  Equal.trans(List<&2, Nat>, A.fill(pb, age, acc), A.fill(ar.strip(pb), age, acc), A.fill(bs, age, acc), ar.fill_strip(pb, age, acc),
+    Equal.trans(List<&2, Nat>, A.fill(ar.strip(pb), age, acc), A.fill(ar.strip(bs), age, acc), A.fill(bs, age, acc),
+      Equal.cong(List<&2, A.Block>, List<&2, Nat>, x => A.fill(x, age, acc), ar.strip(pb), ar.strip(bs), ar.strip_pos(bs, ps, i)),
+      Equal.sym(List<&2, Nat>, A.fill(bs, age, acc), A.fill(ar.strip(bs), age, acc), ar.fill_strip(bs, age, acc))))
+
+def ar.ages_pos(ps: +List<A.Seen>, bs: +List<A.Block>, e: Bool, +turn: Nat, +acc: +List<Nat>, +i: Nat)
+  -> {A.ages.go(Laws.PosSeen(ps, i), Laws.PosBlocks(bs, ps, i), e, turn, acc) == A.ages.go(ps, bs, e, turn, acc) : List<&2, Nat>}:
+  match ps bs e:
+    case Nil{} _ _:
+      ar.fill_pos(bs, Nil{}, i, turn, acc)
+    case Con{A.Seen{h, a}, pt} Nil{} _:
+      {==}
+    case Con{A.Seen{h, +a}, +pt} Con{A.Block{g, k, n}, +bt} True{}:
+      %Equal.sym(Bool, A.same(Laws.PosSeen(pt, 1n+i), Laws.PosBlocks(bt, pt, 1n+i)), A.same(pt, bt), ar.same_pos(pt, bt, 1n+i)) : {A.ages.go(Laws.PosSeen(pt, 1n+i), Laws.PosBlocks(bt, pt, 1n+i), _, turn, a <> acc) == A.ages.go(pt, bt, A.same(pt, bt), turn, a <> acc) : List<&2, Nat>}
+      ar.ages_pos(pt, bt, A.same(pt, bt), turn, a <> acc, 1n+i)
+    case Con{A.Seen{+h, +a}, +pt} Con{A.Block{+g, +k, +n}, +bt} False{}:
+      ar.fill_pos(A.Block{g, k, n} <> bt, A.Seen{h, a} <> pt, i, turn, acc)
+
+def ar.ages_top(prev: A.Prev, +bs: +List<A.Block>, +turn: Nat, tracked: Bool) -> {A.ages(Laws.PosPrev(prev), Laws.PosBlocksOf(prev, bs), turn, tracked) == A.ages(prev, bs, turn, tracked) : List<&2, Nat>}:
+  match prev tracked:
+    case A.Fresh{} True{}:
+      ar.fill_pos(bs, Nil{}, 0n, turn, Nil{})
+    case A.Fresh{} False{}:
+      ar.fill_pos(bs, Nil{}, 0n, 0n, Nil{})
+    case A.Known{+ps} _:
+      %Equal.sym(Bool, A.same(Laws.PosSeen(ps, 0n), Laws.PosBlocks(bs, ps, 0n)), A.same(ps, bs), ar.same_pos(ps, bs, 0n)) : {A.ages.go(Laws.PosSeen(ps, 0n), Laws.PosBlocks(bs, ps, 0n), _, turn, Nil{}) == A.ages.go(ps, bs, A.same(ps, bs), turn, Nil{}) : List<&2, Nat>}
+      ar.ages_pos(ps, bs, A.same(ps, bs), turn, Nil{}, 0n)
+
+def ar.first_top(prev: A.Prev, +bs: +List<A.Block>) -> {A.first(Laws.PosPrev(prev), Laws.PosBlocksOf(prev, bs)) == A.first(prev, bs) : Maybe<&2, A.First>}:
+  match prev:
+    case A.Fresh{}:
+      {==}
+    case A.Known{+ps}:
+      %Equal.sym(Bool, A.same(Laws.PosSeen(ps, 0n), Laws.PosBlocks(bs, ps, 0n)), A.same(ps, bs), ar.same_pos(ps, bs, 0n)) : {A.first.go(Laws.PosSeen(ps, 0n), Laws.PosBlocks(bs, ps, 0n), _, 0n, 0n) == A.first.go(ps, bs, A.same(ps, bs), 0n, 0n) : Maybe<&2, A.First>}
+      ar.first_pos(ps, bs, A.same(ps, bs), 0n, 0n, 0n)
+
+def ar.joins_strip(bs: +List<A.Block>, ags: +List<Nat>, c: A.Cut, +acc: +List<A.Run>) -> {A.joins(bs, ags, c, acc) == A.joins(ar.strip(bs), ags, c, acc) : Bool}:
+  match bs ags c:
+    case Nil{} _ _:
+      {==}
+    case Con{A.Block{g, k, n}, bt} Nil{} _:
+      {==}
+    case Con{A.Block{g, k, n}, bt} Con{a, at} A.NoCut{}:
+      {==}
+    case Con{A.Block{g, k, n}, bt} Con{a, at} A.CutIn{m}:
+      match m:
+        case 0n:
+          {==}
+        case 1n+d:
+          {==}
+
+def ar.runs_strip(bs: +List<A.Block>, ags: +List<Nat>, +c: A.Cut, +acc: +List<A.Run>, j: Bool) -> {A.runs.go(bs, ags, c, acc, j) == A.runs.go(ar.strip(bs), ags, c, acc, j) : List<&2, A.Run>}:
+  match bs ags j:
+    case Nil{} _ _:
+      {==}
+    case Con{A.Block{g, k, n}, bt} Nil{} _:
+      {==}
+    case Con{A.Block{g, +k, +n}, +bt} Con{+a, +at} True{}:
+      +c2 = A.cut.next(c)
+      +acc2 = A.grow(acc, n)
+      %Equal.sym(Bool, A.joins(bt, at, c2, acc2), A.joins(ar.strip(bt), at, c2, acc2), ar.joins_strip(bt, at, c2, acc2)) : {A.runs.go(bt, at, c2, acc2, _) == A.runs.go(ar.strip(bt), at, c2, acc2, A.joins(ar.strip(bt), at, c2, acc2)) : List<&2, A.Run>}
+      ar.runs_strip(bt, at, c2, acc2, A.joins(ar.strip(bt), at, c2, acc2))
+    case Con{A.Block{g, +k, +n}, +bt} Con{+a, +at} False{}:
+      +c2 = A.cut.next(c)
+      +acc2 = A.push(k, n, a, acc)
+      %Equal.sym(Bool, A.joins(bt, at, c2, acc2), A.joins(ar.strip(bt), at, c2, acc2), ar.joins_strip(bt, at, c2, acc2)) : {A.runs.go(bt, at, c2, acc2, _) == A.runs.go(ar.strip(bt), at, c2, acc2, A.joins(ar.strip(bt), at, c2, acc2)) : List<&2, A.Run>}
+      ar.runs_strip(bt, at, c2, acc2, A.joins(ar.strip(bt), at, c2, acc2))
+
+def ar.runs_eq(+bs: +List<A.Block>, +ags: +List<Nat>, +f: Maybe<&2, A.First>) -> {A.runs(bs, ags, f) == A.runs(ar.strip(bs), ags, f) : List<&2, A.Run>}:
+  +c = A.cut.of(f)
+  %Equal.sym(Bool, A.joins(bs, ags, c, Nil{}), A.joins(ar.strip(bs), ags, c, Nil{}), ar.joins_strip(bs, ags, c, Nil{})) : {A.runs.go(bs, ags, c, Nil{}, _) == A.runs.go(ar.strip(bs), ags, c, Nil{}, A.joins(ar.strip(bs), ags, c, Nil{})) : List<&2, A.Run>}
+  ar.runs_strip(bs, ags, c, Nil{}, A.joins(ar.strip(bs), ags, c, Nil{}))
+
+def ar.runs_pos(+bs: +List<A.Block>, +ps: +List<A.Seen>, +i: Nat, +ags: +List<Nat>, +f: Maybe<&2, A.First>) -> {A.runs(Laws.PosBlocks(bs, ps, i), ags, f) == A.runs(bs, ags, f) : List<&2, A.Run>}:
+  +pb = Laws.PosBlocks(bs, ps, i)
+  Equal.trans(List<&2, A.Run>, A.runs(pb, ags, f), A.runs(ar.strip(pb), ags, f), A.runs(bs, ags, f), ar.runs_eq(pb, ags, f),
+    Equal.trans(List<&2, A.Run>, A.runs(ar.strip(pb), ags, f), A.runs(ar.strip(bs), ags, f), A.runs(bs, ags, f),
+      Equal.cong(List<&2, A.Block>, List<&2, A.Run>, x => A.runs(x, ags, f), ar.strip(pb), ar.strip(bs), ar.strip_pos(bs, ps, i)),
+      Equal.sym(List<&2, A.Run>, A.runs(bs, ags, f), A.runs(ar.strip(bs), ags, f), ar.runs_eq(bs, ags, f))))
+
+def ar.runs_top(prev: A.Prev, +bs: +List<A.Block>, +ags: +List<Nat>, +f: Maybe<&2, A.First>) -> {A.runs(Laws.PosBlocksOf(prev, bs), ags, f) == A.runs(bs, ags, f) : List<&2, A.Run>}:
+  match prev:
+    case A.Fresh{}:
+      ar.runs_pos(bs, Nil{}, 0n, ags, f)
+    case A.Known{+ps}:
+      ar.runs_pos(bs, ps, 0n, ags, f)
+
+def Laws.arena_reads_hashes_only_position_by_position(prev, bs, turn, tracked):
+  +pp = Laws.PosPrev(prev)
+  +pb = Laws.PosBlocksOf(prev, bs)
+  +ag1 = A.ages(pp, pb, turn, tracked)
+  +ag0 = A.ages(prev, bs, turn, tracked)
+  +f1 = A.first(pp, pb)
+  +f0 = A.first(prev, bs)
+  %Equal.sym(List<&2, Nat>, ag1, ag0, ar.ages_top(prev, bs, turn, tracked)) : {A.Arena{_, f1, A.runs(pb, _, f1)} == A.Arena{ag0, f0, A.runs(bs, ag0, f0)} : A.Arena}
+  %Equal.sym(Maybe<&2, A.First>, f1, f0, ar.first_top(prev, bs)) : {A.Arena{ag0, _, A.runs(pb, ag0, _)} == A.Arena{ag0, f0, A.runs(bs, ag0, f0)} : A.Arena}
+  %Equal.sym(List<&2, A.Run>, A.runs(pb, ag0, f0), A.runs(bs, ag0, f0), ar.runs_top(prev, bs, ag0, f0)) : {A.Arena{ag0, f0, _} == A.Arena{ag0, f0, A.runs(bs, ag0, f0)} : A.Arena}
+  {==}

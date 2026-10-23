@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import BendParts from "./bend/parts.mjs";
 import BendSpans from "./bend/spans.mjs";
-import { bendList, fromBendList, type BendList } from "./context.js";
+import { bendList, bendListOf, fromBendList, type BendList } from "./context.js";
 
 export type Mode = "redact" | "no-go" | "advisory";
 export type Allowlist = Pick<ReadonlySet<string>, "has">;
@@ -129,8 +129,9 @@ export function scanText(text: string, carnet?: Allowlist): Span[] {
 type BendGroup = { start: number; end: number; ms: number; me: number; first: number; grown: boolean };
 
 export function mergeSpans(text: string, spans: Span[]): Span[] {
+  if (spans.length < 2) return spans.map((s) => ({ start: s.start, end: s.end, matchStart: s.matchStart, matchEnd: s.matchEnd, rule: s.rule, value: s.value }));
   const sorted = [...spans].sort((a, b) => a.start - b.start || b.end - a.end);
-  const groups = fromBendList(BendSpans.merge(bendList(sorted.map((s, id) => ({ $: "Raw", start: s.start, end: s.end, ms: s.matchStart, me: s.matchEnd, id })))) as BendList<BendGroup>);
+  const groups = fromBendList(BendSpans.merge(bendListOf(sorted, (s, id) => ({ $: "Raw", start: s.start, end: s.end, ms: s.matchStart, me: s.matchEnd, id }))) as BendList<BendGroup>);
   return groups.map((g) => {
     const first = sorted[g.first];
     return { start: g.start, end: g.end, matchStart: g.ms, matchEnd: g.me, rule: first.rule, value: g.grown ? text.slice(g.start, g.end) : first.value };
@@ -199,7 +200,7 @@ const lastWhere = (n: number, ok: (i: number) => boolean) => {
 };
 export type SpanRange = Pick<Span, "start" | "end" | "matchStart" | "matchEnd">;
 export const takenAcrossParts = (starts: number[], spans: SpanRange[]): boolean[] =>
-  fromBendList(BendParts["taken.fast"](bendList(starts.slice(1)), bendList(spans.map((s) => ({ $: "Span", start: s.start, end: s.end, ms: s.matchStart, me: s.matchEnd })))) as BendList<{ t: boolean }>).map((m) => m.t);
+  fromBendList(BendParts["taken.fast"](bendList(starts.slice(1)), bendListOf(spans, (s) => ({ $: "Span", start: s.start, end: s.end, ms: s.matchStart, me: s.matchEnd }))) as BendList<{ t: boolean }>).map((m) => m.t);
 
 function joinParts(arr: unknown[], carnet: Allowlist | undefined, path: string, findings: Finding[]): unknown[] {
   const idx: number[] = [], texts: string[] = [];
