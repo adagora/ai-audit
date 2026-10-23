@@ -6,7 +6,7 @@ export interface Out { model?: string; text: string; toolCalls: { name: string; 
 const sseData = (raw: string) => raw.split(/\r?\n/).filter((l) => l.startsWith("data:")).map((l) => l.slice(5).trim())
   .filter((d) => d && d !== "[DONE]").flatMap((d) => { try { const e = JSON.parse(d); return e && typeof e === "object" && !Array.isArray(e) ? [e] : []; } catch { return []; } });
 const text = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v) ?? "");
-const tokenCount = (n: unknown) => (Number.isSafeInteger(n) && (n as number) >= 0 ? (n as number) : undefined);
+export const tokenCount = (n: unknown) => (Number.isSafeInteger(n) && (n as number) >= 0 ? (n as number) : undefined);
 
 export function extract(api: Api, body: string, sse: boolean): Out {
   const o: Out = { text: "", toolCalls: [] };

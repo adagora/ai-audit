@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { accessSync, appendFileSync, closeSync, constants, existsSync, fstatSync, openSync, readFileSync, readSync, statSync, unlinkSync, writeSync } from "node:fs";
 import { dirname } from "node:path";
 import vm from "node:vm";
+import { tokenCount } from "./extract.js";
 import { policyHistories } from "./policies.js";
 
 export const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -144,7 +145,7 @@ export function replay(log: AuditLog, recId: string, opts = { timeoutMs: 200, ma
 }
 
 const billed = (c: any) => c.kind === "llm-call" && c.decision?.action !== "block" && c.upstreamStatus >= 200 && c.upstreamStatus < 400;
-const known = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const known = (v: unknown): v is number => tokenCount(v) !== undefined;
 export function tokenTotals(calls: any[]) {
   const t = { inputTokens: 0, outputTokens: 0, unknownInputUsage: 0, unknownOutputUsage: 0 };
   for (const c of calls) { if (!billed(c)) continue;

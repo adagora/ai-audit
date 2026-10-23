@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AuditLog, report, stats } from "../src/audit.js";
+import { AuditLog, report, stats, tokenTotals } from "../src/audit.js";
+import { turnTokens } from "../src/contextView.js";
 import { extract } from "../src/extract.js";
 
 const sse = (...es: object[]) => es.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("") + "data: [DONE]\n\n";
@@ -61,4 +62,12 @@ test("found by fuzzing: a model, stop reason or token count of the wrong type is
   assert.deepEqual([o.model, o.stop, o.usage], [undefined, undefined, { input: undefined, output: undefined, cached: undefined }]);
   assert.deepEqual(extract("anthropic-messages", '{"model":"m","stop_reason":"end_turn","usage":{"input_tokens":6,"output_tokens":1e400}}', false).usage,
     { input: 6, output: undefined, cached: undefined, cacheWrite: undefined });
+});
+
+test("a negative or fractional token count in an older log is unknown in reports and the session view, not counted (ADR 0012)", () => {
+  const call = (usage: object) => ({ kind: "llm-call", upstreamStatus: 200, usage });
+  assert.deepEqual(tokenTotals([call({ input: 1000, output: 10 }), call({ input: -400, output: 10 }), call({ input: 12.5, output: 1 })]),
+    { inputTokens: 1000, outputTokens: 21, unknownInputUsage: 2, unknownOutputUsage: 0, unknownUsage: 2, tokensComplete: false });
+  assert.deepEqual(turnTokens({ provider: "openai", usage: { input: -50, cached: 0, output: 1 } }), { cacheRead: null, cacheWrite: null, input: null, output: 1, prompt: null });
+  assert.deepEqual(turnTokens({ provider: "anthropic", usage: { input: 50, cached: 0.5, cacheWrite: -1, output: 2.5 } }), { cacheRead: 0, cacheWrite: 0, input: 50, output: null, prompt: 50 });
 });

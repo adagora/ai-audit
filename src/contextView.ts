@@ -1,5 +1,5 @@
 import { KIND_BY_CODE, SEGMENTS, type ArenaBlock, type ContextComposition, type Segment } from "./context.js";
-import type { Usage } from "./extract.js";
+import { tokenCount, type Usage } from "./extract.js";
 import type { SessionLink } from "./session.js";
 
 export interface SessionCall { id: string; ts: string; provider?: string; model?: string; usage?: Usage; session: SessionLink; context: ContextComposition }
@@ -10,7 +10,7 @@ export interface TurnView { call: SessionCall; kind: "" | "retry" | "branch"; to
 export interface SessionView { turns: TurnView[]; peakTokens: number | null; cacheHit: number | null; busts: number; preambleShare: number; unknownUsage: number }
 
 const MIN_CACHEABLE_TOKENS = 1024;
-const known = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n);
+const known = (n: unknown): n is number => tokenCount(n) !== undefined;
 
 export function sessionCalls(records: object[]): SessionCall[] {
   return (records as Partial<SessionCall & { kind: string }>[])
