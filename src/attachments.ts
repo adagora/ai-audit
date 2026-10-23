@@ -50,15 +50,15 @@ export function discover(body: unknown): { atts: Att[]; refs: string[] } {
       return;
     }
     if (!v || typeof v !== "object") return;
+    const binary = !Array.isArray(v) && v.type === "base64" && typeof v.data === "string";
+    if (binary) atts.push({ path: [...path, "data"], mime: typeof v.media_type === "string" ? v.media_type : "", b64: v.data, set: (b) => (v.data = b) });
     if (!Array.isArray(v)) {
-      if (v.type === "base64" && typeof v.data === "string" && typeof v.media_type === "string")
-        return void atts.push({ path: [...path, "data"], mime: v.media_type, b64: v.data, set: (b) => (v.data = b) });
       if ((v.type === "url" || v.type === "file") && (v.url || v.file_id)) refs.push(path.join("."));
       if (typeof v.file_id === "string") refs.push(path.join("."));
       const u = v.image_url?.url ?? v.image_url ?? v.file_url;
       if (typeof u === "string" && /^https?:/i.test(u)) refs.push(path.join("."));
     }
-    for (const [k, x] of Object.entries(v)) walk(x, [...path, Array.isArray(v) ? Number(k) : k], v, Array.isArray(v) ? Number(k) : k);
+    for (const [k, x] of Object.entries(v)) if (!(binary && k === "data")) walk(x, [...path, Array.isArray(v) ? Number(k) : k], v, Array.isArray(v) ? Number(k) : k);
   };
   walk(body, ["$"]);
   return { atts, refs };

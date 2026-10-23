@@ -46,3 +46,19 @@ test("stats and report: unknown usage counted separately, sums exclude it, total
   log2.append({ kind: "llm-call", id: "y", ts: "2026-10-20T10:00:00Z", provider: "openai", upstreamStatus: 200, decision: { action: "forward", findings: [] }, usage: { input: 1, output: 2 } } as any);
   assert.equal(stats(log2, "key")[0].tokensComplete, true); assert.doesNotMatch(report(log2, "", "~").md, /lower bound/);
 });
+
+test("found by fuzzing: extract skips events that are not objects, returns string tool calls and never writes to Object.prototype", () => {
+  const chat = extract("openai-chat", "data: null\n\n" + sse({ choices: [{ delta: { content: "a", tool_calls: [{ index: "__proto__", function: { name: "f", arguments: "{}" } }] } }] }), true);
+  assert.deepEqual([chat.text, chat.toolCalls], ["a", [{ name: "f", args: "{}" }]]);
+  extract("anthropic-messages", sse({ type: "content_block_delta", index: "__proto__", delta: { text: "x" } }), true);
+  assert.deepEqual(extract("openai-responses", JSON.stringify({ output: [{ type: "function_call", name: 7, arguments: { q: 1 } }] }), false).toolCalls, [{ name: "7", args: '{"q":1}' }]);
+  const probe: Record<string, unknown> = {};
+  assert.deepEqual([probe.name, probe.args, probe.text], [undefined, undefined, undefined]);
+});
+
+test("found by fuzzing: a model, stop reason or token count of the wrong type is unknown, not copied into the log (ADR 0012)", () => {
+  const o = extract("openai-responses", JSON.stringify({ model: { echo: "prompt" }, status: ["completed"], usage: { input_tokens: "5", output_tokens: -1 } }), false);
+  assert.deepEqual([o.model, o.stop, o.usage], [undefined, undefined, { input: undefined, output: undefined, cached: undefined }]);
+  assert.deepEqual(extract("anthropic-messages", '{"model":"m","stop_reason":"end_turn","usage":{"input_tokens":6,"output_tokens":1e400}}', false).usage,
+    { input: 6, output: undefined, cached: undefined, cacheWrite: undefined });
+});

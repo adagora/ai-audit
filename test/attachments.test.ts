@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, appendFileSync, mkdtempSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mockUpstream, startProxy, makePdf, AWS, AUTH, SANDBOXED_ATTACHMENTS } from "./helpers.js";
-import { work, cacheStats, SANDBOX_AVAILABLE, inspectAttachment } from "../src/attachments.js";
+import { work, cacheStats, SANDBOX_AVAILABLE, discover, inspectAttachment } from "../src/attachments.js";
 import { AuditLog, anchor, sha256, verifyAnchors } from "../src/audit.js";
 import { scanText } from "../src/scan.js";
 import { createInspectionProfile } from "../src/profile.js";
@@ -142,4 +142,15 @@ test("a PDF containing an AWS secret-access assignment is sanitized by the share
   assert.notEqual(sent, pdf);
   assert.ok(!(await ocrText("application/pdf", sent)).includes(secret));
   assert.ok((red.log.read().at(-1)!.decision as any).findings.some((f: any) => f.rule === "aws-secret-access-key"));
+});
+
+test("found by fuzzing: base64 data without a media type, and a data URL beside base64 data, are attachments, never unread text (ADR 0003)", async () => {
+  const content = [{ type: "image", source: { type: "base64", data: AWS } }, { type: "image", source: { type: "base64", media_type: "image/png", data: CLEAN_PNG, note: `data:text/plain;base64,${AWS}` } }];
+  assert.deepEqual(discover({ messages: [{ role: "user", content }] }).atts.map((a) => [a.path.join("."), a.mime]),
+    [["$.messages.0.content.0.source.data", ""], ["$.messages.0.content.1.source.data", "image/png"], ["$.messages.0.content.1.source.note", "text/plain"]]);
+  for (const part of content) {
+    const seen = up.seen.length, r = await post(red.url, "/v1/messages", { model: "c", max_tokens: 5, messages: [{ role: "user", content: [part] }] });
+    assert.equal(r.status, 422); await r.text();
+    assert.equal(up.seen.length, seen);
+  }
 });

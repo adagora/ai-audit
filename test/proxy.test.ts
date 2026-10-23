@@ -99,3 +99,14 @@ test("scanner: checksums avoid false positives, keys detected", () => {
   assert.equal(scanText("ver 1.2.3 build 2026-10-20 cost 123 456 789.00").length, 0);
   assert.ok(hasDuplicateKeys('{"a":{"b":1,"\\u0062":2}}')); assert.ok(!hasDuplicateKeys('{"a":{"b":1},"c":{"b":2}}'));
 });
+
+test("found by fuzzing: an upstream tool call with non-string arguments still gets its record", async () => {
+  const srv = http.createServer((_req, res) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ model: "m", status: "completed", output: [{ type: "function_call", name: "f", arguments: { q: 1 } }] })); });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const px = await startProxy(`http://127.0.0.1:${(srv.address() as AddressInfo).port}`, "redact");
+  try {
+    const r = await post(px.url, "/v1/responses", { model: "m", input: "hi" });
+    assert.equal(r.status, 200); await r.text();
+    assert.deepEqual(px.log.read().map((x) => x.toolCalls), [[{ name: "f", argsHash: sha256('{"q":1}') }]]);
+  } finally { srv.close(); px.close(); }
+});
