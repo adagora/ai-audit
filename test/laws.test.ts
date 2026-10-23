@@ -8,20 +8,11 @@ import { composeContext, KIND_CODES, scaleToProvider, SEGMENTS, type ArenaBlock,
 import type { Api } from "../src/extract.js";
 import { decide, inspect, redactText, scanText, type Mode } from "../src/scan.js";
 import { SessionIndex, type SessionLink } from "../src/session.js";
-import { mockUpstream, startProxy } from "./helpers.js";
-
-type Gen = ReturnType<typeof gen>;
-const gen = (seed: number) => {
-  let s = seed >>> 0;
-  const next = () => { s = (s + 0x6d2b79f5) >>> 0; let t = Math.imul(s ^ (s >>> 15), s | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
-  const int = (n: number) => Math.floor(next() * n);
-  return { int, pick: <T>(xs: readonly T[]) => xs[int(xs.length)], chars: (n: number, alphabet: string) => Array.from({ length: n }, () => alphabet[int(alphabet.length)]).join("") };
-};
+import { gen, mockUpstream, pesel, startProxy, type Gen } from "./helpers.js";
 
 const UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ", LOWER = "abcdefghijklmnopqrstuvwxyz", DIGITS = "0123456789", ALNUM = UPPER + LOWER + DIGITS, NOISE = LOWER + "żółć";
 interface Planted { rule: string; text: string; core: string; inKey?: boolean }
 const planted = (rule: string, text: string, core = text): Planted => ({ rule, text, core });
-const pesel = (d: string) => d + (10 - ([1, 3, 7, 9, 1, 3, 7, 9, 1, 3].reduce((a, w, i) => a + w * Number(d[i]), 0) % 10)) % 10;
 const iban = (bban: string) => { let m = 0; for (const ch of bban + "252100") m = (m * 10 + Number(ch)) % 97; return "PL" + String(98 - m).padStart(2, "0") + bban; };
 const SECRETS: ((g: Gen) => Planted)[] = [
   (g) => { const c = g.chars(16, UPPER + "234567"); return planted("aws-access-token", "AKIA" + c, c); },

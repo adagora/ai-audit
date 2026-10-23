@@ -1,0 +1,9 @@
+{
+  "name": "ai-audit-fuzz",
+  "private": true,
+  "type": "module",
+  "description": "Coverage-guided fuzz targets for ai-audit, kept out of the main package so its install stays free of native code",
+  "devDependencies": {
+    "@jazzer.js/core": "4.0.0"
+  }
+}

@@ -11,6 +11,15 @@ export const AWS = "AKIA" + "IOSFODNN7EXAMPLQ";
 export const PESEL = "44051401359";
 export const AUTH = "Bearer sk-test-SHOULD-NEVER-BE-LOGGED";
 
+export type Gen = ReturnType<typeof gen>;
+export const gen = (seed: number) => {
+  let s = seed >>> 0;
+  const next = () => { s = (s + 0x6d2b79f5) >>> 0; let t = Math.imul(s ^ (s >>> 15), s | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const int = (n: number) => Math.floor(next() * n);
+  return { int, pick: <T>(xs: readonly T[]) => xs[int(xs.length)], chars: (n: number, alphabet: string) => Array.from({ length: n }, () => alphabet[int(alphabet.length)]).join("") };
+};
+export const pesel = (d: string) => d + (10 - ([1, 3, 7, 9, 1, 3, 7, 9, 1, 3].reduce((a, w, i) => a + w * Number(d[i]), 0) % 10)) % 10;
+
 type Seen = { path: string; body: Buffer; headers: http.IncomingHttpHeaders };
 export async function mockUpstream() {
   const seen: Seen[] = [];

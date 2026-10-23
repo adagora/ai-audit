@@ -8,3 +8,8 @@ demo-log.jsonl
 demo-report.md
 *.jsonl.lock
 *.session-key
+fuzz/corpus/
+fuzz/artifacts/
+fuzz/seeds/
+fuzz/logs/
+fuzz/dict.txt
