@@ -1,6 +1,7 @@
 import Base
 import ./context.bend as C
 import ./LAWS.bend as Laws
+import ./arena.bend as A
 
 def add_zero(a: Nat) -> {a == Nat.add(a, 0n) : Nat}:
   match a:
@@ -1333,3 +1334,347 @@ def fair_of(-p: Nat, -t: Nat, bs: +List<Nat>, xs: +List<C.Share>, hh: Inv(p, t, 
 
 def Laws.split_leftover_to_largest_remainders(p, bs):
   fair_of(p, C.total(bs), bs, C.rounds(Nat.sub(p, C.sum_q(C.shares(p, C.total(bs), bs))), C.shares(p, C.total(bs), bs)), dup_inv(p, C.total(bs), bs, C.rounds(Nat.sub(p, C.sum_q(C.shares(p, C.total(bs), bs))), C.shares(p, C.total(bs), bs)), rounds_inv(p, C.total(bs), Nat.sub(p, C.sum_q(C.shares(p, C.total(bs), bs))), bs, C.shares(p, C.total(bs), bs), shares_inv(p, C.total(bs), bs))), rounds_fair(Nat.sub(p, C.sum_q(C.shares(p, C.total(bs), bs))), C.shares(p, C.total(bs), bs), shares_fair(p, C.total(bs), bs)))
+
+def Shift(i: Nat, off: Nat, r: Maybe<&2, A.First>) -> Maybe<&2, A.First>:
+  match r:
+    case None{}:
+      None{}
+    case Some{A.First{k, o}}:
+      Some{A.First{Nat.add(i, k), Nat.add(off, o)}}
+
+def first.s(ps: +List<A.Seen>, bs: +List<A.Block>, eq: Bool) -> Maybe<&2, A.First>:
+  match ps:
+    case Nil{}:
+      None{}
+    case p <> +pt:
+      match bs:
+        case Nil{}:
+          Some{A.First{0n, 0n}}
+        case A.Block{g, k, n} <> +bt:
+          match eq:
+            case True{}:
+              Shift(1n, n, first.s(pt, bt, A.same(pt, bt)))
+            case False{}:
+              Some{A.First{0n, 0n}}
+
+def shift_zero(+i: Nat, +off: Nat) -> {Some{A.First{i, off}} == Shift(i, off, Some{A.First{0n, 0n}}) : Maybe<&2, A.First>}:
+  %add_zero(i) : {Some{A.First{i, off}} == Some{A.First{_, Nat.add(off, 0n)}} : Maybe<&2, A.First>}
+  %add_zero(off) : {Some{A.First{i, off}} == Some{A.First{i, _}} : Maybe<&2, A.First>}
+  {==}
+
+def shift_shift(+i: Nat, +off: Nat, +n: Nat, r: Maybe<&2, A.First>) -> {Shift(1n+i, Nat.add(off, n), r) == Shift(i, off, Shift(1n, n, r)) : Maybe<&2, A.First>}:
+  match r:
+    case None{}:
+      {==}
+    case Some{A.First{+k, +o}}:
+      %add_succ(i, k) : {Some{A.First{1n+Nat.add(i, k), Nat.add(Nat.add(off, n), o)}} == Some{A.First{_, Nat.add(off, Nat.add(n, o))}} : Maybe<&2, A.First>}
+      %Equal.sym(Nat, Nat.add(off, Nat.add(n, o)), Nat.add(Nat.add(off, n), o), add_assoc(off, n, o)) : {Some{A.First{1n+Nat.add(i, k), Nat.add(Nat.add(off, n), o)}} == Some{A.First{1n+Nat.add(i, k), _}} : Maybe<&2, A.First>}
+      {==}
+
+def first_go_s(ps: +List<A.Seen>, bs: +List<A.Block>, eq: Bool, +i: Nat, +off: Nat) -> {A.first.go(ps, bs, eq, i, off) == Shift(i, off, first.s(ps, bs, eq)) : Maybe<&2, A.First>}:
+  match ps:
+    case Nil{}:
+      {==}
+    case p <> +pt:
+      match bs:
+        case Nil{}:
+          shift_zero(i, off)
+        case A.Block{g, k, +n} <> +bt:
+          match eq:
+            case True{}:
+              Equal.trans(Maybe<&2, A.First>, A.first.go(pt, bt, A.same(pt, bt), 1n+i, Nat.add(off, n)), Shift(1n+i, Nat.add(off, n), first.s(pt, bt, A.same(pt, bt))), Shift(i, off, Shift(1n, n, first.s(pt, bt, A.same(pt, bt)))),
+                first_go_s(pt, bt, A.same(pt, bt), 1n+i, Nat.add(off, n)), shift_shift(i, off, n, first.s(pt, bt, A.same(pt, bt))))
+            case False{}:
+              shift_zero(i, off)
+
+def shift_zero_zero(r: Maybe<&2, A.First>) -> {Shift(0n, 0n, r) == r : Maybe<&2, A.First>}:
+  match r:
+    case None{}:
+      {==}
+    case Some{A.First{k, o}}:
+      {==}
+
+def first_shift_ok(-h: Nat, -g: Nat, -a: Nat, -pt: +List<A.Seen>, -k: Nat, +n: Nat, -bt: +List<A.Block>, e: Laws.Agree(h, g), r: Maybe<&2, A.First>, ih: Laws.FirstOk(A.Known{pt}, bt, r))
+  -> Laws.FirstOk(A.Known{A.Seen{h, a} <> pt}, A.Block{g, k, n} <> bt, Shift(1n, n, r)):
+  match r:
+    case None{}:
+      (e, ih)
+    case Some{A.First{k2, o}}:
+      (d, eo) = ih
+      ((e, d), Equal.cong(Nat, Nat, x => Nat.add(n, x), o, Laws.BytesBefore(bt, k2), eo))
+
+def first_s_step(+h: Nat, +g: Nat, -a: Nat, +pt: +List<A.Seen>, -k: Nat, +n: Nat, +bt: +List<A.Block>, b: Bool, e: {Nat.is_eq(h, g) == b : Bool},
+  ih: Laws.FirstOk(A.Known{pt}, bt, first.s(pt, bt, A.same(pt, bt))))
+  -> Laws.FirstOk(A.Known{A.Seen{h, a} <> pt}, A.Block{g, k, n} <> bt, first.s(A.Seen{h, a} <> pt, A.Block{g, k, n} <> bt, b)):
+  match b:
+    case True{}:
+      first_shift_ok(h, g, a, pt, k, n, bt, e, first.s(pt, bt, A.same(pt, bt)), ih)
+    case False{}:
+      (e, {==})
+
+def first_s_ok(ps: +List<A.Seen>, bs: +List<A.Block>) -> Laws.FirstOk(A.Known{ps}, bs, first.s(ps, bs, A.same(ps, bs))):
+  match ps:
+    case Nil{}:
+      Unit{}
+    case A.Seen{+h, a} <> +pt:
+      match bs:
+        case Nil{}:
+          ({==}, {==})
+        case A.Block{+g, k, +n} <> +bt:
+          first_s_step(h, g, a, pt, k, n, bt, Nat.is_eq(h, g), {==}, first_s_ok(pt, bt))
+
+def Laws.arena_first_change_is_the_first_difference(prev, bs):
+  match prev:
+    case A.Fresh{}:
+      Unit{}
+    case A.Known{+ps}:
+      %Equal.sym(Maybe<&2, A.First>, A.first.go(ps, bs, A.same(ps, bs), 0n, 0n), first.s(ps, bs, A.same(ps, bs)),
+        Equal.trans(Maybe<&2, A.First>, A.first.go(ps, bs, A.same(ps, bs), 0n, 0n), Shift(0n, 0n, first.s(ps, bs, A.same(ps, bs))), first.s(ps, bs, A.same(ps, bs)),
+          first_go_s(ps, bs, A.same(ps, bs), 0n, 0n), shift_zero_zero(first.s(ps, bs, A.same(ps, bs))))) : Laws.FirstOk(A.Known{ps}, bs, _)
+      first_s_ok(ps, bs)
+
+def fill_eq(bs: +List<A.Block>, +age: Nat, acc: +List<Nat>) -> {A.fill(bs, age, acc) == A.rev(acc, Laws.AllAt(bs, age)) : List<&2, Nat>}:
+  match bs:
+    case Nil{}:
+      {==}
+    case b <> rest:
+      fill_eq(rest, age, age <> acc)
+
+def same_eq(ps: +List<A.Seen>, bs: +List<A.Block>) -> {A.same(ps, bs) == Laws.SameHead(ps, bs) : Bool}:
+  match ps:
+    case Nil{}:
+      {==}
+    case A.Seen{h, a} <> pt:
+      match bs:
+        case Nil{}:
+          {==}
+        case A.Block{g, k, n} <> bt:
+          {==}
+
+def ages_go_eq(ps: +List<A.Seen>, bs: +List<A.Block>, eq: Bool, +turn: Nat, acc: +List<Nat>)
+  -> {A.ages.go(ps, bs, eq, turn, acc) == A.rev(acc, Laws.KeptAges(ps, bs, eq, turn)) : List<&2, Nat>}:
+  match ps:
+    case Nil{}:
+      fill_eq(bs, turn, acc)
+    case A.Seen{h, +a} <> +pt:
+      match bs:
+        case Nil{}:
+          {==}
+        case b <> +bt:
+          match eq:
+            case True{}:
+              %same_eq(pt, bt) : {A.ages.go(pt, bt, A.same(pt, bt), turn, a <> acc) == A.rev(acc, a <> Laws.KeptAges(pt, bt, _, turn)) : List<&2, Nat>}
+              ages_go_eq(pt, bt, A.same(pt, bt), turn, a <> acc)
+            case False{}:
+              fill_eq(b <> bt, turn, acc)
+
+def Laws.arena_ages_keep_the_unchanged_prefix(prev, bs, turn, tracked):
+  match prev:
+    case A.Fresh{}:
+      match tracked:
+        case True{}:
+          fill_eq(bs, turn, Nil{})
+        case False{}:
+          fill_eq(bs, 0n, Nil{})
+    case A.Known{+ps}:
+      %same_eq(ps, bs) : {A.ages.go(ps, bs, A.same(ps, bs), turn, Nil{}) == Laws.KeptAges(ps, bs, _, turn) : List<&2, Nat>}
+      ages_go_eq(ps, bs, A.same(ps, bs), turn, Nil{})
+
+def SameLen(bs: +List<A.Block>, ags: +List<Nat>) -> Type:
+  match bs:
+    case Nil{}:
+      match ags:
+        case Nil{}:
+          Unit
+        case a <> at:
+          Empty
+    case b <> bt:
+      match ags:
+        case Nil{}:
+          Empty
+        case a <> at:
+          SameLen(bt, at)
+
+def samelen_all(bs: +List<A.Block>, +age: Nat) -> SameLen(bs, Laws.AllAt(bs, age)):
+  match bs:
+    case Nil{}:
+      Unit{}
+    case b <> bt:
+      samelen_all(bt, age)
+
+def samelen_kept(ps: +List<A.Seen>, bs: +List<A.Block>, eq: Bool, +turn: Nat) -> SameLen(bs, Laws.KeptAges(ps, bs, eq, turn)):
+  match ps:
+    case Nil{}:
+      samelen_all(bs, turn)
+    case A.Seen{h, a} <> +pt:
+      match bs:
+        case Nil{}:
+          Unit{}
+        case b <> +bt:
+          match eq:
+            case True{}:
+              samelen_kept(pt, bt, Laws.SameHead(pt, bt), turn)
+            case False{}:
+              samelen_all(b <> bt, turn)
+
+def samelen_expected(prev: A.Prev, +bs: +List<A.Block>, +turn: Nat, tracked: Bool) -> SameLen(bs, Laws.ExpectedAges(prev, bs, turn, tracked)):
+  match prev:
+    case A.Fresh{}:
+      match tracked:
+        case True{}:
+          samelen_all(bs, turn)
+        case False{}:
+          samelen_all(bs, 0n)
+    case A.Known{+ps}:
+      samelen_kept(ps, bs, Laws.SameHead(ps, bs), turn)
+
+def samelen_ages(+prev: A.Prev, +bs: +List<A.Block>, +turn: Nat, +tracked: Bool) -> SameLen(bs, A.ages(prev, bs, turn, tracked)):
+  %Equal.sym(List<&2, Nat>, A.ages(prev, bs, turn, tracked), Laws.ExpectedAges(prev, bs, turn, tracked), Laws.arena_ages_keep_the_unchanged_prefix(prev, bs, turn, tracked)) : SameLen(bs, _)
+  samelen_expected(prev, bs, turn, tracked)
+
+def joins_nil(bs: +List<A.Block>, ags: +List<Nat>, c: A.Cut) -> {A.joins(bs, ags, c, Nil{}) == False{} : Bool}:
+  match bs:
+    case Nil{}:
+      {==}
+    case A.Block{h, k, n} <> bt:
+      match ags:
+        case Nil{}:
+          {==}
+        case a <> at:
+          match c:
+            case A.NoCut{}:
+              {==}
+            case A.CutIn{m}:
+              match m:
+                case 0n:
+                  {==}
+                case 1n+d:
+                  {==}
+
+
+def cat_assoc(xs: +List<Laws.Label>, +ys: +List<Laws.Label>, +zs: +List<Laws.Label>) -> {Laws.Cat(Laws.Cat(xs, ys), zs) == Laws.Cat(xs, Laws.Cat(ys, zs)) : List<&2, Laws.Label>}:
+  match xs:
+    case Nil{}:
+      {==}
+    case x <> +rest:
+      Equal.cong(List<&2, Laws.Label>, List<&2, Laws.Label>, l => x <> l, Laws.Cat(Laws.Cat(rest, ys), zs), Laws.Cat(rest, Laws.Cat(ys, zs)), cat_assoc(rest, ys, zs))
+
+def copies_add(m: Nat, +n: Nat, +k: Nat, +a: Nat) -> {Laws.Copies(Nat.add(m, n), k, a) == Laws.Cat(Laws.Copies(m, k, a), Laws.Copies(n, k, a)) : List<&2, Laws.Label>}:
+  match m:
+    case 0n:
+      {==}
+    case 1n+p:
+      Equal.cong(List<&2, Laws.Label>, List<&2, Laws.Label>, l => Laws.Label{k, a} <> l, Laws.Copies(Nat.add(p, n), k, a), Laws.Cat(Laws.Copies(p, k, a), Laws.Copies(n, k, a)), copies_add(p, n, k, a))
+
+def RevExpand(acc: +List<A.Run>) -> +List<Laws.Label>:
+  match acc:
+    case Nil{}:
+      Nil{}
+    case A.Run{k, n, a} <> rest:
+      Laws.Cat(RevExpand(rest), Laws.Copies(n, k, a))
+
+def expand_rev(acc: +List<A.Run>, +ys: +List<A.Run>) -> {Laws.Expand(A.rev.runs(acc, ys)) == Laws.Cat(RevExpand(acc), Laws.Expand(ys)) : List<&2, Laws.Label>}:
+  match acc:
+    case Nil{}:
+      {==}
+    case A.Run{+k, +n, +a} <> +rest:
+      Equal.trans(List<&2, Laws.Label>, Laws.Expand(A.rev.runs(rest, A.Run{k, n, a} <> ys)), Laws.Cat(RevExpand(rest), Laws.Cat(Laws.Copies(n, k, a), Laws.Expand(ys))), Laws.Cat(Laws.Cat(RevExpand(rest), Laws.Copies(n, k, a)), Laws.Expand(ys)),
+        expand_rev(rest, A.Run{k, n, a} <> ys),
+        Equal.sym(List<&2, Laws.Label>, Laws.Cat(Laws.Cat(RevExpand(rest), Laws.Copies(n, k, a)), Laws.Expand(ys)), Laws.Cat(RevExpand(rest), Laws.Cat(Laws.Copies(n, k, a), Laws.Expand(ys))), cat_assoc(RevExpand(rest), Laws.Copies(n, k, a), Laws.Expand(ys))))
+
+def and_left(x: Bool, -y: Bool, e: {True{} == Bool.and(x, y) : Bool}) -> {x == True{} : Bool}:
+  match x:
+    case True{}:
+      {==}
+    case False{}:
+      Equal.sym(Bool, True{}, False{}, e)
+
+def and_right(x: Bool, -y: Bool, e: {True{} == Bool.and(x, y) : Bool}) -> {y == True{} : Bool}:
+  match x:
+    case True{}:
+      Equal.sym(Bool, True{}, y, e)
+    case False{}:
+      Empty.absurd({y == True{} : Bool}, ft(Equal.sym(Bool, True{}, False{}, e)))
+
+def eq_true(a: Nat, b: Nat, e: {Nat.is_eq(a, b) == True{} : Bool}) -> {a == b : Nat}:
+  match a b:
+    case 0n 0n:
+      {==}
+    case 0n 1n+bb:
+      Empty.absurd({0n == 1n+bb : Nat}, ft(e))
+    case 1n+aa 0n:
+      Empty.absurd({1n+aa == 0n : Nat}, ft(e))
+    case 1n+aa 1n+bb:
+      Equal.cong(Nat, Nat, x => 1n+x, aa, bb, eq_true(aa, bb, e))
+
+def regroup4(+r: +List<Laws.Label>, +m: +List<Laws.Label>, +n: +List<Laws.Label>, +l: +List<Laws.Label>)
+  -> {Laws.Cat(Laws.Cat(r, Laws.Cat(m, n)), l) == Laws.Cat(Laws.Cat(r, m), Laws.Cat(n, l)) : List<&2, Laws.Label>}:
+  Equal.trans(List<&2, Laws.Label>, Laws.Cat(Laws.Cat(r, Laws.Cat(m, n)), l), Laws.Cat(r, Laws.Cat(m, Laws.Cat(n, l))), Laws.Cat(Laws.Cat(r, m), Laws.Cat(n, l)),
+    Equal.trans(List<&2, Laws.Label>, Laws.Cat(Laws.Cat(r, Laws.Cat(m, n)), l), Laws.Cat(r, Laws.Cat(Laws.Cat(m, n), l)), Laws.Cat(r, Laws.Cat(m, Laws.Cat(n, l))),
+      cat_assoc(r, Laws.Cat(m, n), l),
+      Equal.cong(List<&2, Laws.Label>, List<&2, Laws.Label>, z => Laws.Cat(r, z), Laws.Cat(Laws.Cat(m, n), l), Laws.Cat(m, Laws.Cat(n, l)), cat_assoc(m, n, l))),
+    Equal.sym(List<&2, Laws.Label>, Laws.Cat(Laws.Cat(r, m), Laws.Cat(n, l)), Laws.Cat(r, Laws.Cat(m, Laws.Cat(n, l))), cat_assoc(r, m, Laws.Cat(n, l))))
+
+def merge_labels(-x: +List<Laws.Label>, +rest: +List<A.Run>, +k2: Nat, +m: Nat, +a2: Nat, +n: Nat, -k: Nat, -a: Nat, +lbt: +List<Laws.Label>,
+  ek: {k == k2 : Nat}, ea: {a == a2 : Nat}, ih: {x == Laws.Cat(Laws.Cat(RevExpand(rest), Laws.Copies(Nat.add(m, n), k2, a2)), lbt) : List<&2, Laws.Label>})
+  -> {x == Laws.Cat(Laws.Cat(RevExpand(rest), Laws.Copies(m, k2, a2)), Laws.Cat(Laws.Copies(n, k, a), lbt)) : List<&2, Laws.Label>}:
+  %Equal.sym(Nat, k, k2, ek) : {x == Laws.Cat(Laws.Cat(RevExpand(rest), Laws.Copies(m, k2, a2)), Laws.Cat(Laws.Copies(n, _, a), lbt)) : List<&2, Laws.Label>}
+  %Equal.sym(Nat, a, a2, ea) : {x == Laws.Cat(Laws.Cat(RevExpand(rest), Laws.Copies(m, k2, a2)), Laws.Cat(Laws.Copies(n, k2, _), lbt)) : List<&2, Laws.Label>}
+  Equal.trans(List<&2, Laws.Label>, x, Laws.Cat(Laws.Cat(RevExpand(rest), Laws.Copies(Nat.add(m, n), k2, a2)), lbt), Laws.Cat(Laws.Cat(RevExpand(rest), Laws.Copies(m, k2, a2)), Laws.Cat(Laws.Copies(n, k2, a2), lbt)), ih,
+    Equal.trans(List<&2, Laws.Label>, Laws.Cat(Laws.Cat(RevExpand(rest), Laws.Copies(Nat.add(m, n), k2, a2)), lbt), Laws.Cat(Laws.Cat(RevExpand(rest), Laws.Cat(Laws.Copies(m, k2, a2), Laws.Copies(n, k2, a2))), lbt), Laws.Cat(Laws.Cat(RevExpand(rest), Laws.Copies(m, k2, a2)), Laws.Cat(Laws.Copies(n, k2, a2), lbt)),
+      Equal.cong(List<&2, Laws.Label>, List<&2, Laws.Label>, z => Laws.Cat(Laws.Cat(RevExpand(rest), z), lbt), Laws.Copies(Nat.add(m, n), k2, a2), Laws.Cat(Laws.Copies(m, k2, a2), Laws.Copies(n, k2, a2)), copies_add(m, n, k2, a2)),
+      regroup4(RevExpand(rest), Laws.Copies(m, k2, a2), Laws.Copies(n, k2, a2), lbt)))
+
+def joined(+k: Nat, +a: Nat, +k2: Nat, +a2: Nat, +e: {True{} == Bool.and(Nat.is_eq(k, k2), Nat.is_eq(a, a2)) : Bool}) -> {k == k2 : Nat} & {a == a2 : Nat}:
+  (eq_true(k, k2, and_left(Nat.is_eq(k, k2), Nat.is_eq(a, a2), e)), eq_true(a, a2, and_right(Nat.is_eq(k, k2), Nat.is_eq(a, a2), e)))
+
+def merge_with(-x: +List<Laws.Label>, +rest: +List<A.Run>, +k2: Nat, +m: Nat, +a2: Nat, +n: Nat, -k: Nat, -a: Nat, +lbt: +List<Laws.Label>,
+  ks: {k == k2 : Nat} & {a == a2 : Nat}, ih: {x == Laws.Cat(Laws.Cat(RevExpand(rest), Laws.Copies(Nat.add(m, n), k2, a2)), lbt) : List<&2, Laws.Label>})
+  -> {x == Laws.Cat(Laws.Cat(RevExpand(rest), Laws.Copies(m, k2, a2)), Laws.Cat(Laws.Copies(n, k, a), lbt)) : List<&2, Laws.Label>}:
+  (ek, ea) = ks
+  merge_labels(x, rest, k2, m, a2, n, k, a, lbt, ek, ea, ih)
+
+def runs_go_labels(bs: +List<A.Block>, ags: +List<Nat>, j: Bool, +acc: +List<A.Run>, +c: A.Cut, e: {j == A.joins(bs, ags, c, acc) : Bool}, l: SameLen(bs, ags))
+  -> {Laws.Expand(A.runs.go(bs, ags, c, acc, j)) == Laws.Cat(RevExpand(acc), Laws.Labels(bs, ags)) : List<&2, Laws.Label>}:
+  match bs:
+    case Nil{}:
+      match ags:
+        case Nil{}:
+          expand_rev(acc, Nil{})
+        case a <> at:
+          match l:
+    case A.Block{h, +k, +n} <> +bt:
+      match ags:
+        case Nil{}:
+          match l:
+        case +a <> +at:
+          match j:
+            case True{}:
+              match acc:
+                case Nil{}:
+                  Empty.absurd({Laws.Expand(A.runs.go(A.Block{h, k, n} <> bt, a <> at, c, Nil{}, True{})) == Laws.Cat(RevExpand(Nil{}), Laws.Labels(A.Block{h, k, n} <> bt, a <> at)) : List<&2, Laws.Label>},
+                    ft(Equal.sym(Bool, True{}, False{}, Equal.trans(Bool, True{}, A.joins(A.Block{h, k, n} <> bt, a <> at, c, Nil{}), False{}, e, joins_nil(A.Block{h, k, n} <> bt, a <> at, c)))))
+                case A.Run{+k2, +m, +a2} <> +rest:
+                  match c:
+                    case A.NoCut{}:
+                      merge_with(Laws.Expand(A.runs.go(bt, at, A.NoCut{}, A.Run{k2, Nat.add(m, n), a2} <> rest, A.joins(bt, at, A.NoCut{}, A.Run{k2, Nat.add(m, n), a2} <> rest))),
+                        rest, k2, m, a2, n, k, a, Laws.Labels(bt, at), joined(k, a, k2, a2, e),
+                        runs_go_labels(bt, at, A.joins(bt, at, A.NoCut{}, A.Run{k2, Nat.add(m, n), a2} <> rest), A.Run{k2, Nat.add(m, n), a2} <> rest, A.NoCut{}, {==}, l))
+                    case A.CutIn{cm}:
+                      match cm:
+                        case 0n:
+                          Empty.absurd({Laws.Expand(A.runs.go(A.Block{h, k, n} <> bt, a <> at, A.CutIn{0n}, A.Run{k2, m, a2} <> rest, True{})) == Laws.Cat(RevExpand(A.Run{k2, m, a2} <> rest), Laws.Labels(A.Block{h, k, n} <> bt, a <> at)) : List<&2, Laws.Label>},
+                            ft(Equal.sym(Bool, True{}, False{}, e)))
+                        case 1n++d:
+                          merge_with(Laws.Expand(A.runs.go(bt, at, A.CutIn{d}, A.Run{k2, Nat.add(m, n), a2} <> rest, A.joins(bt, at, A.CutIn{d}, A.Run{k2, Nat.add(m, n), a2} <> rest))),
+                            rest, k2, m, a2, n, k, a, Laws.Labels(bt, at), joined(k, a, k2, a2, e),
+                            runs_go_labels(bt, at, A.joins(bt, at, A.CutIn{d}, A.Run{k2, Nat.add(m, n), a2} <> rest), A.Run{k2, Nat.add(m, n), a2} <> rest, A.CutIn{d}, {==}, l))
+            case False{}:
+              Equal.trans(List<&2, Laws.Label>, Laws.Expand(A.runs.go(bt, at, A.cut.next(c), A.Run{k, n, a} <> acc, A.joins(bt, at, A.cut.next(c), A.Run{k, n, a} <> acc))),
+                Laws.Cat(Laws.Cat(RevExpand(acc), Laws.Copies(n, k, a)), Laws.Labels(bt, at)), Laws.Cat(RevExpand(acc), Laws.Cat(Laws.Copies(n, k, a), Laws.Labels(bt, at))),
+                runs_go_labels(bt, at, A.joins(bt, at, A.cut.next(c), A.Run{k, n, a} <> acc), A.Run{k, n, a} <> acc, A.cut.next(c), {==}, l),
+                cat_assoc(RevExpand(acc), Laws.Copies(n, k, a), Laws.Labels(bt, at)))
+
+def Laws.arena_runs_keep_every_byte_with_its_kind_and_age(prev, bs, turn, tracked):
+  %Laws.arena_ages_keep_the_unchanged_prefix(prev, bs, turn, tracked) : {Laws.Expand(Laws.RunsOf(A.arena(prev, bs, turn, tracked))) == Laws.Labels(bs, _) : List<&2, Laws.Label>}
+  runs_go_labels(bs, A.ages(prev, bs, turn, tracked), A.joins(bs, A.ages(prev, bs, turn, tracked), A.cut.of(A.first(prev, bs)), Nil{}), Nil{}, A.cut.of(A.first(prev, bs)), {==}, samelen_ages(prev, bs, turn, tracked))

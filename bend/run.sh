@@ -7,6 +7,7 @@ found=$("$BEND" version 2>/dev/null)
 [ "$found" = "bend $BEND_VERSION" ] || { echo "FAIL need bend $BEND_VERSION, found '${found:-no bend}'"; exit 1; }
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 rc=0; ran=""
+MODULES="context arena"
 
 verdict() {
   if (cd "$1" && "$BEND" "$2" 2>&1) | grep -qx "ALL PROOFS CHECK"; then echo pass; else echo fail; fi
@@ -23,27 +24,38 @@ laws_only() {
 }
 
 laws_of() {
-  grep -o '^def [A-Za-z0-9_.]*' "stops/$1.bend" | cut -c5- | paste -sd, -
+  grep -o '^def [A-Za-z0-9_.]*' "stops/$1.bend" | cut -c5- | while read -r name; do grep -qx "law $name:" LAWS.bend && echo "$name"; done | paste -sd, -
 }
 
-real="$tmp/real"; mkdir -p "$real"; cp context.bend stops/*.bend "$real/"; laws_only "$real"
+copy_modules() {
+  for m in $MODULES; do cp "$m.bend" "$1/"; done
+}
+
+real="$tmp/real"; mkdir -p "$real"; copy_modules "$real"; cp stops/*.bend "$real/"; laws_only "$real"
 
 mutant() {
   ran="$ran $1 "
-  local dir="$tmp/$1"; mkdir -p "$dir"; cp context.bend LAWS.bend PROOF.bend "stops/$1.bend" "$dir/"; laws_only "$dir"
-  perl -0pi -e "$2" "$dir/context.bend"
-  if cmp -s context.bend "$dir/context.bend"; then echo "FAIL mutant $1: the substitution matched nothing"; rc=1; return; fi
+  local dir="$tmp/$1"; mkdir -p "$dir"; copy_modules "$dir"; cp LAWS.bend PROOF.bend "stops/$1.bend" "$dir/"; laws_only "$dir"
+  perl -0pi -e "$3" "$dir/$2.bend"
+  if cmp -s "$2.bend" "$dir/$2.bend"; then echo "FAIL mutant $1: the substitution matched nothing in $2.bend"; rc=1; return; fi
+  if [ -z "$(laws_of "$1")" ]; then echo "FAIL stops/$1.bend names no law in LAWS.bend"; rc=1; return; fi
   expect "$dir" PROOF.bend fail "mutant $1, PROOF.bend"
   expect "$dir" "$1.bend" pass "mutant $1 breaks $(laws_of "$1") (stops/$1.bend)"
   expect "$real" "$1.bend" fail "the real code keeps $(laws_of "$1") (stops/$1.bend)"
 }
 
 expect . PROOF.bend pass "laws in LAWS.bend"
-mutant leftover 's/tokens\(rounds\(Nat\.sub\(p, sum_q\(xs\)\), xs\)\)/tokens(rounds(1n+Nat.sub(p, sum_q(xs)), xs))/'
-mutant double-bump 's/case True\{\}:\n          1n\+q/case True{}:\n          2n+q/'
-mutant empty-segment 's/case 0n _:\n          pick\.shift\(found\)/case 0n _:\n          pick.vs(1n, found)/'
-mutant tie-to-later 's/pick\.choose\(r, i, v, Nat\.is_ge\(r, v\)\)/pick.choose(r, i, v, Nat.is_gt(r, v))/'
-mutant smallest-first 's/pick\.choose\(r, i, v, Nat\.is_ge\(r, v\)\)/pick.choose(r, i, v, Nat.is_ge(v, r))/'
+mutant leftover context 's/tokens\(rounds\(Nat\.sub\(p, sum_q\(xs\)\), xs\)\)/tokens(rounds(1n+Nat.sub(p, sum_q(xs)), xs))/'
+mutant double-bump context 's/case True\{\}:\n          1n\+q/case True{}:\n          2n+q/'
+mutant empty-segment context 's/case 0n _:\n          pick\.shift\(found\)/case 0n _:\n          pick.vs(1n, found)/'
+mutant tie-to-later context 's/pick\.choose\(r, i, v, Nat\.is_ge\(r, v\)\)/pick.choose(r, i, v, Nat.is_gt(r, v))/'
+mutant smallest-first context 's/pick\.choose\(r, i, v, Nat\.is_ge\(r, v\)\)/pick.choose(r, i, v, Nat.is_ge(v, r))/'
+mutant first-shifted arena 's/            case False\{\}:\n              Some\{First\{i, off\}\}/            case False{}:\n              Some{First{1n+i, off}}/'
+mutant offset-skips arena 's/first\.go\(pt, bt, same\(pt, bt\), 1n\+i, Nat\.add\(off, n\)\)/first.go(pt, bt, same(pt, bt), 1n+i, off)/'
+mutant ages-reset arena 's/ages\.go\(pt, bt, same\(pt, bt\), turn, a <> acc\)/ages.go(pt, bt, same(pt, bt), turn, turn <> acc)/'
+mutant bytes-lost arena 's/Run\{k, Nat\.add\(m, n\), a\} <> rest/Run{k, m, a} <> rest/'
+mutant kind-lost arena 's/\+acc2 = push\(k, n, a, acc\)/+acc2 = push(0n, n, a, acc)/'
+mutant age-lost arena 's/\+acc2 = push\(k, n, a, acc\)/+acc2 = push(k, n, 0n, acc)/'
 for f in stops/*.bend; do case "$ran" in *" $(basename "$f" .bend) "*) ;; *) echo "FAIL $f has no mutant"; rc=1;; esac; done
 
 if command -v lean >/dev/null 2>&1; then
@@ -52,8 +64,10 @@ else
   echo "skip --verdict: needs Lean v4.34.0 (elan toolchain leanprover/lean4:v4.34.0)"
 fi
 
-"$BEND" context.bend -o "$tmp/context.mjs" || { echo "FAIL build context.mjs"; exit 1; }
-if [ "${1:-}" = "--write" ]; then cp "$tmp/context.mjs" ../src/bend/context.mjs; echo "ok   wrote src/bend/context.mjs"
-elif cmp -s "$tmp/context.mjs" ../src/bend/context.mjs; then echo "ok   src/bend/context.mjs matches context.bend"
-else echo "FAIL src/bend/context.mjs is stale: run bash bend/run.sh --write"; rc=1; fi
+for m in $MODULES; do
+  "$BEND" "$m.bend" -o "$tmp/$m.mjs" || { echo "FAIL build $m.mjs"; exit 1; }
+  if [ "${1:-}" = "--write" ]; then cp "$tmp/$m.mjs" "../src/bend/$m.mjs"; echo "ok   wrote src/bend/$m.mjs"
+  elif cmp -s "$tmp/$m.mjs" "../src/bend/$m.mjs"; then echo "ok   src/bend/$m.mjs matches $m.bend"
+  else echo "FAIL src/bend/$m.mjs is stale: run bash bend/run.sh --write"; rc=1; fi
+done
 exit $rc

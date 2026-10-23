@@ -122,16 +122,16 @@ export function promptTokens(api: Api, usage: Usage | undefined): number | undef
 }
 
 export const BEND_NAT_MAX = 2 ** 48 - 1;
-type NatList = { $: "Nil" } | { $: "Con"; head: number; tail: NatList };
-const natList = (xs: number[]) => xs.reduceRight<NatList>((tail, head) => ({ $: "Con", head, tail }), { $: "Nil" });
-const fromNatList = (list: NatList) => { const out: number[] = []; for (let l = list; l.$ === "Con"; l = l.tail) out.push(l.head); return out; };
+export type BendList<T> = { $: "Nil" } | { $: "Con"; head: T; tail: BendList<T> };
+export const bendList = <T>(xs: T[]) => xs.reduceRight<BendList<T>>((tail, head) => ({ $: "Con", head, tail }), { $: "Nil" });
+export const fromBendList = <T>(list: BendList<T>) => { const out: T[] = []; for (let l = list; l.$ === "Con"; l = l.tail) out.push(l.head); return out; };
 
 export function scaleToProvider(c: ContextComposition, providerPromptTokens: number | undefined): ContextComposition {
   if (providerPromptTokens == null || c.bytes.attachments > 0) return c;
   const scaled = SEGMENTS.filter((s) => s !== "other");
   const textBytes = scaled.reduce((a, s) => a + c.bytes[s], 0);
   if (textBytes === 0 || providerPromptTokens * textBytes > BEND_NAT_MAX) return c;
-  const split = fromNatList(Bend.split(providerPromptTokens, natList(scaled.map((s) => c.bytes[s]))));
+  const split = fromBendList<number>(Bend.split(providerPromptTokens, bendList(scaled.map((s) => c.bytes[s]))));
   const tokens = Object.fromEntries(SEGMENTS.map((s) => [s, 0])) as Record<Segment, number>;
   scaled.forEach((s, i) => (tokens[s] = split[i]));
   return { ...c, tokens, tokenBasis: "provider-scaled" };
