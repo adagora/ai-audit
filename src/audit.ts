@@ -2,7 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { accessSync, appendFileSync, closeSync, constants, existsSync, fstatSync, openSync, readFileSync, readSync, statSync, unlinkSync, writeSync } from "node:fs";
 import { dirname } from "node:path";
 import vm from "node:vm";
-import { tokenCount } from "./extract.js";
+import BendUsage from "./bend/usage.mjs";
+import { bendCount, bendList } from "./context.js";
 import { policyHistories } from "./policies.js";
 
 export const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -145,14 +146,11 @@ export function replay(log: AuditLog, recId: string, opts = { timeoutMs: 200, ma
 }
 
 const billed = (c: any) => c.kind === "llm-call" && c.decision?.action !== "block" && c.upstreamStatus >= 200 && c.upstreamStatus < 400;
-const known = (v: unknown): v is number => tokenCount(v) !== undefined;
 export function tokenTotals(calls: any[]) {
-  const t = { inputTokens: 0, outputTokens: 0, unknownInputUsage: 0, unknownOutputUsage: 0 };
-  for (const c of calls) { if (!billed(c)) continue;
-    if (known(c.usage?.input)) t.inputTokens += c.usage.input; else t.unknownInputUsage++;
-    if (known(c.usage?.output)) t.outputTokens += c.usage.output; else t.unknownOutputUsage++; }
-  return { ...t, unknownUsage: calls.filter((c) => billed(c) && !(known(c.usage?.input) && known(c.usage?.output))).length,
-    tokensComplete: t.unknownInputUsage === 0 && t.unknownOutputUsage === 0 };
+  const t: { input: number; output: number; unknownInput: number; unknownOutput: number; unknownUsage: number } = BendUsage.totals(
+    bendList(calls.map((c) => ({ $: "Call", billed: billed(c), input: bendCount(c.usage?.input), output: bendCount(c.usage?.output) }))));
+  return { inputTokens: t.input, outputTokens: t.output, unknownInputUsage: t.unknownInput, unknownOutputUsage: t.unknownOutput, unknownUsage: t.unknownUsage,
+    tokensComplete: t.unknownInput === 0 && t.unknownOutput === 0 };
 }
 
 export function report(log: AuditLog, from: string, to: string) {

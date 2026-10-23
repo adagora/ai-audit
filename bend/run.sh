@@ -7,7 +7,7 @@ found=$("$BEND" version 2>/dev/null)
 [ "$found" = "bend $BEND_VERSION" ] || { echo "FAIL need bend $BEND_VERSION, found '${found:-no bend}'"; exit 1; }
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 rc=0; ran=""
-MODULES="context arena"
+MODULES="context arena usage"
 
 verdict() {
   if (cd "$1" && "$BEND" "$2" 2>&1) | grep -qx "ALL PROOFS CHECK"; then echo pass; else echo fail; fi
@@ -58,6 +58,10 @@ mutant kind-lost arena 's/\+acc2 = push\(k, n, a, acc\)/+acc2 = push(0n, n, a, a
 mutant age-lost arena 's/\+acc2 = push\(k, n, a, acc\)/+acc2 = push(k, n, 0n, acc)/'
 mutant never-merge arena 's/Bool\.and\(Nat\.is_eq\(k, k2\), Nat\.is_eq\(a, a2\)\)/False{}/'
 mutant merge-across-change arena 's/                case 0n:\n                  False\{\}/                case 0n:\n                  joins.head(k, a, acc)/'
+mutant unknown-as-zero usage 's/        case None\{\}:\n          Turn\{None\{\}, None\{\}, None\{\}, o, None\{\}\}/        case None{}:\n          Turn{Some{0n}, Some{0n}, Some{0n}, o, Some{0n}}/'
+mutant threshold-off usage 's/Nat\.is_ge\(e, 1024n\)/Nat.is_ge(e, 1023n)/'
+mutant half-wrong usage 's/Nat\.is_lt\(Nat\.add\(c, c\), e\)/Nat.is_lt(c, e)/'
+mutant unknown-not-counted usage 's/Nat\.add\(ui, unknown\(i\)\)/ui/'
 for f in stops/*.bend; do case "$ran" in *" $(basename "$f" .bend) "*) ;; *) echo "FAIL $f has no mutant"; rc=1;; esac; done
 
 if command -v lean >/dev/null 2>&1; then

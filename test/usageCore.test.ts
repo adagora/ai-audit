@@ -25,3 +25,11 @@ test("usage: same output as the TypeScript reference on generated inputs and on 
   const log = Array.from({ length: 200_000 }, (_, i) => ({ kind: "llm-call", upstreamStatus: i % 50 ? 200 : 500, usage: i % 7 ? { input: 1 + (i % 900), output: i % 11 } : { output: 3 } }));
   assert.equal(JSON.stringify(tokenTotals(log)), JSON.stringify(tokenTotalsReference(log)));
 });
+
+test("usage: a token count above 2^48-1 (281 trillion) is unknown, where Bend's numbers end; the TypeScript counted it", () => {
+  const huge = 2 ** 48, call = (usage: object) => ({ kind: "llm-call", upstreamStatus: 200, usage });
+  assert.deepEqual(tokenTotals([call({ input: huge, output: 1 }), call({ input: huge - 1, output: 1 })]),
+    { inputTokens: huge - 1, outputTokens: 2, unknownInputUsage: 1, unknownOutputUsage: 0, unknownUsage: 1, tokensComplete: false });
+  assert.deepEqual(turnTokens({ provider: "anthropic", usage: { input: 10, cached: huge, output: 1 } }), { cacheRead: 0, cacheWrite: 0, input: 10, output: 1, prompt: 10 });
+  assert.equal(tokenTotalsReference([call({ input: huge, output: 1 })]).inputTokens, huge);
+});

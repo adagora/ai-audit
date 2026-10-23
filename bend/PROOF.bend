@@ -2,6 +2,7 @@ import Base
 import ./context.bend as C
 import ./LAWS.bend as Laws
 import ./arena.bend as A
+import ./usage.bend as U
 
 def add_zero(a: Nat) -> {a == Nat.add(a, 0n) : Nat}:
   match a:
@@ -1815,3 +1816,122 @@ def Laws.arena_runs_merge_neighbours_of_one_kind_and_age(prev, bs, turn, tracked
   %Laws.arena_ages_keep_the_unchanged_prefix(prev, bs, turn, tracked) : {Laws.RunsOf(A.arena(prev, bs, turn, tracked)) == Laws.ExpectedRuns(bs, _, A.first(prev, bs)) : List<&2, A.Run>}
   %before_d(A.first(prev, bs)) : {Laws.RunsOf(A.arena(prev, bs, turn, tracked)) == Laws.Grouped(bs, A.ages(prev, bs, turn, tracked), None{}, _, Laws.NextFits(bs, A.ages(prev, bs, turn, tracked), None{}, _)) : List<&2, A.Run>}
   runs_spec(bs, A.ages(prev, bs, turn, tracked), A.joins(bs, A.ages(prev, bs, turn, tracked), A.cut.of(A.first(prev, bs)), Nil{}), Laws.NextFits(bs, A.ages(prev, bs, turn, tracked), None{}, D(A.cut.of(A.first(prev, bs)))), Nil{}, A.cut.of(A.first(prev, bs)), joins_fits(bs, A.ages(prev, bs, turn, tracked), A.cut.of(A.first(prev, bs)), Nil{}))
+
+def Laws.usage_unknown_input_stays_unknown(anthropic, output, cached, write):
+  {==}
+
+def and_false(b: Bool) -> {Bool.and(b, False{}) == False{} : Bool}:
+  match b:
+    case True{}:
+      {==}
+    case False{}:
+      {==}
+
+def or0_eq(m: Maybe<&2, Nat>) -> {U.or0(m) == Laws.Or0(m) : Nat}:
+  match m:
+    case None{}:
+      {==}
+    case Some{n}:
+      {==}
+
+def expect_eq(before: U.Turn, anthropic: Bool) -> {U.drop.expect(before, anthropic) == Laws.ExpectedPrefix(before, anthropic) : Maybe<&2, Nat>}:
+  match before:
+    case U.Turn{+r, +w, i, o, p}:
+      match p:
+        case None{}:
+          {==}
+        case Some{pp}:
+          match anthropic:
+            case True{}:
+              %or0_eq(r) : {Some{Nat.add(U.or0(r), U.or0(w))} == Some{Nat.add(_, Laws.Or0(w))} : Maybe<&2, Nat>}
+              %or0_eq(w) : {Some{Nat.add(U.or0(r), U.or0(w))} == Some{Nat.add(U.or0(r), _)} : Maybe<&2, Nat>}
+              {==}
+            case False{}:
+              {==}
+
+def drop_go_eq(e: Maybe<&2, Nat>, now: U.Turn) -> {U.drop.go(e, now) == Laws.CacheDropped(e, now) : Bool}:
+  match e:
+    case None{}:
+      {==}
+    case Some{+x}:
+      match now:
+        case U.Turn{r, w, i, o, p}:
+          match r:
+            case None{}:
+              Equal.sym(Bool, Bool.and(Nat.is_ge(x, 1024n), False{}), False{}, and_false(Nat.is_ge(x, 1024n)))
+            case Some{c}:
+              {==}
+
+def Laws.usage_cache_drop_only_from_evidence(anthropic, now, before):
+  Equal.trans(Bool, U.drop.go(U.drop.expect(before, anthropic), now), Laws.CacheDropped(U.drop.expect(before, anthropic), now), Laws.CacheDropped(Laws.ExpectedPrefix(before, anthropic), now),
+    drop_go_eq(U.drop.expect(before, anthropic), now),
+    Equal.cong(Maybe<&2, Nat>, Bool, e => Laws.CacheDropped(e, now), U.drop.expect(before, anthropic), Laws.ExpectedPrefix(before, anthropic), expect_eq(before, anthropic)))
+
+def Merge(t: U.Totals, u: U.Totals) -> U.Totals:
+  match t:
+    case U.Totals{a, b, c, d, e}:
+      match u:
+        case U.Totals{f, g, h, k, l}:
+          U.Totals{Nat.add(a, f), Nat.add(b, g), Nat.add(c, h), Nat.add(d, k), Nat.add(e, l)}
+
+def merge_zero(u: U.Totals) -> {Merge(U.Totals{0n, 0n, 0n, 0n, 0n}, u) == u : U.Totals}:
+  match u:
+    case U.Totals{f, g, h, k, l}:
+      {==}
+
+def merge_nil(t: U.Totals) -> {t == Merge(t, U.Totals{0n, 0n, 0n, 0n, 0n}) : U.Totals}:
+  match t:
+    case U.Totals{+a, +b, +c, +d, +e}:
+      %add_zero(a) : {U.Totals{a, b, c, d, e} == U.Totals{_, Nat.add(b, 0n), Nat.add(c, 0n), Nat.add(d, 0n), Nat.add(e, 0n)} : U.Totals}
+      %add_zero(b) : {U.Totals{a, b, c, d, e} == U.Totals{a, _, Nat.add(c, 0n), Nat.add(d, 0n), Nat.add(e, 0n)} : U.Totals}
+      %add_zero(c) : {U.Totals{a, b, c, d, e} == U.Totals{a, b, _, Nat.add(d, 0n), Nat.add(e, 0n)} : U.Totals}
+      %add_zero(d) : {U.Totals{a, b, c, d, e} == U.Totals{a, b, c, _, Nat.add(e, 0n)} : U.Totals}
+      %add_zero(e) : {U.Totals{a, b, c, d, e} == U.Totals{a, b, c, d, _} : U.Totals}
+      {==}
+
+def merge_step(+a: Nat, +b: Nat, +c: Nat, +d: Nat, +e: Nat, +x1: Nat, +x2: Nat, +x3: Nat, +x4: Nat, +x5: Nat, er: U.Totals)
+  -> {Merge(U.Totals{Nat.add(a, x1), Nat.add(b, x2), Nat.add(c, x3), Nat.add(d, x4), Nat.add(e, x5)}, er) == Merge(U.Totals{a, b, c, d, e}, Laws.AddTo(x1, x2, x3, x4, x5, er)) : U.Totals}:
+  match er:
+    case U.Totals{+f, +g, +h, +k, +l}:
+      %Equal.sym(Nat, Nat.add(a, Nat.add(x1, f)), Nat.add(Nat.add(a, x1), f), add_assoc(a, x1, f)) : {U.Totals{Nat.add(Nat.add(a, x1), f), Nat.add(Nat.add(b, x2), g), Nat.add(Nat.add(c, x3), h), Nat.add(Nat.add(d, x4), k), Nat.add(Nat.add(e, x5), l)} == U.Totals{_, Nat.add(b, Nat.add(x2, g)), Nat.add(c, Nat.add(x3, h)), Nat.add(d, Nat.add(x4, k)), Nat.add(e, Nat.add(x5, l))} : U.Totals}
+      %Equal.sym(Nat, Nat.add(b, Nat.add(x2, g)), Nat.add(Nat.add(b, x2), g), add_assoc(b, x2, g)) : {U.Totals{Nat.add(Nat.add(a, x1), f), Nat.add(Nat.add(b, x2), g), Nat.add(Nat.add(c, x3), h), Nat.add(Nat.add(d, x4), k), Nat.add(Nat.add(e, x5), l)} == U.Totals{Nat.add(Nat.add(a, x1), f), _, Nat.add(c, Nat.add(x3, h)), Nat.add(d, Nat.add(x4, k)), Nat.add(e, Nat.add(x5, l))} : U.Totals}
+      %Equal.sym(Nat, Nat.add(c, Nat.add(x3, h)), Nat.add(Nat.add(c, x3), h), add_assoc(c, x3, h)) : {U.Totals{Nat.add(Nat.add(a, x1), f), Nat.add(Nat.add(b, x2), g), Nat.add(Nat.add(c, x3), h), Nat.add(Nat.add(d, x4), k), Nat.add(Nat.add(e, x5), l)} == U.Totals{Nat.add(Nat.add(a, x1), f), Nat.add(Nat.add(b, x2), g), _, Nat.add(d, Nat.add(x4, k)), Nat.add(e, Nat.add(x5, l))} : U.Totals}
+      %Equal.sym(Nat, Nat.add(d, Nat.add(x4, k)), Nat.add(Nat.add(d, x4), k), add_assoc(d, x4, k)) : {U.Totals{Nat.add(Nat.add(a, x1), f), Nat.add(Nat.add(b, x2), g), Nat.add(Nat.add(c, x3), h), Nat.add(Nat.add(d, x4), k), Nat.add(Nat.add(e, x5), l)} == U.Totals{Nat.add(Nat.add(a, x1), f), Nat.add(Nat.add(b, x2), g), Nat.add(Nat.add(c, x3), h), _, Nat.add(e, Nat.add(x5, l))} : U.Totals}
+      %Equal.sym(Nat, Nat.add(e, Nat.add(x5, l)), Nat.add(Nat.add(e, x5), l), add_assoc(e, x5, l)) : {U.Totals{Nat.add(Nat.add(a, x1), f), Nat.add(Nat.add(b, x2), g), Nat.add(Nat.add(c, x3), h), Nat.add(Nat.add(d, x4), k), Nat.add(Nat.add(e, x5), l)} == U.Totals{Nat.add(Nat.add(a, x1), f), Nat.add(Nat.add(b, x2), g), Nat.add(Nat.add(c, x3), h), Nat.add(Nat.add(d, x4), k), _} : U.Totals}
+      {==}
+
+def plus_step(i: Maybe<&2, Nat>, o: Maybe<&2, Nat>, +a: Nat, +b: Nat, +c: Nat, +d: Nat, +e: Nat, +er: U.Totals, -x: U.Totals,
+  ih: {x == Merge(U.Totals{Nat.add(a, U.or0(i)), Nat.add(b, U.or0(o)), Nat.add(c, U.unknown(i)), Nat.add(d, U.unknown(o)), Nat.add(e, U.unknown2(i, o))}, er) : U.Totals})
+  -> {x == Merge(U.Totals{a, b, c, d, e}, Laws.Plus(i, o, er)) : U.Totals}:
+  match i o:
+    case None{} None{}:
+      Equal.trans(U.Totals, x, Merge(U.Totals{Nat.add(a, 0n), Nat.add(b, 0n), Nat.add(c, 1n), Nat.add(d, 1n), Nat.add(e, 1n)}, er), Merge(U.Totals{a, b, c, d, e}, Laws.AddTo(0n, 0n, 1n, 1n, 1n, er)),
+        ih, merge_step(a, b, c, d, e, 0n, 0n, 1n, 1n, 1n, er))
+    case None{} Some{m}:
+      Equal.trans(U.Totals, x, Merge(U.Totals{Nat.add(a, 0n), Nat.add(b, m), Nat.add(c, 1n), Nat.add(d, 0n), Nat.add(e, 1n)}, er), Merge(U.Totals{a, b, c, d, e}, Laws.AddTo(0n, m, 1n, 0n, 1n, er)),
+        ih, merge_step(a, b, c, d, e, 0n, m, 1n, 0n, 1n, er))
+    case Some{n} None{}:
+      Equal.trans(U.Totals, x, Merge(U.Totals{Nat.add(a, n), Nat.add(b, 0n), Nat.add(c, 0n), Nat.add(d, 1n), Nat.add(e, 1n)}, er), Merge(U.Totals{a, b, c, d, e}, Laws.AddTo(n, 0n, 0n, 1n, 1n, er)),
+        ih, merge_step(a, b, c, d, e, n, 0n, 0n, 1n, 1n, er))
+    case Some{n} Some{m}:
+      Equal.trans(U.Totals, x, Merge(U.Totals{Nat.add(a, n), Nat.add(b, m), Nat.add(c, 0n), Nat.add(d, 0n), Nat.add(e, 0n)}, er), Merge(U.Totals{a, b, c, d, e}, Laws.AddTo(n, m, 0n, 0n, 0n, er)),
+        ih, merge_step(a, b, c, d, e, n, m, 0n, 0n, 0n, er))
+
+def go_spec(cs: +List<U.Call>, t: U.Totals) -> {U.totals.go(cs, t) == Merge(t, Laws.ExpectedTotals(cs)) : U.Totals}:
+  match cs:
+    case Nil{}:
+      merge_nil(t)
+    case U.Call{b, +i, +o} <> +rest:
+      match b:
+        case False{}:
+          go_spec(rest, t)
+        case True{}:
+          match t:
+            case U.Totals{+ta, +tb, +tc, +td, +te}:
+              plus_step(i, o, ta, tb, tc, td, te, Laws.ExpectedTotals(rest),
+                U.totals.go(rest, U.Totals{Nat.add(ta, U.or0(i)), Nat.add(tb, U.or0(o)), Nat.add(tc, U.unknown(i)), Nat.add(td, U.unknown(o)), Nat.add(te, U.unknown2(i, o))}),
+                go_spec(rest, U.Totals{Nat.add(ta, U.or0(i)), Nat.add(tb, U.or0(o)), Nat.add(tc, U.unknown(i)), Nat.add(td, U.unknown(o)), Nat.add(te, U.unknown2(i, o))}))
+
+def Laws.usage_totals_count_unknown_apart(cs):
+  Equal.trans(U.Totals, U.totals.go(cs, U.Totals{0n, 0n, 0n, 0n, 0n}), Merge(U.Totals{0n, 0n, 0n, 0n, 0n}, Laws.ExpectedTotals(cs)), Laws.ExpectedTotals(cs),
+    go_spec(cs, U.Totals{0n, 0n, 0n, 0n, 0n}), merge_zero(Laws.ExpectedTotals(cs)))

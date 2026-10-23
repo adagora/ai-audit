@@ -1,4 +1,4 @@
-import type { Api, Usage } from "./extract.js";
+import { tokenCount, type Api, type Usage } from "./extract.js";
 import Bend from "./bend/context.mjs";
 
 export const SEGMENTS = ["system", "tools", "user", "assistant", "toolResults", "attachments", "other"] as const;
@@ -125,6 +125,9 @@ export const BEND_NAT_MAX = 2 ** 48 - 1;
 export type BendList<T> = { $: "Nil" } | { $: "Con"; head: T; tail: BendList<T> };
 export const bendList = <T>(xs: T[]) => xs.reduceRight<BendList<T>>((tail, head) => ({ $: "Con", head, tail }), { $: "Nil" });
 export const fromBendList = <T>(list: BendList<T>) => { const out: T[] = []; for (let l = list; l.$ === "Con"; l = l.tail) out.push(l.head); return out; };
+export type BendMaybe<T> = { $: "None" } | { $: "Some"; value: T };
+export const bendCount = (v: unknown): BendMaybe<number> => { const n = tokenCount(v); return n !== undefined && n <= BEND_NAT_MAX ? { $: "Some", value: n } : { $: "None" }; };
+export const fromBendMaybe = <T>(m: BendMaybe<T>) => (m.$ === "Some" ? m.value : null);
 
 export function scaleToProvider(c: ContextComposition, providerPromptTokens: number | undefined): ContextComposition {
   if (providerPromptTokens == null || c.bytes.attachments > 0) return c;

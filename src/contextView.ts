@@ -1,5 +1,6 @@
-import { KIND_BY_CODE, SEGMENTS, type ArenaBlock, type ContextComposition, type Segment } from "./context.js";
-import { tokenCount, type Usage } from "./extract.js";
+import BendUsage from "./bend/usage.mjs";
+import { bendCount, fromBendMaybe, KIND_BY_CODE, SEGMENTS, type ArenaBlock, type BendMaybe, type ContextComposition, type Segment } from "./context.js";
+import type { Usage } from "./extract.js";
 import type { SessionLink } from "./session.js";
 
 export interface SessionCall { id: string; ts: string; provider?: string; model?: string; usage?: Usage; session: SessionLink; context: ContextComposition }
@@ -9,8 +10,9 @@ export interface TurnTokens { cacheRead: number | null; cacheWrite: number | nul
 export interface TurnView { call: SessionCall; kind: "" | "retry" | "branch"; tokens: TurnTokens; bust: BustSignal[]; preambleBytes: number; totalBytes: number }
 export interface SessionView { turns: TurnView[]; peakTokens: number | null; cacheHit: number | null; busts: number; preambleShare: number; unknownUsage: number }
 
-const MIN_CACHEABLE_TOKENS = 1024;
-const known = (n: unknown): n is number => tokenCount(n) !== undefined;
+type BendTurn = { read: BendMaybe<number>; write: BendMaybe<number>; input: BendMaybe<number>; output: BendMaybe<number>; prompt: BendMaybe<number> };
+const bendTurn = (call: Pick<SessionCall, "provider" | "usage">): BendTurn => BendUsage.turn(call.provider === "anthropic",
+  { $: "Usage", input: bendCount(call.usage?.input), output: bendCount(call.usage?.output), cached: bendCount(call.usage?.cached), write: bendCount(call.usage?.cacheWrite) });
 
 export function sessionCalls(records: object[]): SessionCall[] {
   return (records as Partial<SessionCall & { kind: string }>[])
@@ -31,24 +33,14 @@ export function listSessions(records: object[]): SessionSummary[] {
 }
 
 export function turnTokens(call: Pick<SessionCall, "provider" | "usage">): TurnTokens {
-  const u = call.usage, output = known(u?.output) ? u!.output! : null;
-  if (!known(u?.input)) return { cacheRead: null, cacheWrite: null, input: null, output, prompt: null };
-  const read = known(u!.cached) ? u!.cached! : 0;
-  if (call.provider === "anthropic") {
-    const write = known(u!.cacheWrite) ? u!.cacheWrite! : 0;
-    return { cacheRead: read, cacheWrite: write, input: u!.input!, output, prompt: u!.input! + read + write };
-  }
-  return { cacheRead: read, cacheWrite: null, input: Math.max(0, u!.input! - read), output, prompt: u!.input! };
+  const t = bendTurn(call);
+  return { cacheRead: fromBendMaybe(t.read), cacheWrite: fromBendMaybe(t.write), input: fromBendMaybe(t.input), output: fromBendMaybe(t.output), prompt: fromBendMaybe(t.prompt) };
 }
 
 export function bustSignals(call: SessionCall, previous: SessionCall | undefined): BustSignal[] {
   const signals: BustSignal[] = [];
   if (call.session.firstChanged) signals.push("prefix-rewrite");
-  if (previous) {
-    const now = turnTokens(call), before = turnTokens(previous);
-    const expected = before.prompt === null ? null : call.provider === "anthropic" ? (before.cacheRead ?? 0) + (before.cacheWrite ?? 0) : before.prompt;
-    if (expected !== null && expected >= MIN_CACHEABLE_TOKENS && now.cacheRead !== null && now.cacheRead < expected / 2) signals.push("provider-cache-drop");
-  }
+  if (previous && BendUsage.drop(call.provider === "anthropic", bendTurn(call), bendTurn(previous))) signals.push("provider-cache-drop");
   return signals;
 }
 

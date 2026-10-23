@@ -1,6 +1,7 @@
 import Base
 import ./context.bend as C
 import ./arena.bend as A
+import ./usage.bend as U
 
 def RoundedUp(r: Nat, o: Nat, q: Nat) -> Type:
   match r:
@@ -292,6 +293,75 @@ def RunsOf(x: A.Arena) -> +List<A.Run>:
     case A.Arena{ags, f, rs}:
       rs
 
+def Or0(m: Maybe<&2, Nat>) -> Nat:
+  match m:
+    case None{}:
+      0n
+    case Some{n}:
+      n
+
+def Unknown(m: Maybe<&2, Nat>) -> Nat:
+  match m:
+    case None{}:
+      1n
+    case Some{n}:
+      0n
+
+def AnyUnknown(i: Maybe<&2, Nat>, o: Maybe<&2, Nat>) -> Nat:
+  match i:
+    case None{}:
+      1n
+    case Some{n}:
+      Unknown(o)
+
+def ExpectedPrefix(before: U.Turn, anthropic: Bool) -> Maybe<&2, Nat>:
+  match before:
+    case U.Turn{read, write, input, output, prompt}:
+      match prompt:
+        case None{}:
+          None{}
+        case Some{p}:
+          match anthropic:
+            case True{}:
+              Some{Nat.add(Or0(read), Or0(write))}
+            case False{}:
+              Some{p}
+
+def BelowHalf(read: Maybe<&2, Nat>, +prefix: Nat) -> Bool:
+  match read:
+    case None{}:
+      False{}
+    case Some{+c}:
+      Nat.is_lt(Nat.add(c, c), prefix)
+
+def CacheDropped(prefix: Maybe<&2, Nat>, now: U.Turn) -> Bool:
+  match prefix:
+    case None{}:
+      False{}
+    case Some{+x}:
+      match now:
+        case U.Turn{read, write, input, output, prompt}:
+          Bool.and(Nat.is_ge(x, 1024n), BelowHalf(read, x))
+
+def AddTo(x1: Nat, x2: Nat, x3: Nat, x4: Nat, x5: Nat, t: U.Totals) -> U.Totals:
+  match t:
+    case U.Totals{a, b, c, d, e}:
+      U.Totals{Nat.add(x1, a), Nat.add(x2, b), Nat.add(x3, c), Nat.add(x4, d), Nat.add(x5, e)}
+
+def Plus(+i: Maybe<&2, Nat>, +o: Maybe<&2, Nat>, t: U.Totals) -> U.Totals:
+  AddTo(Or0(i), Or0(o), Unknown(i), Unknown(o), AnyUnknown(i, o), t)
+
+def ExpectedTotals(cs: +List<U.Call>) -> U.Totals:
+  match cs:
+    case Nil{}:
+      U.Totals{0n, 0n, 0n, 0n, 0n}
+    case U.Call{b, +i, +o} <> rest:
+      match b:
+        case False{}:
+          ExpectedTotals(rest)
+        case True{}:
+          Plus(i, o, ExpectedTotals(rest))
+
 law split_sums_to_provider:
   for +p: Nat
   for +bs: +List<Nat>
@@ -339,3 +409,20 @@ law arena_runs_merge_neighbours_of_one_kind_and_age:
   for +turn: Nat
   for +tracked: Bool
   {RunsOf(A.arena(prev, bs, turn, tracked)) == ExpectedRuns(bs, ExpectedAges(prev, bs, turn, tracked), A.first(prev, bs)) : List<&2, A.Run>}
+
+law usage_unknown_input_stays_unknown:
+  for anthropic: Bool
+  for +output: Maybe<&2, Nat>
+  for cached: Maybe<&2, Nat>
+  for write: Maybe<&2, Nat>
+  {U.turn(anthropic, U.Usage{None{}, output, cached, write}) == U.Turn{None{}, None{}, None{}, output, None{}} : U.Turn}
+
+law usage_cache_drop_only_from_evidence:
+  for +anthropic: Bool
+  for +now: U.Turn
+  for +before: U.Turn
+  {U.drop(anthropic, now, before) == CacheDropped(ExpectedPrefix(before, anthropic), now) : Bool}
+
+law usage_totals_count_unknown_apart:
+  for +cs: +List<U.Call>
+  {U.totals(cs) == ExpectedTotals(cs) : U.Totals}
