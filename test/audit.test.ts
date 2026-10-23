@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AuditLog, replay, report, sha256 } from "../src/audit.js";
+import { AuditLog, redact, replay, report, sha256 } from "../src/audit.js";
 
 const fresh = () => new AuditLog(join(mkdtempSync(join(tmpdir(), "audit-")), "log.jsonl"));
 const step = `(input, tick) => { let s = 0; for (const x of input.xs) { tick(); s += x * input.k; } return { s }; }`;
@@ -57,4 +57,12 @@ test("report numbers match the log", () => {
   assert.equal(report(log, "2100-01-01", "2200-01-01").stats.decisions, 0);
   const lines = readFileSync(log.path, "utf8").split("\n"); lines[0] = lines[0].replace('"odp"', '"zmienione"'); writeFileSync(log.path, lines.join("\n"));
   assert.match(report(log, "2000-01-01", "2100-01-01").md, /NARUSZONA ❌ \(linia 1/);
+});
+
+test("found by fuzzing: redacting a stored input takes linear time", () => {
+  for (const text of ["a".repeat(65536) + "!", "_y".repeat(32768) + "@x"]) {
+    const t0 = performance.now(); redact(text);
+    assert.ok(performance.now() - t0 < 1000, text.slice(0, 4));
+  }
+  assert.equal(redact("mail jan.kowalski@firma.pl, tel +48 601 234 567"), "mail [EMAIL], tel [PHONE]");
 });

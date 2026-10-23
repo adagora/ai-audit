@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 export type Mode = "redact" | "no-go" | "advisory";
 export type Allowlist = Pick<ReadonlySet<string>, "has">;
 interface Rule { readonly id: string; readonly re: RegExp; readonly group?: number; readonly keywords?: readonly string[]; readonly valid?: (m: string) => boolean; readonly field?: RegExp }
-export const SCANNER_VERSION = "4";
+export const SCANNER_VERSION = "5";
 const KEY_END = String.raw`(?![\w-])`, JWT_END = String.raw`(?![\w\/\\=-])`;
 
 const pesel = (s: string) => {
@@ -19,16 +19,18 @@ const mod97 = (iban: string) => {
   let m = 0; for (const ch of digits) m = (m * 10 + Number(ch)) % 97;
   return m === 1;
 };
+const NAME_PREFIX = String.raw`(?:(?=[A-Za-z])(?<!(?:^|[^A-Za-z0-9_])[A-Za-z][\w.-]*?)[A-Za-z][\w.-]*?)?`;
 const NAMED = String.raw`(?:pass(?:word|wd|phrase)|secret|private[_.-]?key|api[_.-]?key|access[_.-]?key|(?<!(?:page|next|cursor|continuation|sync)[_.-]?)token)`;
 const literal = (v: string) => v.length >= 6 && !/\s/.test(v) && !/^[$<{]|[([]/.test(v) && !/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/.test(v);
+const DB_SCHEME = String.raw`\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|rediss?|mssql|sqlserver|cockroachdb):\/\/`;
 const databaseCredentials = (uri: string) => {
   const authority = uri.slice(uri.indexOf("://") + 3).split(/[/?#]/, 1)[0];
   const at = authority.lastIndexOf("@");
-  if (at >= 0 && authority.slice(0, at).includes(":")) return true;
+  if (at >= 0 && authority.slice(0, at).replace(/\[REDACTED:[\w-]+\]/g, "").includes(":")) return true;
   const query = uri.indexOf("?");
   if (query < 0) return false;
-  return [...new URLSearchParams(uri.slice(query + 1).split("#", 1)[0])]
-    .some(([key, value]) => /^(?:password|passwd|pwd)$/i.test(key) && value.length > 0);
+  return uri.slice(query + 1).split("#", 1)[0].split("&")
+    .some((pair) => pair.includes("=") && [...new URLSearchParams(pair)].some(([key, value]) => /^(?:password|passwd|pwd)$/i.test(key) && value.length > 0));
 };
 
 const definitions: Rule[] = [
@@ -38,8 +40,8 @@ const definitions: Rule[] = [
   { id: "aws-session-token", re: /(?<![A-Za-z0-9])(?:aws[_.-]?)?session[_.-]?token\b[\\"'\s]*[:=][\\"'\s]*((?:[A-Za-z0-9/+=]|%2[FB]|%3D){16,})(?![A-Za-z0-9/+=]|%[0-9A-F]{2})/gi, group: 1, field: /^(?:aws[_.-]?)?session[_.-]?token$/i },
   { id: "presigned-url-credential", re: /[?&]X-Amz-Security-Token=([A-Za-z0-9%+/=_.~-]{16,})/gi, group: 1, keywords: ["x-amz-security-token"] },
   { id: "presigned-url-credential", re: /[?&]X-(?:Amz|Goog)-Signature=([0-9a-f]{16,})/gi, group: 1, keywords: ["x-amz-signature", "x-goog-signature"] },
-  { id: "database-credentials", re: /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|rediss?|mssql|sqlserver|cockroachdb):\/\/[^\s<>"'`]+/gi, valid: databaseCredentials },
-  { id: "database-credentials", re: /(?<![\w.-])[\w.-]+:[^\s@/"'`;[\]]+@(?:tcp|unix)\([^)\s]*\)/g, keywords: ["@tcp(", "@unix("] },
+  { id: "database-credentials", re: new RegExp(String.raw`${DB_SCHEME}(?:(?!${DB_SCHEME})[^\s<>"'\x60])+`, "gi"), valid: databaseCredentials },
+  { id: "database-credentials", re: /(?<![\w.-])[\w.-]+:[^\s@/"'`;[\]]{1,256}@(?:tcp|unix)\([^)\s]{0,260}\)/g, keywords: ["@tcp(", "@unix("] },
   { id: "database-password", re: /(?<![A-Za-z0-9])(?:PGPASSWORD|MYSQL_PWD|(?:db|database)[_.-]?password)\b[\\"'\s]*[:=]\s*(["'])((?:\\.|(?!\1)[^\\\r\n])+)\1/gi, group: 2 },
   { id: "database-password", re: /(?<![A-Za-z0-9])(?:PGPASSWORD|MYSQL_PWD|(?:db|database)[_.-]?password)\b[\\"'\s]*[:=]\s*([^\s\\"'`;]+)/gi, group: 1, field: /^(?:PGPASSWORD|MYSQL_PWD|(?:db|database)[_.-]?password)$/i },
   { id: "credential-client-secret", re: /(?<![A-Za-z0-9])client[_.-]?secret\b[\\"'\s]*[:=][\\"'\s]*([A-Za-z0-9_./+~=-]{8,})/gi, group: 1, field: /^client[_.-]?secret$/i },
@@ -62,14 +64,14 @@ const definitions: Rule[] = [
   { id: "slack-bot-token", re: /xoxb-[0-9]{10,13}-[0-9]{10,13}[a-zA-Z0-9-]*/g, keywords: ["xoxb"] },
   { id: "slack-user-token", re: /xox[pe](?:-[0-9]{10,13}){3}-[a-zA-Z0-9-]{28,34}/g, keywords: ["xoxp-", "xoxe-"] },
   { id: "slack-webhook-url", re: /(?:https?:\/\/)?hooks.slack.com\/(?:services|workflows|triggers)\/[A-Za-z0-9+/]{43,56}/g, keywords: ["hooks.slack.com"] },
-  { id: "pii-email", re: /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g, keywords: ["@"] },
+  { id: "pii-email", re: /(?:(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+|[A-Za-z0-9._%+-]{1,64})@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g, keywords: ["@"] },
   { id: "pii-iban", re: /\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,4})?\b/g, valid: mod97 },
   { id: "pii-iban", re: /(?<![\w-])\d{2}(?: ?\d{4}){6}(?![\w-])/g, valid: (m) => mod97("PL" + m.replace(/ /g, "")) },
   { id: "pii-pesel", re: /(?<!\d)\d{11}(?!\d)/g, valid: pesel },
   { id: "pii-phone", re: /(?<![\w+.])(?:\+|00)\d{2,3}[ -]?\d{2,4}(?:[ -]?\d{2,4}){2,3}(?![\w])/g },
   { id: "pii-phone", re: /(?<![\w.,-])\d{3}[ -]\d{3}[ -]\d{3}(?![\w.,-])/g },
-  { id: "named-credential", re: new RegExp(String.raw`(?<![A-Za-z0-9_])(?:[A-Za-z][\w.-]*?)?${NAMED}["']?\s*[:=]\s*(["'])((?:(?!\1)[^\\\r\n]){6,})\1`, "gi"), group: 2, valid: literal, field: new RegExp(String.raw`${NAMED}$`, "i") },
-  { id: "named-credential", re: new RegExp(String.raw`(?<![A-Za-z0-9_])(?:[A-Za-z][\w.-]*?)?${NAMED}["']?\s*[:=]\s*([^\s"'\x60;,&<>]{8,})`, "gi"), group: 1, valid: (v) => literal(v) && /\d/.test(v) },
+  { id: "named-credential", re: new RegExp(String.raw`(?<![A-Za-z0-9_])${NAME_PREFIX}${NAMED}["']?\s*[:=]\s*(["'])((?:(?!\1)[^\\\r\n]){6,})\1`, "gi"), group: 2, valid: literal, field: new RegExp(String.raw`${NAMED}$`, "i") },
+  { id: "named-credential", re: new RegExp(String.raw`(?<![A-Za-z0-9_])${NAME_PREFIX}${NAMED}["']?\s*[:=]\s*([^\s"'\x60;,&<>]{8,})`, "gi"), group: 1, valid: (v) => literal(v) && /\d/.test(v) },
 ];
 export const RULES: readonly Rule[] = Object.freeze(definitions.map((r) => Object.freeze({ ...r,
   re: Object.freeze(r.re), field: r.field && Object.freeze(r.field), keywords: r.keywords && Object.freeze([...r.keywords]) })));
@@ -85,9 +87,11 @@ interface Span { start: number; end: number; matchStart: number; matchEnd: numbe
 
 const allowed = (value: string, carnet?: Allowlist) => carnet?.has(createHash("sha256").update(value).digest("hex")) === true;
 const validBeforeSpace = (r: Rule, text: string, start: number, end: number) => {
+  const match = text.slice(start, end);
+  if (match.lastIndexOf(" ") <= 0) return undefined;
   const whole = new RegExp(`^(?:${r.re.source})$`, r.re.flags.replace("g", ""));
-  for (let cut = text.lastIndexOf(" ", end - 1); cut > start; cut = text.lastIndexOf(" ", cut - 1))
-    if (whole.test(text.slice(start, cut)) && r.valid!(text.slice(start, cut))) return cut;
+  for (let cut = match.lastIndexOf(" "); cut > 0; cut = match.lastIndexOf(" ", cut - 1))
+    if (whole.test(match.slice(0, cut)) && r.valid!(match.slice(0, cut))) return start + cut;
   return undefined;
 };
 export function scanText(text: string, carnet?: Allowlist): Span[] {
@@ -108,12 +112,12 @@ export function scanText(text: string, carnet?: Allowlist): Span[] {
       spans.push({ start: s, end: e, matchStart, matchEnd, rule: r.id, value });
     }
   }
-  if (lower.includes("ey")) for (const m of text.matchAll(/ey[\w\-\/\\.=]*(?:\s+[\w\-\/\\.=]{8,}(?![\w\-\/\\.=]))+/g)) {
+  if (lower.includes("ey")) for (const m of text.matchAll(/(?<![\w\-\/\\.=])(?=([\w\-\/\\.=]*))\1(?<=ey[\w\-\/\\.=]*)(?:\s+[\w\-\/\\.=]{8,}(?![\w\-\/\\.=]))+/g)) {
     const at: number[] = []; let joined = "";
     [...m[0]].forEach((c, i) => { if (!/\s/.test(c)) { at.push(m.index! + i); joined += c; } });
-    for (const j of joined.matchAll(/ey[a-zA-Z0-9]{17,}\.ey[a-zA-Z0-9\/\\_-]{17,}\.(?:[a-zA-Z0-9\/\\_-]{10,}={0,2})?/g)) {
-      const start = at[j.index!], end = at[j.index! + j[0].length - 1] + 1;
-      if (!allowed(j[0], carnet)) spans.push({ start, end, matchStart: start, matchEnd: end, rule: "jwt", value: j[0] });
+    for (const j of joined.matchAll(/(?<![a-zA-Z0-9])(?=[a-zA-Z0-9]*\.)(?=([a-zA-Z0-9]*?)ey[a-zA-Z0-9]{17,}\.)\1(ey[a-zA-Z0-9]{17,}\.ey[a-zA-Z0-9\/\\_-]{17,}\.(?:[a-zA-Z0-9\/\\_-]{10,}={0,2})?)/g)) {
+      const from = j.index! + j[1].length, start = at[from], end = at[from + j[2].length - 1] + 1;
+      if (!allowed(j[2], carnet)) spans.push({ start, end, matchStart: start, matchEnd: end, rule: "jwt", value: j[2] });
     }
   }
   spans.sort((a, b) => a.start - b.start || b.end - a.end);
@@ -128,29 +132,41 @@ export function scanText(text: string, carnet?: Allowlist): Span[] {
 }
 
 export const redactText = (text: string, spans: Span[]) =>
-  spans.reduceRight((t, s) => t.slice(0, s.start) + `[REDACTED:${s.rule}]` + t.slice(s.end), text);
+  spans.map((s, i) => `${text.slice(i ? spans[i - 1].end : 0, s.start)}[REDACTED:${s.rule}]`).join("") + text.slice(spans.at(-1)?.end ?? 0);
 
+const MASKING_PASSES = 4;
 const isPayload = (s: string) => /^data:[\w.+-]+\/[\w.+-]+(?:;[^,]*)?;base64,/.test(s);
 const outsideStrings = (json: string) => json.replace(/"(?:[^"\\]|\\.)*"/g, (s) => `"${" ".repeat(s.length - 2)}"`);
+function maskOnce(v: string, carnet: Allowlist | undefined, path: string, findings: Finding[]): string {
+  if (/^\s*[\[{]/.test(v)) {
+    let parsed: unknown;
+    try { parsed = JSON.parse(v); } catch { }
+    if (parsed && typeof parsed === "object") {
+      if (hasDuplicateKeys(v)) {
+        findings.push({ rule: "ambiguous-json", path, unredactable: true });
+        return v;
+      }
+      const nested = inspect(parsed, carnet, `${path}#json`), json = nested.findings.length ? JSON.stringify(nested.value) : v;
+      const spans = scanText(outsideStrings(json), carnet);
+      findings.push(...nested.findings); spans.forEach((s) => findings.push({ rule: s.rule, path }));
+      return spans.length ? redactText(json, spans) : json;
+    }
+  }
+  const spans = scanText(v, carnet); spans.forEach((s) => findings.push({ rule: s.rule, path }));
+  return spans.length ? redactText(v, spans) : v;
+}
+
 export function inspect(v: unknown, carnet?: Allowlist, path = "$", findings: Finding[] = [], payload = false): { value: unknown; findings: Finding[] } {
   if (typeof v === "string") {
     if (payload || isPayload(v)) return { value: v, findings };
-    if (/^\s*[\[{]/.test(v)) {
-      let parsed: unknown;
-      try { parsed = JSON.parse(v); } catch { }
-      if (parsed && typeof parsed === "object") {
-        if (hasDuplicateKeys(v)) {
-          findings.push({ rule: "ambiguous-json", path, unredactable: true });
-          return { value: v, findings };
-        }
-        const nested = inspect(parsed, carnet, `${path}#json`);
-        if (nested.findings.length) { findings.push(...nested.findings); return { value: JSON.stringify(nested.value), findings }; }
-        const spans = scanText(outsideStrings(v), carnet); spans.forEach((s) => findings.push({ rule: s.rule, path }));
-        return { value: spans.length ? redactText(v, spans) : v, findings };
-      }
+    let value = v;
+    for (let pass = 0; ; pass++) {
+      const found: Finding[] = [], masked = maskOnce(value, carnet, path, found);
+      findings.push(...found.map((f) => (pass < MASKING_PASSES ? f : { ...f, unredactable: true })));
+      if (!found.length) return { value, findings };
+      value = masked;
+      if (pass === MASKING_PASSES || found.some((f) => f.inKey || f.unredactable)) return { value, findings };
     }
-    const spans = scanText(v, carnet); spans.forEach((s) => findings.push({ rule: s.rule, path }));
-    return { value: spans.length ? redactText(v, spans) : v, findings };
   }
   if (Array.isArray(v)) return { value: joinParts(v, carnet, path, findings).map((x, i) => inspect(x, carnet, `${path}[${i}]`, findings).value), findings };
   if (v && typeof v === "object") {

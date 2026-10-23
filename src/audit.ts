@@ -33,7 +33,7 @@ export interface Rec {
 }
 
 export function redact(s: string): string {
-  return s.replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, "[EMAIL]")
+  return s.replace(/(?:(?<![\w.+-])[\w.+-]+|[\w.+-]{1,64})@[\w-]+\.[\w.]+/g, "[EMAIL]")
     .replace(/\+?\d[\d \-]{7,}\d/g, "[PHONE]")
     .replace(/\b\d{11}\b/g, "[PESEL]");
 }

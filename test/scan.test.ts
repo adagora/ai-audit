@@ -153,3 +153,47 @@ test("a decimal fraction is not a phone number; international numbers still are"
   for (const text of ["0.0012444963678717614", '{"bend":[-0.18,0.0012444963678717614]}', "ratio 1.00485551234567"]) assert.deepEqual(scanText(text), [], text);
   for (const text of ["tel +48 601 234 567", "call 0048 601 234 567", "0048601234567"]) assert.deepEqual(scanText(text).map((s) => s.rule), ["pii-phone"], text);
 });
+
+test("found by fuzzing: a number beside another finding in nested JSON is still masked; long names after a non-letter are still names", () => {
+  assert.deepEqual(inspect('{"mail":"jan@firma.pl","pesel":44051401359}'), { value: '{"mail":"[REDACTED:pii-email]","pesel":[REDACTED:pii-pesel]}',
+    findings: [{ rule: "pii-email", path: "$#json.mail" }, { rule: "pii-pesel", path: "$" }] });
+  for (const text of [`1a.${"b".repeat(70)}_password: Secr3tValue1`, `.${"c".repeat(90)}_secret = 'Secr3tValue1'`])
+    assert.ok(!redactText(text, scanText(text)).includes("Secr3tValue1"), text);
+});
+
+test("found by fuzzing: masking an email in a database URL is a fixpoint, because the colon in a mask is not a password", () => {
+  const once = inspect("postgres://jan@firma.pl@db.local/app");
+  assert.deepEqual(once, { value: "postgres://[REDACTED:pii-email]@db.local/app", findings: [{ rule: "pii-email", path: "$" }] });
+  assert.deepEqual(inspect(once.value).findings, []);
+  assert.equal(inspect("postgres://[REDACTED:pii-email]:hunter2@db.local/app").value, "[REDACTED:database-credentials]");
+});
+
+test("found by fuzzing: a database URL with a password is found when another database URL without one runs into it", () => {
+  assert.equal(inspect("DATABASE_URLS=mysql://localhost/app,postgres://admin:hunter2@db:5432/x").value, "DATABASE_URLS=mysql://localhost/app,[REDACTED:database-credentials]");
+  assert.equal(inspect("postgres://u@h/db?fallback=mysql://x:y@z").value, "postgres://u@h/db?fallback=[REDACTED:database-credentials]");
+  assert.equal(inspect("mongodb://u:p@h1:27017,h2:27017/db?replicaSet=x").value, "[REDACTED:database-credentials]");
+});
+
+test("found by fuzzing: masking repeats until nothing new shows, also when masking turns text into JSON, so a mask never leaves a key standing on its own", () => {
+  assert.deepEqual(inspect("AKIA" + "IOSFODNN7EXAMPLQ" + "44051401359"), { value: "[REDACTED:aws-access-token][REDACTED:pii-pesel]",
+    findings: [{ rule: "pii-pesel", path: "$" }, { rule: "aws-access-token", path: "$" }] });
+  const once = inspect("PL61712191228client_secret = Secr3tValue1");
+  assert.ok(!JSON.stringify(once.value).includes("Secr3tValue1"), JSON.stringify(once));
+  assert.deepEqual(inspect(once.value).findings, []);
+  const wrapped = `["ghp_${"a".repeat(10)}","${"b".repeat(30)}","eyJhbGciOiJIUzI1NiJ9x.eyJzdWIi\n  OiIxMjM0NTY3ODkw.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV"]`;
+  assert.deepEqual(inspect(wrapped), { value: '["[REDACTED:github-pat]","bbbb","[REDACTED:jwt]"]', findings: [{ rule: "jwt", path: "$" }, { rule: "github-pat", path: "$#json[0..1]" }] });
+});
+
+test("found by fuzzing: repeated characters scan in linear time, not seconds per 64 KiB", () => {
+  for (const text of ["a".repeat(65536) + " @", "%".repeat(65536) + " @", "ey".repeat(32768) + "\n12345678", "a.".repeat(32768) + "\n", "-a".repeat(32768) + "\n", "7:".repeat(32768) + "@tcp(",
+    "12345678901,".repeat(21846), "mysql://a,".repeat(26215), "mysql://h#?" + "&/".repeat(131072)]) {
+    const t0 = performance.now(); scanText(text);
+    assert.ok(performance.now() - t0 < 1000, JSON.stringify(text.slice(0, 4)));
+  }
+});
+
+test("found by fuzzing: masking thousands of findings takes linear time, so a pasted mailing list does not stall the proxy", () => {
+  const mails = "jan.kowalski@firma.pl\n".repeat(40000), t0 = performance.now(), r = inspect(mails);
+  assert.ok(performance.now() - t0 < 1000, `${(performance.now() - t0).toFixed(0)} ms`);
+  assert.deepEqual([r.findings.length, (r.value as string).includes("@")], [40000, false]);
+});
