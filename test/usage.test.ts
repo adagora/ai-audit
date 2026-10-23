@@ -71,3 +71,13 @@ test("a negative or fractional token count in an older log is unknown in reports
   assert.deepEqual(turnTokens({ provider: "openai", usage: { input: -50, cached: 0, output: 1 } }), { cacheRead: null, cacheWrite: null, input: null, output: 1, prompt: null });
   assert.deepEqual(turnTokens({ provider: "anthropic", usage: { input: 50, cached: 0.5, cacheWrite: -1, output: 2.5 } }), { cacheRead: 0, cacheWrite: 0, input: 50, output: null, prompt: 50 });
 });
+
+test("cached and cache-write sums in stats skip a count that is not a valid token count (a string, negative or fractional value in an older log)", () => {
+  const log = new AuditLog(join(mkdtempSync(join(tmpdir(), "usage-")), "log.jsonl"));
+  const call = (usage: object) => log.append({ kind: "llm-call", id: "c", ts: "2026-10-20T10:00:00Z", provider: "anthropic", model: "m", virtualKey: "k", upstreamStatus: 200, decision: { action: "forward", findings: [] }, usage } as any);
+  call({ input: 10, output: 1, cached: 40, cacheWrite: 5 });
+  call({ input: 10, output: 1, cached: "5", cacheWrite: -3 });
+  call({ input: 10, output: 1, cached: 2.5, cacheWrite: 7 });
+  const [s] = stats(log, "key");
+  assert.deepEqual([s.cachedTokens, s.cacheWriteTokens], [40, 12]);
+});

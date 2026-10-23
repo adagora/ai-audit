@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import vm from "node:vm";
 import BendUsage from "./bend/usage.mjs";
 import { bendCount, bendListOf } from "./context.js";
+import { tokenCount } from "./extract.js";
 import { policyHistories } from "./policies.js";
 
 export const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -220,7 +221,7 @@ export function stats(log: AuditLog, by: "key" | "model" | "hour", from = "", to
     const k = by === "key" ? c.virtualKey ?? "(provider key)" : by === "model" ? `${c.provider}/${c.model ?? "?"}` : c.ts.slice(0, 13) + ":00Z";
     const r = g.get(k) ?? { requests: 0, errors: 0, blocked: 0, calls: [], cached: 0, cacheWrite: 0, injection: 0, latencyMs: [] }; g.set(k, r);
     r.requests++; if (c.decision?.action === "block") r.blocked++; else if (!(c.upstreamStatus >= 200 && c.upstreamStatus < 400)) r.errors++;
-    r.calls.push(c); r.cached += c.usage?.cached ?? 0; r.cacheWrite += c.usage?.cacheWrite ?? 0; r.injection += c.decision?.signals?.length ?? 0; r.latencyMs.push(c.latencyMs ?? 0);
+    r.calls.push(c); r.cached += tokenCount(c.usage?.cached) ?? 0; r.cacheWrite += tokenCount(c.usage?.cacheWrite) ?? 0; r.injection += c.decision?.signals?.length ?? 0; r.latencyMs.push(c.latencyMs ?? 0);
   }
   return [...g].sort(([a], [b]) => a.localeCompare(b)).map(([group, r]) => {
     const l = r.latencyMs.sort((a, b) => a - b);
