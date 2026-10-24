@@ -172,7 +172,7 @@ export function createProxy(o: ProxyOpts) {
       res.setHeader("x-audit-finding-count", String(findings.length));
       if (signals.length) res.setHeader("x-audit-signal-count", String(signals.length));
       if (d.action === "forward-redacted") sanitize.forEach((f) => f());
-      const fwd = d.action === "forward-redacted" || alias ? Buffer.from(JSON.stringify(value)) : raw;
+      const fwd = d.action === "forward-redacted" ? Buffer.from(JSON.stringify(value)) : alias ? Buffer.from(JSON.stringify(body)) : raw;
       const rec = {
         ...context, forwardedPromptDigest: sha256(fwd.toString("latin1")), ...(composition && { context: composition }), ...(session && { session }),
         decision: { mode: profile.mode, action: d.action, findings: d.findings.map((f) => ({ rule: f.rule, path: f.path })), ...(signals.length && { signals }), ...(d.action === "forward-redacted" && rasterized.length && { rasterized }), ...(atts.length && { sandbox }) },

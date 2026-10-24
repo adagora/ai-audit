@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { mockUpstream, startProxy } from "./helpers.js";
+import { AWS, mockUpstream, startProxy } from "./helpers.js";
 import { report, sha256, stats } from "../src/audit.js";
 
 const up = await mockUpstream(), other = await mockUpstream();
@@ -38,6 +38,19 @@ test("aliases: client asks for 'fast'/'local', proxy routes model (and upstream)
   const p2 = await startProxy(up.url, "redact", { aliases: { local: { model: "qwen-local", upstream: other.url } } });
   await (await fetch(p2.url + "/v1/chat/completions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(oa("local")) })).text();
   assert.equal(JSON.parse(other.seen.at(-1)!.body.toString()).model, "qwen-local"); p2.close();
+});
+
+test("aliases in advisory mode forward the original text with only the model replaced, as the decision says", async () => {
+  const p4 = await startProxy(up.url, "advisory", { aliases: { fast: { model: "mock-1" } } });
+  try {
+    const r = await fetch(p4.url + "/v1/chat/completions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: "fast", messages: [{ role: "user", content: `key ${AWS}` }] }) });
+    assert.equal(r.status, 200); await r.text();
+    const sent = JSON.parse(up.seen.at(-1)!.body.toString());
+    assert.equal(sent.model, "mock-1"); assert.equal(sent.messages[0].content, `key ${AWS}`);
+    const rec = p4.log.read().at(-1) as any;
+    assert.equal(rec.decision.action, "forward-original"); assert.deepEqual(rec.decision.findings.map((f: any) => f.rule), ["aws-access-token"]);
+    assert.equal(rec.forwardedPromptDigest, sha256(up.seen.at(-1)!.body.toString("latin1")));
+  } finally { p4.close(); }
 });
 
 test("aliases: a model named like an Object.prototype member is not an alias and is forwarded unchanged", async () => {
