@@ -1,7 +1,7 @@
 import http from "node:http";
 import { randomUUID } from "node:crypto";
 import { AuditLog, AuditLogUnavailable, sha256, stats } from "./audit.js";
-import { decide, hasDuplicateKeys, inspect, type Mode } from "./scan.js";
+import { decide, hasDuplicateKeys, inspect, MAX_JSON_DEPTH, nestedDeeperThan, type Mode } from "./scan.js";
 import { toolResultSignals, type Signal } from "./injection.js";
 import { quinelingCalls, quinelingResults, type QuinelingEvent } from "./quinelings.js";
 import { extract, type Api } from "./extract.js";
@@ -118,9 +118,10 @@ export function createProxy(o: ProxyOpts) {
 
       const chunks: Buffer[] = []; let n = 0;
       for await (const c of req) { n += c.length; if (n > max) { clearTimeout(timer); return fail(413, "audit_body_too_large"); } chunks.push(c); }
-      const raw = Buffer.concat(chunks); let body: any;
-      try { body = JSON.parse(raw.toString("utf8")); } catch { clearTimeout(timer); return fail(400, "audit_malformed_json"); }
-      if (hasDuplicateKeys(raw.toString("utf8"))) { clearTimeout(timer); return fail(400, "audit_duplicate_keys"); }
+      const raw = Buffer.concat(chunks), text = raw.toString("utf8"); let body: any;
+      try { body = JSON.parse(text); } catch { clearTimeout(timer); return fail(400, "audit_malformed_json"); }
+      if (hasDuplicateKeys(text)) { clearTimeout(timer); return fail(400, "audit_duplicate_keys"); }
+      if (nestedDeeperThan(text, MAX_JSON_DEPTH)) { clearTimeout(timer); return fail(400, "audit_json_too_deep"); }
 
       if (route !== "count") try { o.log.ensureWritable(); } catch (e) { clearTimeout(timer); decisionTag = "log-unavailable"; return logUnavailable(e); }
 

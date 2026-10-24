@@ -30,7 +30,7 @@ stateDiagram-v2
   KeyCheck --> Refused: unsupported route 404
   KeyCheck --> Answered: GET /v1/models, passed through
   KeyCheck --> BodyCheck: POST chat/completions, responses, messages, count_tokens
-  BodyCheck --> Refused: over 32 MiB 413, bad JSON or duplicate keys 400
+  BodyCheck --> Refused: over 32 MiB 413, bad JSON, duplicate keys or nested deeper than 256 400
   BodyCheck --> LogCheck: parsed
   LogCheck --> Refused: log torn or unwritable 503
   LogCheck --> Refused: model not allowed for this key 403

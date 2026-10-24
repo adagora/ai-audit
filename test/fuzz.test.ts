@@ -7,7 +7,7 @@ import { AuditLog, redact } from "../src/audit.js";
 import { discover } from "../src/attachments.js";
 import { extract, type Api } from "../src/extract.js";
 import { quinelingCalls, quinelingResults } from "../src/quinelings.js";
-import { decide, hasDuplicateKeys, inspect, scanText } from "../src/scan.js";
+import { decide, hasDuplicateKeys, inspect, nestedDeeperThan, scanText } from "../src/scan.js";
 import { gen, pesel, type Gen } from "./helpers.js";
 
 const SCALE = Math.max(Number(process.env.FUZZ_SCALE ?? 1), 1), SEED = Number(process.env.FUZZ_SEED ?? 0);
@@ -165,6 +165,17 @@ test("fuzz: duplicate-key detection agrees with the generator on JSON with escap
     const { text, duplicate } = jsonText(g, 0);
     JSON.parse(text);
     assert.equal(hasDuplicateKeys(text), duplicate, text);
+  }
+});
+
+const depthOf = (v: unknown): number => (v !== null && typeof v === "object" ? 1 + Math.max(0, ...Object.values(v).map(depthOf)) : 0);
+test("fuzz: the nesting-depth check agrees with the parsed value on JSON with escapes and brackets inside strings", () => {
+  const g = seeded(10);
+  for (let i = 0; i < runs(20000); i++) {
+    const wrap = g.int(4), { text: inner, duplicate } = jsonText(g, 0);
+    if (duplicate) continue;
+    const text = "[".repeat(wrap) + inner + "]".repeat(wrap), depth = depthOf(JSON.parse(text));
+    for (let limit = 0; limit <= depth + 1; limit++) assert.equal(nestedDeeperThan(text, limit), depth > limit, `${limit} ${text}`);
   }
 });
 

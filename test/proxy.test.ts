@@ -7,7 +7,7 @@ import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { AuditLog, report, sha256 } from "../src/audit.js";
 import { createProxy } from "../src/proxy.js";
-import { hasDuplicateKeys, scanText } from "../src/scan.js";
+import { hasDuplicateKeys, inspect, MAX_JSON_DEPTH, scanText } from "../src/scan.js";
 import { mockUpstream, startProxy, AWS, PESEL, AUTH } from "./helpers.js";
 import type { Mode } from "../src/scan.js";
 
@@ -86,6 +86,47 @@ test("count_tokens + models passthrough, routing errors use static codes", async
   const dup = await post(proxies.redact.url, "/v1/chat/completions", '{"model":"a","model":"b"}');
   assert.equal(dup.status, 400); assert.equal((await dup.json()).error.code, "audit_duplicate_keys");
   assert.equal((await post(proxies.redact.url, "/v1/nope", {})).status, 404);
+});
+
+test("a request nested deeper than MAX_JSON_DEPTH is refused with 400 before inspection, where it used to overflow the stack into a 500", async () => {
+  const nested = (depth: number) => `{"model":"gpt-x","messages":[{"role":"user","content":"${"[{".repeat(5000)}"}],"metadata":${"[".repeat(depth - 1)}${"]".repeat(depth - 1)}}`;
+  const sent = up.seen.length, logged = proxies.redact.log.read().length;
+  for (const depth of [MAX_JSON_DEPTH + 1, 3000, 100_000]) {
+    const r = await post(proxies.redact.url, "/v1/chat/completions", nested(depth));
+    assert.equal(r.status, 400); assert.equal((await r.json()).error.code, "audit_json_too_deep");
+  }
+  assert.equal(up.seen.length, sent); assert.equal(proxies.redact.log.read().length, logged);
+  const atLimit = await post(proxies.redact.url, "/v1/chat/completions", nested(MAX_JSON_DEPTH));
+  assert.equal(atLimit.status, 200); await atLimit.text();
+  assert.equal(up.seen.length, sent + 1); assert.equal(proxies.redact.log.read().length, logged + 1);
+});
+
+test("JSON inside a string counts toward MAX_JSON_DEPTH across every hop; deeper JSON is an unmaskable deep-json finding, never an overflow", () => {
+  const arrays = (depth: number) => "[".repeat(depth) + "]".repeat(depth);
+  const rules = (v: unknown) => inspect(v).findings.map((f) => `${f.rule} ${f.path} ${f.unredactable === true}`);
+  assert.deepEqual(rules({ a: arrays(MAX_JSON_DEPTH - 1) }), []);
+  assert.deepEqual(rules({ a: arrays(MAX_JSON_DEPTH) }), ["deep-json $.a true"]);
+  const hop = (outer: number, inner: number) => ({ a: `${"[".repeat(outer)}${JSON.stringify(arrays(inner))}${"]".repeat(outer)}` });
+  assert.deepEqual(rules(hop(50, MAX_JSON_DEPTH - 51)), []);
+  assert.deepEqual(rules(hop(50, MAX_JSON_DEPTH - 50)), [`deep-json $.a#json${"[0]".repeat(50)} true`]);
+  for (const depth of [1000, 100_000]) {
+    assert.deepEqual(rules({ a: arrays(depth) }), ["deep-json $.a true"]);
+    const parsed = JSON.parse(arrays(depth)), result = inspect({ a: parsed });
+    assert.deepEqual(result.findings.map((f) => f.rule), ["deep-json"]);
+  }
+});
+
+test("a request with too deep JSON inside a string is blocked and recorded in redact mode, and forwarded as it is in advisory mode", async () => {
+  const body = { model: "gpt-x", messages: [{ role: "user", content: "hi" }, { role: "tool", tool_call_id: "t1", content: "[".repeat(5000) + "]".repeat(5000) }] };
+  const sent = up.seen.length;
+  const blocked = await post(proxies.redact.url, "/v1/chat/completions", body);
+  assert.equal(blocked.status, 409); assert.equal((await blocked.json()).error.code, "audit_unredactable_finding");
+  assert.equal(up.seen.length, sent);
+  const rec = proxies.redact.log.read().at(-1) as any;
+  assert.equal(rec.decision.action, "block"); assert.deepEqual(rec.decision.findings, [{ rule: "deep-json", path: "$.messages[1].content" }]);
+  const advisory = await post(proxies.advisory.url, "/v1/chat/completions", body);
+  assert.equal(advisory.status, 200); await advisory.text();
+  assert.equal(last().body.toString(), JSON.stringify(body));
 });
 
 test("report summarises proxy calls", () => {

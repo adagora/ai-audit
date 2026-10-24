@@ -8,7 +8,8 @@ import { bendList, bendListOf, fromBendList, type BendList } from "./context.js"
 export type Mode = "redact" | "no-go" | "advisory";
 export type Allowlist = Pick<ReadonlySet<string>, "has">;
 interface Rule { readonly id: string; readonly re: RegExp; readonly group?: number; readonly keywords?: readonly string[]; readonly valid?: (m: string) => boolean; readonly field?: RegExp }
-export const SCANNER_VERSION = "5";
+export const SCANNER_VERSION = "6";
+export const MAX_JSON_DEPTH = 256;
 const KEY_END = String.raw`(?![\w-])`, JWT_END = String.raw`(?![\w\/\\=-])`;
 
 const pesel = (s: string) => {
@@ -150,7 +151,7 @@ export const redactText = (text: string, spans: Span[]) => assemble(text, maskPl
 const MASKING_PASSES = 4;
 const isPayload = (s: string) => /^data:[\w.+-]+\/[\w.+-]+(?:;[^,]*)?;base64,/.test(s);
 const outsideStrings = (json: string) => json.replace(/"(?:[^"\\]|\\.)*"/g, (s) => `"${" ".repeat(s.length - 2)}"`);
-function maskOnce(v: string, carnet: Allowlist | undefined, path: string, findings: Finding[]): string {
+function maskOnce(v: string, carnet: Allowlist | undefined, path: string, findings: Finding[], depth: number): string {
   if (/^\s*[\[{]/.test(v)) {
     let parsed: unknown;
     try { parsed = JSON.parse(v); } catch { }
@@ -159,7 +160,11 @@ function maskOnce(v: string, carnet: Allowlist | undefined, path: string, findin
         findings.push({ rule: "ambiguous-json", path, unredactable: true });
         return v;
       }
-      const nested = inspect(parsed, carnet, `${path}#json`), json = nested.findings.length ? JSON.stringify(nested.value) : v;
+      if (nestedDeeperThan(v, MAX_JSON_DEPTH - depth)) {
+        findings.push({ rule: "deep-json", path, unredactable: true });
+        return v;
+      }
+      const nested = inspect(parsed, carnet, `${path}#json`, [], false, depth), json = nested.findings.length ? JSON.stringify(nested.value) : v;
       const spans = scanText(outsideStrings(json), carnet);
       findings.push(...nested.findings); spans.forEach((s) => findings.push({ rule: s.rule, path }));
       return spans.length ? redactText(json, spans) : json;
@@ -169,19 +174,23 @@ function maskOnce(v: string, carnet: Allowlist | undefined, path: string, findin
   return spans.length ? redactText(v, spans) : v;
 }
 
-export function inspect(v: unknown, carnet?: Allowlist, path = "$", findings: Finding[] = [], payload = false): { value: unknown; findings: Finding[] } {
+export function inspect(v: unknown, carnet?: Allowlist, path = "$", findings: Finding[] = [], payload = false, depth = 0): { value: unknown; findings: Finding[] } {
   if (typeof v === "string") {
     if (payload || isPayload(v)) return { value: v, findings };
     let value = v;
     for (let pass = 0; ; pass++) {
-      const found: Finding[] = [], masked = maskOnce(value, carnet, path, found);
+      const found: Finding[] = [], masked = maskOnce(value, carnet, path, found, depth);
       findings.push(...found.map((f) => (pass < MASKING_PASSES ? f : { ...f, unredactable: true })));
       if (!found.length) return { value, findings };
       value = masked;
       if (pass === MASKING_PASSES || found.some((f) => f.inKey || f.unredactable)) return { value, findings };
     }
   }
-  if (Array.isArray(v)) return { value: joinParts(v, carnet, path, findings).map((x, i) => inspect(x, carnet, `${path}[${i}]`, findings).value), findings };
+  if (v && typeof v === "object" && depth >= MAX_JSON_DEPTH) {
+    findings.push({ rule: "deep-json", path, unredactable: true });
+    return { value: v, findings };
+  }
+  if (Array.isArray(v)) return { value: joinParts(v, carnet, path, findings).map((x, i) => inspect(x, carnet, `${path}[${i}]`, findings, false, depth + 1).value), findings };
   if (v && typeof v === "object") {
     const o: Record<string, unknown> = {};
     for (const [k, x] of Object.entries(v)) {
@@ -191,7 +200,7 @@ export function inspect(v: unknown, carnet?: Allowlist, path = "$", findings: Fi
       const field = typeof x === "string" && x.length && !binary && !isPayload(x) && !/^\[REDACTED:[\w-]+\]$/.test(x) && !allowed(x, carnet)
         ? RULES.find((r) => r.field?.test(k) && (!r.valid || r.valid(x))) : undefined;
       if (field) findings.push({ rule: field.id, path: nextPath });
-      const value = field ? `[REDACTED:${field.id}]` : inspect(x, carnet, nextPath, findings, binary).value;
+      const value = field ? `[REDACTED:${field.id}]` : inspect(x, carnet, nextPath, findings, binary, depth + 1).value;
       Object.defineProperty(o, k, { value, enumerable: true, writable: true, configurable: true });
     }
     return { value: o, findings };
@@ -245,6 +254,17 @@ export function hasDuplicateKeys(t: string): boolean {
     else if (c === "[") stack.push({});
     else if (c === "}" || c === "]") stack.pop();
     else if (c === ",") { const top = stack[stack.length - 1]; if (top?.keys) top.expectKey = true; }
+  }
+  return false;
+}
+
+export function nestedDeeperThan(t: string, limit: number): boolean {
+  let depth = 0;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (c === '"') { i++; while (t[i] !== '"') i += t[i] === "\\" ? 2 : 1; }
+    else if (c === "{" || c === "[") { if (++depth > limit) return true; }
+    else if (c === "}" || c === "]") depth--;
   }
   return false;
 }
