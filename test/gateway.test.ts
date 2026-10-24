@@ -40,6 +40,18 @@ test("aliases: client asks for 'fast'/'local', proxy routes model (and upstream)
   assert.equal(JSON.parse(other.seen.at(-1)!.body.toString()).model, "qwen-local"); p2.close();
 });
 
+test("aliases: a model named like an Object.prototype member is not an alias and is forwarded unchanged", async () => {
+  const p3 = await startProxy(up.url, "redact", { aliases: { fast: { model: "mock-1" } } });
+  try {
+    for (const model of ["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"]) {
+      const r = await fetch(p3.url + "/v1/chat/completions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(oa(model)) });
+      assert.equal(r.status, 200); await r.text();
+      assert.equal(JSON.parse(up.seen.at(-1)!.body.toString()).model, model);
+      const rec = p3.log.read().at(-1) as any; assert.equal(rec.model, model); assert.equal(rec.requestedModel, undefined);
+    }
+  } finally { p3.close(); }
+});
+
 test("usage time series: /audit/stats needs admin key; groups by key/model/hour; CLI stats", async () => {
   assert.equal((await fetch(p.url + "/audit/stats?by=key")).status, 401);
   assert.equal((await fetch(p.url + "/audit/stats?by=key", { headers: { "x-admin-key": "nope" } })).status, 401);

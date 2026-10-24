@@ -125,7 +125,7 @@ export function createProxy(o: ProxyOpts) {
       if (route !== "count") try { o.log.ensureWritable(); } catch (e) { clearTimeout(timer); decisionTag = "log-unavailable"; return logUnavailable(e); }
 
       const requestedModel = typeof body?.model === "string" ? body.model : undefined;
-      const alias = requestedModel ? o.aliases?.[requestedModel] : undefined;
+      const alias = requestedModel && o.aliases && Object.hasOwn(o.aliases, requestedModel) ? o.aliases[requestedModel] : undefined;
       if (alias) { body.model = alias.model; if (alias.upstream) base = alias.upstream; }
       if (vkey?.models && !vkey.models.includes("*") && !vkey.models.includes(requestedModel ?? "") && !vkey.models.includes(body?.model)) { clearTimeout(timer); return fail(403, "audit_model_not_allowed"); }
       const target = base.replace(/\/$/, "") + url.pathname + url.search;
