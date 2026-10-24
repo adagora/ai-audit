@@ -37,3 +37,4 @@ Format: Nygard (Status, Context, Decision, Consequences), at most ~40 lines, fil
 - [27. Policy versions are derived per use case from the log](0027-policy-versions-per-use-case.md)
 - [28. Credentials without a shape are found by their name](0028-named-credentials.md)
 - [29. Pure functions with proved laws are written in Bend 2 and shipped as generated JavaScript](0029-proved-pure-core-in-bend.md)
+- [30. CI runs every gate on Linux; Bend comes from its pinned release archive](0030-ci-and-pinned-bend-archive.md)

@@ -1,5 +1,5 @@
 # 29. Pure functions with proved laws are written in Bend 2 and shipped as generated JavaScript
-Status: Accepted (2026-10-23). Supersedes the "TypeScript only" part of [0001](0001-typescript-zero-runtime-deps.md) for the modules under `bend/`.
+Status: Accepted (2026-10-23). Supersedes the "TypeScript only" part of [0001](0001-typescript-zero-runtime-deps.md) for the modules under `bend/`; "installed with the official script" superseded by [0030](0030-ci-and-pinned-bend-archive.md).
 ## Context
 Some pure functions carry rules that the log's readers rely on: the token split of ADR 0017 must add up exactly to the provider total. Today such rules are tested on generated inputs (`test/laws.test.ts`) but not proved. Bend 2 checks proofs of stated laws and compiles a file to an ES module that Node imports without Bun or any runtime package. A spike on Bend 2.0.38 ported `scaleToProvider`:
 - Three laws in `bend/LAWS.bend`, proved in `bend/PROOF.bend` (767 lines, checked in 0.2 s): the parts sum to the provider total; each part is the floor of its exact share, or one more only when that share is not whole; a segment with no bytes gets no tokens. Three mutated versions of the code fail the check.

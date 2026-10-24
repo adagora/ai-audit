@@ -1,7 +1,7 @@
 # Formal verification (TLA+ / TLC, Bend 2)
 
 Run: `npm run verify:formal`. Procedure, coverage and sync commit: `.agents/skills/verify-audit-log/SKILL.md`.
-Specs `spec/AuditChain.tla`, `spec/RequestLifecycle.tla`; configs `spec/*.cfg`; runner `spec/run.sh` (tla2tools v1.8.0).
+Specs `spec/AuditChain.tla`, `spec/RequestLifecycle.tla`; configs `spec/*.cfg`; runner `spec/run.sh` (tla2tools v1.8.0, a pre-release that upstream rebuilds; v1.7.4 lacks `-noGenerateSpecTE`). CI runs `spec/run.sh` on every push to `main` and every pull request (ADR 0030).
 Statecharts: `audit-chain.mmd/.png`, `request-lifecycle.mmd/.png` (code after ADR 0016).
 
 ## Why TLA+
@@ -26,7 +26,7 @@ Real-code mutations caught by `verify:formal`: append without `withLock` (multi-
 Not modelled: attachment cache vs inspection profile (reviewed: key includes `profile.id`, profile frozen per instance; no stale path).
 
 ## Proofs in Bend 2 (ADR 0029)
-Run: `npm run verify:bend` (needs Bend 2.0.38 on PATH). Code `bend/context.bend` (token split, ADR 0017), `bend/arena.bend` (arena ages, first change and runs, ADR 0020), `bend/usage.bend` (turn tokens, the provider-cache-drop signal and report totals, ADR 0012 and ADR 0020) `bend/spans.bend` (the merge of overlapping finding spans before redaction, ADR 0007) `bend/parts.bend` (which spans are removed from the joined text when a message has several text parts, ADR 0007) `bend/mask.bend` (which bytes of each text part the provider gets after redaction, ADR 0007) and `bend/decide.bend` (the decision to forward or block a request, ADR 0009), laws `bend/LAWS.bend`, proofs `bend/PROOF.bend`, runner `bend/run.sh`. The committed `src/bend/*.mjs` must match the code; `bash bend/run.sh --write` regenerates them.
+Run: `npm run verify:bend` (needs Bend 2.0.38 on PATH; `sh bend/install.sh` installs it into `~/.bend` and checks the archive's sha256, ADR 0030). CI runs it on every push to `main` and every pull request. Code `bend/context.bend` (token split, ADR 0017), `bend/arena.bend` (arena ages, first change and runs, ADR 0020), `bend/usage.bend` (turn tokens, the provider-cache-drop signal and report totals, ADR 0012 and ADR 0020) `bend/spans.bend` (the merge of overlapping finding spans before redaction, ADR 0007) `bend/parts.bend` (which spans are removed from the joined text when a message has several text parts, ADR 0007) `bend/mask.bend` (which bytes of each text part the provider gets after redaction, ADR 0007) and `bend/decide.bend` (the decision to forward or block a request, ADR 0009), laws `bend/LAWS.bend`, proofs `bend/PROOF.bend`, runner `bend/run.sh`. The committed `src/bend/*.mjs` must match the code; `bash bend/run.sh --write` regenerates them.
 
 | Check | Expected | Result |
 |---|---|---|
