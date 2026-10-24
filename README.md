@@ -44,7 +44,7 @@ stateDiagram-v2
   Upstream --> Recorded: deadline 408 or unreachable 502
   Upstream --> Streaming: response headers
   Streaming --> Recorded: response delivered unchanged
-  Streaming --> Lost: append fails after delivery
+  Streaming --> Lost: append or any later step fails after delivery
   Rejected --> Recorded
   Blocked --> Recorded
   Recorded --> [*]
@@ -53,7 +53,7 @@ stateDiagram-v2
   Lost --> [*]
 ```
 
-`Recorded` appends exactly one hash-chained `llm-call` record (ADR 0009); `count_tokens` is inspected the same way but skips both log checks and is never logged. `Refused` writes no record and forwards nothing. `Lost` is the residual window from ADR 0016: the client already has the response, so the failure is counted in `ai_audit_log_write_failures_total` and reported on stderr. The append lock and anchors are drawn in [docs/verification](docs/verification/README.md).
+`Recorded` appends exactly one hash-chained `llm-call` record (ADR 0009); `count_tokens` is inspected the same way but skips both log checks and is never logged. `Refused` writes no record and forwards nothing. `Lost` is the residual window from ADR 0016: the client already has the response, so the failure is counted in `ai_audit_log_write_failures_total` and reported on stderr as `audit_log_write_failed`, whose reason is an error code (`ENOSPC`) or class (`TypeError`), never the message. The append lock and anchors are drawn in [docs/verification](docs/verification/README.md).
 
 ## Development
 `npm run build` compiles with TypeScript (`tsc`); tests, demos and benchmarks use that output. `npm run build:fast` uses the pinned experimental [tsrs](https://github.com/oxc-project/tsrs) Rust compiler instead. It is about 15x faster, for local iteration. It needs `--skipLibCheck` because tsrs reports TS5115 for circular types in Zod dependency declarations.

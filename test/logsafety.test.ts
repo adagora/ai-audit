@@ -67,4 +67,25 @@ test("append failing after the response was streamed: no write-after-end crash, 
     assert.equal(metrics.logWriteFailures.total(), before + 1);
   } finally { process.off("uncaughtException", onErr); px.close(); up.close(); }
 });
+
+test("a plain error after the response was streamed (disk full) is counted too, and its event names the code, never the message", async () => {
+  const p = join(mkdtempSync(join(tmpdir(), "audit-enospc-")), "log.jsonl");
+  const log = new AuditLog(p);
+  log.append = () => { throw Object.assign(new Error("ENOSPC: no space left on device, write {\"content\":\"sk-test-SHOULD-NOT-APPEAR\"}"), { code: "ENOSPC" }); };
+  const up = await mockUpstream(), before = metrics.logWriteFailures.total();
+  const px = createProxy({ log, mode: "redact", upstreamOpenai: up.url, upstreamAnthropic: up.url }).listen(0);
+  await new Promise((r) => px.once("listening", r));
+  const stderr: string[] = [], write = process.stderr.write;
+  process.stderr.write = ((chunk: string | Uint8Array) => { stderr.push(String(chunk)); return true; }) as typeof process.stderr.write;
+  try {
+    const r = await fetch(`http://127.0.0.1:${(px.address() as AddressInfo).port}/v1/chat/completions`, { method: "POST",
+      headers: { "content-type": "application/json" }, body: JSON.stringify({ model: "m", messages: [{ role: "user", content: "hi" }] }) });
+    assert.equal(r.status, 200); await r.text();
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(metrics.logWriteFailures.total(), before + 1);
+    const lost = stderr.map((l) => JSON.parse(l)).filter((e) => e.event === "audit_log_write_failed");
+    assert.equal(lost.length, 1); assert.equal(lost[0].reason, "ENOSPC");
+    assert.ok(!stderr.join("").includes("SHOULD-NOT-APPEAR"));
+  } finally { process.stderr.write = write; px.close(); up.close(); }
+});
 }

@@ -66,7 +66,7 @@ export function createProxy(o: ProxyOpts) {
   try { sessions.rebuild(o.log.read()); } catch { metrics.sessionIndexRebuildFailures.inc(); }
   return http.createServer(async (req, res) => {
     const rid = randomUUID(), t0 = Date.now(); res.setHeader("x-request-id", rid);
-    let decisionTag = "none", routeTag = "";
+    let decisionTag = "none", routeTag = "", forwarded = false;
     res.on("finish", () => {
       const ms = Date.now() - t0;
       metrics.requests.inc({ route: routeLabel(routeTag), decision: decisionTag, status: String(res.statusCode) });
@@ -77,7 +77,7 @@ export function createProxy(o: ProxyOpts) {
       if (!res.headersSent) res.writeHead(status, { "content-type": "application/json" });
       res.end(JSON.stringify({ type: "error", error: { type: "audit_proxy_error", code, message: code, ...(findings && { findings }) } }));
     };
-    const event = (name: string, e: unknown) => o.quiet || process.stderr.write(JSON.stringify({ ts: new Date().toISOString(), event: name, requestId: rid, reason: e instanceof Error ? e.message : "unknown" }) + "\n");
+    const event = (name: string, e: unknown) => o.quiet || process.stderr.write(JSON.stringify({ ts: new Date().toISOString(), event: name, requestId: rid, reason: contentFreeReason(e) }) + "\n");
     const logUnavailable = (e: unknown) => { metrics.logUnavailable.inc(); event("audit_log_unavailable", e); return fail(503, "audit_log_unavailable"); };
     try {
       const url = new URL(req.url ?? "/", "http://x"), route = ROUTES[url.pathname];
@@ -184,7 +184,7 @@ export function createProxy(o: ProxyOpts) {
       let up: Response;
       try { up = await fetch(target, { method: "POST", headers, body: fwd, signal: ac.signal }); }
       catch { clearTimeout(timer); metrics.upstreamErrors.inc({ provider: context.provider, reason: ac.signal.aborted ? "deadline" : "unreachable" }); const code = ac.signal.aborted ? "audit_deadline_exceeded" : "audit_upstream_unreachable"; write({ upstreamStatus: null, error: code, ...observe(traced) }); return fail(ac.signal.aborted ? 408 : 502, code); }
-      clearTimeout(timer);
+      clearTimeout(timer); forwarded = true;
       metrics.upstreamResponses.inc({ provider: context.provider, class: `${Math.floor(up.status / 100)}xx` });
       const sse = (up.headers.get("content-type") ?? "").includes("text/event-stream");
       const captured = await pipe(up, res);
@@ -203,12 +203,13 @@ export function createProxy(o: ProxyOpts) {
           toolCalls: out.toolCalls.map((t) => ({ name: t.name, argsHash: sha256(t.args), ...(full && { args: red(t.args) }) })) }),
         ...observe([...traced, ...(out ? quinelingCalls(out.toolCalls) : [])]) });
     } catch (e) {
-      if (e instanceof AuditLogUnavailable) { metrics.logWriteFailures.inc(); event("audit_log_write_failed", e); }
+      if (e instanceof AuditLogUnavailable || forwarded) { metrics.logWriteFailures.inc(); event("audit_log_write_failed", e); }
       if (!res.writableEnded) fail(500, "audit_internal_error");
     }
   });
 }
 const str = (v: unknown) => (typeof v === "string" ? v.slice(0, 128) : undefined);
+const contentFreeReason = (e: unknown) => e instanceof AuditLogUnavailable ? e.message : typeof (e as NodeJS.ErrnoException)?.code === "string" ? (e as NodeJS.ErrnoException).code! : e instanceof Error ? e.name : "unknown";
 
 async function pipe(up: Response, res: http.ServerResponse): Promise<string> {
   const h: Record<string, string> = {}; up.headers.forEach((v, k) => { if (!RESP_DROP.has(k)) h[k] = v; });
