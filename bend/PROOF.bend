@@ -7,6 +7,7 @@ import ./spans.bend as S
 import ./parts.bend as P
 import ./mask.bend as K
 import ./decide.bend as D
+import ./policies.bend as Q
 
 def add_zero(a: Nat) -> {a == Nat.add(a, 0n) : Nat}:
   match a:
@@ -5389,3 +5390,965 @@ def Laws.decide_masks_in_redact_mode_only_when_every_finding_can_be_masked(f, fs
   Equal.trans(D.Action, D.decide.redact(D.all_maskable(f <> fs)), D.decide.redact(Laws.Maskable(f <> fs)), Bool.pick(D.Action, Laws.Maskable(f <> fs), D.Masked{}, D.Unmaskable{}),
     Equal.cong(Bool, D.Action, b => D.decide.redact(b), D.all_maskable(f <> fs), Laws.Maskable(f <> fs), dc.all_eq(f <> fs)),
     dc.redact_pick(Laws.Maskable(f <> fs)))
+
+def po.same_refl(a: +List<Bool>) -> {Laws.KeySame(a, a) == True{} : Bool}:
+  match a:
+    case Nil{}:
+      {==}
+    case Con{x, ra}:
+      match x:
+        case True{}:
+          po.same_refl(ra)
+        case False{}:
+          po.same_refl(ra)
+
+def po.ft(e: {False{} == True{} : Bool}) -> Empty:
+  %e : Bool.pick(Type, _, Empty, Unit)
+  Unit{}
+
+def po.same_sound(a: +List<Bool>, b: +List<Bool>, e: {Laws.KeySame(a, b) == True{} : Bool}) -> {a == b : List<&2, Bool>}:
+  match a:
+    case Nil{}:
+      match b:
+        case Nil{}:
+          {==}
+        case Con{y, rb}:
+          Empty.absurd({Nil{} == Con{y, rb} : List<&2, Bool>}, po.ft(e))
+    case Con{x, ra}:
+      match x:
+        case True{}:
+          match b:
+            case Nil{}:
+              Empty.absurd({Con{True{}, ra} == Nil{} : List<&2, Bool>}, po.ft(e))
+            case Con{y, rb}:
+              match y:
+                case True{}:
+                  Equal.cong(List<&2, Bool>, List<&2, Bool>, t => Con{True{}, t}, ra, rb, po.same_sound(ra, rb, e))
+                case False{}:
+                  Empty.absurd({Con{True{}, ra} == Con{False{}, rb} : List<&2, Bool>}, po.ft(e))
+        case False{}:
+          match b:
+            case Nil{}:
+              Empty.absurd({Con{False{}, ra} == Nil{} : List<&2, Bool>}, po.ft(e))
+            case Con{y, rb}:
+              match y:
+                case True{}:
+                  Empty.absurd({Con{False{}, ra} == Con{True{}, rb} : List<&2, Bool>}, po.ft(e))
+                case False{}:
+                  Equal.cong(List<&2, Bool>, List<&2, Bool>, t => Con{False{}, t}, ra, rb, po.same_sound(ra, rb, e))
+
+def po.get_tip(-A: Data, k: +List<Bool>) -> {Q.get(A, k, Q.Tip{}) == None{} : Maybe<&2, A>}:
+  match k:
+    case Nil{}:
+      {==}
+    case Con{b, rest}:
+      match b:
+        case True{}:
+          {==}
+        case False{}:
+          {==}
+
+def po.get_set(-A: Data, k: +List<Bool>, j: +List<Bool>, t: Q.Trie<A>, +v: A)
+  -> {Q.get(A, j, Q.set(A, k, t, v)) == Bool.pick(Maybe<&2, A>, Laws.KeySame(k, j), Some{v}, Q.get(A, j, t)) : Maybe<&2, A>}:
+  match k:
+    case Nil{}:
+      match j:
+        case Nil{}:
+          match t:
+            case Q.Tip{}:
+              {==}
+            case Q.Bin{h, z, o}:
+              {==}
+        case Con{b2, r2}:
+          match b2:
+            case True{}:
+              match t:
+                case Q.Tip{}:
+                  po.get_tip(A, r2)
+                case Q.Bin{h, z, o}:
+                  {==}
+            case False{}:
+              match t:
+                case Q.Tip{}:
+                  po.get_tip(A, r2)
+                case Q.Bin{h, z, o}:
+                  {==}
+    case Con{b, rest}:
+      match b:
+        case True{}:
+          match j:
+            case Nil{}:
+              match t:
+                case Q.Tip{}:
+                  {==}
+                case Q.Bin{h, z, o}:
+                  {==}
+            case Con{b2, +r2}:
+              match b2:
+                case True{}:
+                  match t:
+                    case Q.Tip{}:
+                      %po.get_tip(A, r2) : {Q.get(A, r2, Q.set(A, rest, Q.Tip{}, v)) == Bool.pick(Maybe<&2, A>, Laws.KeySame(rest, r2), Some{v}, _) : Maybe<&2, A>}
+                      po.get_set(A, rest, r2, Q.Tip{}, v)
+                    case Q.Bin{h, z, o}:
+                      po.get_set(A, rest, r2, o, v)
+                case False{}:
+                  match t:
+                    case Q.Tip{}:
+                      po.get_tip(A, r2)
+                    case Q.Bin{h, z, o}:
+                      {==}
+        case False{}:
+          match j:
+            case Nil{}:
+              match t:
+                case Q.Tip{}:
+                  {==}
+                case Q.Bin{h, z, o}:
+                  {==}
+            case Con{b2, +r2}:
+              match b2:
+                case True{}:
+                  match t:
+                    case Q.Tip{}:
+                      po.get_tip(A, r2)
+                    case Q.Bin{h, z, o}:
+                      {==}
+                case False{}:
+                  match t:
+                    case Q.Tip{}:
+                      %po.get_tip(A, r2) : {Q.get(A, r2, Q.set(A, rest, Q.Tip{}, v)) == Bool.pick(Maybe<&2, A>, Laws.KeySame(rest, r2), Some{v}, _) : Maybe<&2, A>}
+                      po.get_set(A, rest, r2, Q.Tip{}, v)
+                    case Q.Bin{h, z, o}:
+                      po.get_set(A, rest, r2, z, v)
+
+def po.len(q: +List<Q.Use>) -> Nat:
+  match q:
+    case Nil{}:
+      0n
+    case x <> rest:
+      1n+po.len(rest)
+
+def po.build(q: +List<Q.Use>) -> Q.State:
+  match q:
+    case Nil{}:
+      Q.State{Nil{}, Q.Tip{}}
+    case Q.Use{+g, +s} <> +rest:
+      Q.step(po.build(rest), g, s, po.len(rest))
+
+def po.revonto(ds: +List<Q.Use>, q: +List<Q.Use>) -> +List<Q.Use>:
+  match ds:
+    case Nil{}:
+      q
+    case d <> rest:
+      po.revonto(rest, d <> q)
+
+def po.go_build(ds: +List<Q.Use>, +q: +List<Q.Use>) -> {Q.go(ds, po.len(q), po.build(q)) == po.build(po.revonto(ds, q)) : Q.State}:
+  match ds:
+    case Nil{}:
+      {==}
+    case Q.Use{+g, +s} <> rest:
+      po.go_build(rest, Q.Use{g, s} <> q)
+
+def po.order(st: Q.State) -> List<&2, List<&2, Bool>>:
+  match st:
+    case Q.State{o, gs}:
+      o
+
+def po.groups(st: Q.State) -> Q.Trie<Q.Group>:
+  match st:
+    case Q.State{o, gs}:
+      gs
+
+def po.cur(grp: Q.Group) -> List<&2, Bool>:
+  match grp:
+    case Q.Group{c, o, src}:
+      c
+
+def po.ord(grp: Q.Group) -> List<&2, List<&2, Bool>>:
+  match grp:
+    case Q.Group{c, o, src}:
+      o
+
+def po.src(grp: Q.Group) -> Q.Trie<Q.Stat>:
+  match grp:
+    case Q.Group{c, o, src}:
+      src
+
+def po.fresh(m: Maybe<&2, Q.Group>) -> Q.Group:
+  match m:
+    case None{}:
+      Q.Group{Nil{}, Nil{}, Q.Tip{}}
+    case Some{grp}:
+      grp
+
+def po.note_g(m: Maybe<&2, Q.Group>, +g: +List<Bool>, o: +List<List<&2, Bool>>) -> List<&2, List<&2, Bool>>:
+  match m:
+    case None{}:
+      g <> o
+    case Some{grp}:
+      o
+
+def po.found_groups(m: Maybe<&2, Q.Group>, +g: +List<Bool>, +s: +List<Bool>, +i: Nat, o: +List<List<&2, Bool>>, gs: Q.Trie<Q.Group>)
+  -> {po.groups(Q.step.found(m, g, s, i, o, gs)) == Q.set(Q.Group, g, gs, Q.visit(po.fresh(m), s, i)) : Q.Trie<Q.Group>}:
+  match m:
+    case None{}:
+      {==}
+    case Some{grp}:
+      {==}
+
+def po.found_order(m: Maybe<&2, Q.Group>, +g: +List<Bool>, +s: +List<Bool>, +i: Nat, o: +List<List<&2, Bool>>, gs: Q.Trie<Q.Group>)
+  -> {po.order(Q.step.found(m, g, s, i, o, gs)) == po.note_g(m, g, o) : List<&2, List<&2, Bool>>}:
+  match m:
+    case None{}:
+      {==}
+    case Some{grp}:
+      {==}
+
+def po.step_groups(st: Q.State, +g: +List<Bool>, +s: +List<Bool>, +i: Nat)
+  -> {po.groups(Q.step(st, g, s, i)) == Q.set(Q.Group, g, po.groups(st), Q.visit(po.fresh(Q.get(Q.Group, g, po.groups(st))), s, i)) : Q.Trie<Q.Group>}:
+  match st:
+    case Q.State{o, +gs}:
+      po.found_groups(Q.get(Q.Group, g, gs), g, s, i, o, gs)
+
+def po.step_order(st: Q.State, +g: +List<Bool>, +s: +List<Bool>, +i: Nat)
+  -> {po.order(Q.step(st, g, s, i)) == po.note_g(Q.get(Q.Group, g, po.groups(st)), g, po.order(st)) : List<&2, List<&2, Bool>>}:
+  match st:
+    case Q.State{o, +gs}:
+      po.found_order(Q.get(Q.Group, g, gs), g, s, i, o, gs)
+
+def po.visit_src(grp: Q.Group, +s: +List<Bool>, +i: Nat)
+  -> {po.src(Q.visit(grp, s, i)) == Q.set(Q.Stat, s, po.src(grp), Q.bump(Q.get(Q.Stat, s, po.src(grp)), i)) : Q.Trie<Q.Stat>}:
+  match grp:
+    case Q.Group{c, o, src}:
+      {==}
+
+def po.visit_cur(grp: Q.Group, +s: +List<Bool>, +i: Nat) -> {po.cur(Q.visit(grp, s, i)) == s : List<&2, Bool>}:
+  match grp:
+    case Q.Group{c, o, src}:
+      {==}
+
+def po.visit_ord(grp: Q.Group, +s: +List<Bool>, +i: Nat)
+  -> {po.ord(Q.visit(grp, s, i)) == Q.note(Q.get(Q.Stat, s, po.src(grp)), s, po.ord(grp)) : List<&2, List<&2, Bool>>}:
+  match grp:
+    case Q.Group{c, o, src}:
+      {==}
+
+def po.exp(+k: +List<Bool>, +s: +List<Bool>, q: +List<Q.Use>) -> Maybe<&2, Q.Stat>:
+  match q:
+    case Nil{}:
+      None{}
+    case Q.Use{g, s2} <> +rest:
+      Bool.pick(Maybe<&2, Q.Stat>, Bool.and(Laws.KeySame(g, k), Laws.KeySame(s2, s)), Some{Q.bump(po.exp(k, s, rest), po.len(rest))}, po.exp(k, s, rest))
+
+def po.stat_hit(+g: +List<Bool>, +s: +List<Bool>, +s2: +List<Bool>, +i: Nat, +t: Q.Trie<Q.Stat>, -rest: +List<Q.Use>, d: Bool, +ed: {Laws.KeySame(s2, s) == d : Bool},
+  e2: {Q.get(Q.Stat, s2, t) == po.exp(g, s2, rest) : Maybe<&2, Q.Stat>}, es: {Q.get(Q.Stat, s, t) == po.exp(g, s, rest) : Maybe<&2, Q.Stat>})
+  -> {Bool.pick(Maybe<&2, Q.Stat>, Laws.KeySame(s2, s), Some{Q.bump(Q.get(Q.Stat, s2, t), i)}, Q.get(Q.Stat, s, t)) == Bool.pick(Maybe<&2, Q.Stat>, Laws.KeySame(s2, s), Some{Q.bump(po.exp(g, s, rest), i)}, po.exp(g, s, rest)) : Maybe<&2, Q.Stat>}:
+  match d:
+    case True{}:
+      %Equal.sym(Bool, Laws.KeySame(s2, s), True{}, ed) : {Bool.pick(Maybe<&2, Q.Stat>, _, Some{Q.bump(Q.get(Q.Stat, s2, t), i)}, Q.get(Q.Stat, s, t)) == Bool.pick(Maybe<&2, Q.Stat>, _, Some{Q.bump(po.exp(g, s, rest), i)}, po.exp(g, s, rest)) : Maybe<&2, Q.Stat>}
+      %po.same_sound(s2, s, ed) : {Some{Q.bump(Q.get(Q.Stat, s2, t), i)} == Some{Q.bump(po.exp(g, _, rest), i)} : Maybe<&2, Q.Stat>}
+      Equal.cong(Maybe<&2, Q.Stat>, Maybe<&2, Q.Stat>, x => Some{Q.bump(x, i)}, Q.get(Q.Stat, s2, t), po.exp(g, s2, rest), e2)
+    case False{}:
+      %Equal.sym(Bool, Laws.KeySame(s2, s), False{}, ed) : {Bool.pick(Maybe<&2, Q.Stat>, _, Some{Q.bump(Q.get(Q.Stat, s2, t), i)}, Q.get(Q.Stat, s, t)) == Bool.pick(Maybe<&2, Q.Stat>, _, Some{Q.bump(po.exp(g, s, rest), i)}, po.exp(g, s, rest)) : Maybe<&2, Q.Stat>}
+      es
+
+
+def po.stat_pick(+k: +List<Bool>, +s: +List<Bool>, +g: +List<Bool>, +s2: +List<Bool>, +rest: +List<Q.Use>, c: Bool, +ec: {Laws.KeySame(g, k) == c : Bool},
+  ihk: {Q.get(Q.Stat, s, po.src(po.fresh(Q.get(Q.Group, k, po.groups(po.build(rest)))))) == po.exp(k, s, rest) : Maybe<&2, Q.Stat>},
+  ih2: {Q.get(Q.Stat, s2, po.src(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))))) == po.exp(g, s2, rest) : Maybe<&2, Q.Stat>},
+  ihs: {Q.get(Q.Stat, s, po.src(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))))) == po.exp(g, s, rest) : Maybe<&2, Q.Stat>})
+  -> {Q.get(Q.Stat, s, po.src(po.fresh(Bool.pick(Maybe<&2, Q.Group>, c, Some{Q.visit(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))), s2, po.len(rest))}, Q.get(Q.Group, k, po.groups(po.build(rest))))))) == Bool.pick(Maybe<&2, Q.Stat>, Bool.and(c, Laws.KeySame(s2, s)), Some{Q.bump(po.exp(k, s, rest), po.len(rest))}, po.exp(k, s, rest)) : Maybe<&2, Q.Stat>}:
+  match c:
+    case False{}:
+      ihk
+    case True{}:
+      %Equal.sym(Q.Trie<Q.Stat>, po.src(Q.visit(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))), s2, po.len(rest))), Q.set(Q.Stat, s2, po.src(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest))))), Q.bump(Q.get(Q.Stat, s2, po.src(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))))), po.len(rest))), po.visit_src(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))), s2, po.len(rest))) : {Q.get(Q.Stat, s, _) == Bool.pick(Maybe<&2, Q.Stat>, Laws.KeySame(s2, s), Some{Q.bump(po.exp(k, s, rest), po.len(rest))}, po.exp(k, s, rest)) : Maybe<&2, Q.Stat>}
+      %Equal.sym(Maybe<&2, Q.Stat>, Q.get(Q.Stat, s, Q.set(Q.Stat, s2, po.src(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest))))), Q.bump(Q.get(Q.Stat, s2, po.src(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))))), po.len(rest)))), Bool.pick(Maybe<&2, Q.Stat>, Laws.KeySame(s2, s), Some{Q.bump(Q.get(Q.Stat, s2, po.src(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))))), po.len(rest))}, Q.get(Q.Stat, s, po.src(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest))))))), po.get_set(Q.Stat, s2, s, po.src(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest))))), Q.bump(Q.get(Q.Stat, s2, po.src(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))))), po.len(rest)))) : {_ == Bool.pick(Maybe<&2, Q.Stat>, Laws.KeySame(s2, s), Some{Q.bump(po.exp(k, s, rest), po.len(rest))}, po.exp(k, s, rest)) : Maybe<&2, Q.Stat>}
+      %po.same_sound(g, k, ec) : {Bool.pick(Maybe<&2, Q.Stat>, Laws.KeySame(s2, s), Some{Q.bump(Q.get(Q.Stat, s2, po.src(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))))), po.len(rest))}, Q.get(Q.Stat, s, po.src(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest))))))) == Bool.pick(Maybe<&2, Q.Stat>, Laws.KeySame(s2, s), Some{Q.bump(po.exp(_, s, rest), po.len(rest))}, po.exp(_, s, rest)) : Maybe<&2, Q.Stat>}
+      po.stat_hit(g, s, s2, po.len(rest), po.src(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest))))), rest, Laws.KeySame(s2, s), {==}, ih2, ihs)
+
+def po.stat_build(q: +List<Q.Use>, +k: +List<Bool>, +s: +List<Bool>) -> {Q.get(Q.Stat, s, po.src(po.fresh(Q.get(Q.Group, k, po.groups(po.build(q)))))) == po.exp(k, s, q) : Maybe<&2, Q.Stat>}:
+  match q:
+    case Nil{}:
+      %Equal.sym(Maybe<&2, Q.Group>, Q.get(Q.Group, k, Q.Tip{}), None{}, po.get_tip(Q.Group, k)) : {Q.get(Q.Stat, s, po.src(po.fresh(_))) == None{} : Maybe<&2, Q.Stat>}
+      po.get_tip(Q.Stat, s)
+    case Q.Use{+g, +s2} <> +rest:
+      %Equal.sym(Q.Trie<Q.Group>, po.groups(Q.step(po.build(rest), g, s2, po.len(rest))), Q.set(Q.Group, g, po.groups(po.build(rest)), Q.visit(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))), s2, po.len(rest))), po.step_groups(po.build(rest), g, s2, po.len(rest))) : {Q.get(Q.Stat, s, po.src(po.fresh(Q.get(Q.Group, k, _)))) == po.exp(k, s, Q.Use{g, s2} <> rest) : Maybe<&2, Q.Stat>}
+      %Equal.sym(Maybe<&2, Q.Group>, Q.get(Q.Group, k, Q.set(Q.Group, g, po.groups(po.build(rest)), Q.visit(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))), s2, po.len(rest)))), Bool.pick(Maybe<&2, Q.Group>, Laws.KeySame(g, k), Some{Q.visit(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))), s2, po.len(rest))}, Q.get(Q.Group, k, po.groups(po.build(rest)))), po.get_set(Q.Group, g, k, po.groups(po.build(rest)), Q.visit(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))), s2, po.len(rest)))) : {Q.get(Q.Stat, s, po.src(po.fresh(_))) == po.exp(k, s, Q.Use{g, s2} <> rest) : Maybe<&2, Q.Stat>}
+      po.stat_pick(k, s, g, s2, rest, Laws.KeySame(g, k), {==}, po.stat_build(rest, k, s), po.stat_build(rest, g, s2), po.stat_build(rest, g, s))
+
+
+def po.some_g(m: Maybe<&2, Q.Group>) -> Bool:
+  match m:
+    case None{}:
+      False{}
+    case Some{x}:
+      True{}
+
+def po.used(+k: +List<Bool>, q: +List<Q.Use>) -> Bool:
+  match q:
+    case Nil{}:
+      False{}
+    case Q.Use{g, s} <> rest:
+      Bool.or(Laws.KeySame(g, k), po.used(k, rest))
+
+def po.used_pick(+k: +List<Bool>, +g: +List<Bool>, +s2: +List<Bool>, +rest: +List<Q.Use>, c: Bool, ihk: {po.some_g(Q.get(Q.Group, k, po.groups(po.build(rest)))) == po.used(k, rest) : Bool})
+  -> {po.some_g(Bool.pick(Maybe<&2, Q.Group>, c, Some{Q.visit(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))), s2, po.len(rest))}, Q.get(Q.Group, k, po.groups(po.build(rest))))) == Bool.or(c, po.used(k, rest)) : Bool}:
+  match c:
+    case True{}:
+      {==}
+    case False{}:
+      ihk
+
+def po.used_build(q: +List<Q.Use>, +k: +List<Bool>) -> {po.some_g(Q.get(Q.Group, k, po.groups(po.build(q)))) == po.used(k, q) : Bool}:
+  match q:
+    case Nil{}:
+      %Equal.sym(Maybe<&2, Q.Group>, Q.get(Q.Group, k, Q.Tip{}), None{}, po.get_tip(Q.Group, k)) : {po.some_g(_) == False{} : Bool}
+      {==}
+    case Q.Use{+g, +s2} <> +rest:
+      %Equal.sym(Q.Trie<Q.Group>, po.groups(Q.step(po.build(rest), g, s2, po.len(rest))), Q.set(Q.Group, g, po.groups(po.build(rest)), Q.visit(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))), s2, po.len(rest))), po.step_groups(po.build(rest), g, s2, po.len(rest))) : {po.some_g(Q.get(Q.Group, k, _)) == po.used(k, Q.Use{g, s2} <> rest) : Bool}
+      %Equal.sym(Maybe<&2, Q.Group>, Q.get(Q.Group, k, Q.set(Q.Group, g, po.groups(po.build(rest)), Q.visit(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))), s2, po.len(rest)))), Bool.pick(Maybe<&2, Q.Group>, Laws.KeySame(g, k), Some{Q.visit(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))), s2, po.len(rest))}, Q.get(Q.Group, k, po.groups(po.build(rest)))), po.get_set(Q.Group, g, k, po.groups(po.build(rest)), Q.visit(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))), s2, po.len(rest)))) : {po.some_g(_) == po.used(k, Q.Use{g, s2} <> rest) : Bool}
+      po.used_pick(k, g, s2, rest, Laws.KeySame(g, k), po.used_build(rest, k))
+
+def po.gord(q: +List<Q.Use>) -> List<&2, List<&2, Bool>>:
+  match q:
+    case Nil{}:
+      Nil{}
+    case Q.Use{+g, s} <> +rest:
+      Bool.pick(List<&2, List<&2, Bool>>, po.used(g, rest), po.gord(rest), g <> po.gord(rest))
+
+def po.note_pick(m: Maybe<&2, Q.Group>, +g: +List<Bool>, +o: +List<List<&2, Bool>>) -> {po.note_g(m, g, o) == Bool.pick(List<&2, List<&2, Bool>>, po.some_g(m), o, g <> o) : List<&2, List<&2, Bool>>}:
+  match m:
+    case None{}:
+      {==}
+    case Some{x}:
+      {==}
+
+def po.order_build(q: +List<Q.Use>) -> {po.order(po.build(q)) == po.gord(q) : List<&2, List<&2, Bool>>}:
+  match q:
+    case Nil{}:
+      {==}
+    case Q.Use{+g, +s2} <> +rest:
+      %Equal.sym(List<&2, List<&2, Bool>>, po.order(Q.step(po.build(rest), g, s2, po.len(rest))), po.note_g(Q.get(Q.Group, g, po.groups(po.build(rest))), g, po.order(po.build(rest))), po.step_order(po.build(rest), g, s2, po.len(rest))) : {_ == po.gord(Q.Use{g, s2} <> rest) : List<&2, List<&2, Bool>>}
+      %Equal.sym(List<&2, List<&2, Bool>>, po.note_g(Q.get(Q.Group, g, po.groups(po.build(rest))), g, po.order(po.build(rest))), Bool.pick(List<&2, List<&2, Bool>>, po.some_g(Q.get(Q.Group, g, po.groups(po.build(rest)))), po.order(po.build(rest)), g <> po.order(po.build(rest))), po.note_pick(Q.get(Q.Group, g, po.groups(po.build(rest))), g, po.order(po.build(rest)))) : {_ == po.gord(Q.Use{g, s2} <> rest) : List<&2, List<&2, Bool>>}
+      %Equal.sym(Bool, po.some_g(Q.get(Q.Group, g, po.groups(po.build(rest)))), po.used(g, rest), po.used_build(rest, g)) : {Bool.pick(List<&2, List<&2, Bool>>, _, po.order(po.build(rest)), g <> po.order(po.build(rest))) == po.gord(Q.Use{g, s2} <> rest) : List<&2, List<&2, Bool>>}
+      %Equal.sym(List<&2, List<&2, Bool>>, po.order(po.build(rest)), po.gord(rest), po.order_build(rest)) : {Bool.pick(List<&2, List<&2, Bool>>, po.used(g, rest), _, g <> _) == po.gord(Q.Use{g, s2} <> rest) : List<&2, List<&2, Bool>>}
+      {==}
+
+def po.gcur(m: Maybe<&2, Q.Group>) -> Maybe<&2, List<&2, Bool>>:
+  match m:
+    case None{}:
+      None{}
+    case Some{grp}:
+      Some{po.cur(grp)}
+
+def po.lat(+k: +List<Bool>, q: +List<Q.Use>) -> Maybe<&2, List<&2, Bool>>:
+  match q:
+    case Nil{}:
+      None{}
+    case Q.Use{g, +s} <> +rest:
+      Bool.pick(Maybe<&2, List<&2, Bool>>, Laws.KeySame(g, k), Some{s}, po.lat(k, rest))
+
+def po.cur_pick(+k: +List<Bool>, +g: +List<Bool>, +s2: +List<Bool>, +rest: +List<Q.Use>, c: Bool, ihk: {po.gcur(Q.get(Q.Group, k, po.groups(po.build(rest)))) == po.lat(k, rest) : Maybe<&2, List<&2, Bool>>})
+  -> {po.gcur(Bool.pick(Maybe<&2, Q.Group>, c, Some{Q.visit(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))), s2, po.len(rest))}, Q.get(Q.Group, k, po.groups(po.build(rest))))) == Bool.pick(Maybe<&2, List<&2, Bool>>, c, Some{s2}, po.lat(k, rest)) : Maybe<&2, List<&2, Bool>>}:
+  match c:
+    case True{}:
+      Equal.cong(List<&2, Bool>, Maybe<&2, List<&2, Bool>>, x => Some{x}, po.cur(Q.visit(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))), s2, po.len(rest))), s2, po.visit_cur(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))), s2, po.len(rest)))
+    case False{}:
+      ihk
+
+def po.cur_build(q: +List<Q.Use>, +k: +List<Bool>) -> {po.gcur(Q.get(Q.Group, k, po.groups(po.build(q)))) == po.lat(k, q) : Maybe<&2, List<&2, Bool>>}:
+  match q:
+    case Nil{}:
+      %Equal.sym(Maybe<&2, Q.Group>, Q.get(Q.Group, k, Q.Tip{}), None{}, po.get_tip(Q.Group, k)) : {po.gcur(_) == None{} : Maybe<&2, List<&2, Bool>>}
+      {==}
+    case Q.Use{+g, +s2} <> +rest:
+      %Equal.sym(Q.Trie<Q.Group>, po.groups(Q.step(po.build(rest), g, s2, po.len(rest))), Q.set(Q.Group, g, po.groups(po.build(rest)), Q.visit(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))), s2, po.len(rest))), po.step_groups(po.build(rest), g, s2, po.len(rest))) : {po.gcur(Q.get(Q.Group, k, _)) == po.lat(k, Q.Use{g, s2} <> rest) : Maybe<&2, List<&2, Bool>>}
+      %Equal.sym(Maybe<&2, Q.Group>, Q.get(Q.Group, k, Q.set(Q.Group, g, po.groups(po.build(rest)), Q.visit(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))), s2, po.len(rest)))), Bool.pick(Maybe<&2, Q.Group>, Laws.KeySame(g, k), Some{Q.visit(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))), s2, po.len(rest))}, Q.get(Q.Group, k, po.groups(po.build(rest)))), po.get_set(Q.Group, g, k, po.groups(po.build(rest)), Q.visit(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))), s2, po.len(rest)))) : {po.gcur(_) == po.lat(k, Q.Use{g, s2} <> rest) : Maybe<&2, List<&2, Bool>>}
+      po.cur_pick(k, g, s2, rest, Laws.KeySame(g, k), po.cur_build(rest, k))
+
+def po.sord(+k: +List<Bool>, q: +List<Q.Use>) -> List<&2, List<&2, Bool>>:
+  match q:
+    case Nil{}:
+      Nil{}
+    case Q.Use{g, +s} <> +rest:
+      Bool.pick(List<&2, List<&2, Bool>>, Laws.KeySame(g, k), Q.note(po.exp(k, s, rest), s, po.sord(k, rest)), po.sord(k, rest))
+
+def po.sord_pick(+k: +List<Bool>, +g: +List<Bool>, +s2: +List<Bool>, +rest: +List<Q.Use>, c: Bool, +ec: {Laws.KeySame(g, k) == c : Bool},
+  ihk: {po.ord(po.fresh(Q.get(Q.Group, k, po.groups(po.build(rest))))) == po.sord(k, rest) : List<&2, List<&2, Bool>>},
+  ih2: {Q.get(Q.Stat, s2, po.src(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))))) == po.exp(g, s2, rest) : Maybe<&2, Q.Stat>},
+  ihg: {po.ord(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest))))) == po.sord(g, rest) : List<&2, List<&2, Bool>>})
+  -> {po.ord(po.fresh(Bool.pick(Maybe<&2, Q.Group>, c, Some{Q.visit(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))), s2, po.len(rest))}, Q.get(Q.Group, k, po.groups(po.build(rest)))))) == Bool.pick(List<&2, List<&2, Bool>>, c, Q.note(po.exp(k, s2, rest), s2, po.sord(k, rest)), po.sord(k, rest)) : List<&2, List<&2, Bool>>}:
+  match c:
+    case False{}:
+      ihk
+    case True{}:
+      %Equal.sym(List<&2, List<&2, Bool>>, po.ord(Q.visit(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))), s2, po.len(rest))), Q.note(Q.get(Q.Stat, s2, po.src(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))))), s2, po.ord(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))))), po.visit_ord(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))), s2, po.len(rest))) : {_ == Q.note(po.exp(k, s2, rest), s2, po.sord(k, rest)) : List<&2, List<&2, Bool>>}
+      %Equal.sym(Maybe<&2, Q.Stat>, Q.get(Q.Stat, s2, po.src(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))))), po.exp(g, s2, rest), ih2) : {Q.note(_, s2, po.ord(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))))) == Q.note(po.exp(k, s2, rest), s2, po.sord(k, rest)) : List<&2, List<&2, Bool>>}
+      %Equal.sym(List<&2, List<&2, Bool>>, po.ord(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest))))), po.sord(g, rest), ihg) : {Q.note(po.exp(g, s2, rest), s2, _) == Q.note(po.exp(k, s2, rest), s2, po.sord(k, rest)) : List<&2, List<&2, Bool>>}
+      %po.same_sound(g, k, ec) : {Q.note(po.exp(g, s2, rest), s2, po.sord(g, rest)) == Q.note(po.exp(_, s2, rest), s2, po.sord(_, rest)) : List<&2, List<&2, Bool>>}
+      {==}
+
+def po.sord_build(q: +List<Q.Use>, +k: +List<Bool>) -> {po.ord(po.fresh(Q.get(Q.Group, k, po.groups(po.build(q))))) == po.sord(k, q) : List<&2, List<&2, Bool>>}:
+  match q:
+    case Nil{}:
+      %Equal.sym(Maybe<&2, Q.Group>, Q.get(Q.Group, k, Q.Tip{}), None{}, po.get_tip(Q.Group, k)) : {po.ord(po.fresh(_)) == Nil{} : List<&2, List<&2, Bool>>}
+      {==}
+    case Q.Use{+g, +s2} <> +rest:
+      %Equal.sym(Q.Trie<Q.Group>, po.groups(Q.step(po.build(rest), g, s2, po.len(rest))), Q.set(Q.Group, g, po.groups(po.build(rest)), Q.visit(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))), s2, po.len(rest))), po.step_groups(po.build(rest), g, s2, po.len(rest))) : {po.ord(po.fresh(Q.get(Q.Group, k, _))) == po.sord(k, Q.Use{g, s2} <> rest) : List<&2, List<&2, Bool>>}
+      %Equal.sym(Maybe<&2, Q.Group>, Q.get(Q.Group, k, Q.set(Q.Group, g, po.groups(po.build(rest)), Q.visit(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))), s2, po.len(rest)))), Bool.pick(Maybe<&2, Q.Group>, Laws.KeySame(g, k), Some{Q.visit(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))), s2, po.len(rest))}, Q.get(Q.Group, k, po.groups(po.build(rest)))), po.get_set(Q.Group, g, k, po.groups(po.build(rest)), Q.visit(po.fresh(Q.get(Q.Group, g, po.groups(po.build(rest)))), s2, po.len(rest)))) : {po.ord(po.fresh(_)) == po.sord(k, Q.Use{g, s2} <> rest) : List<&2, List<&2, Bool>>}
+      po.sord_pick(k, g, s2, rest, Laws.KeySame(g, k), {==}, po.sord_build(rest, k), po.stat_build(rest, g, s2), po.sord_build(rest, g))
+
+def po.m1_hit(+k: +List<Bool>, +g: +List<Bool>, +rest: +List<Q.Use>, c: Bool, +ec: {Laws.KeySame(g, k) == c : Bool},
+  eu: {po.used(g, rest) == True{} : Bool}, ih: {Laws.KeyIn(k, po.gord(rest)) == po.used(k, rest) : Bool})
+  -> {Laws.KeyIn(k, po.gord(rest)) == Bool.or(c, po.used(k, rest)) : Bool}:
+  match c:
+    case True{}:
+      %Equal.sym(Bool, Laws.KeyIn(k, po.gord(rest)), po.used(k, rest), ih) : {_ == True{} : Bool}
+      %po.same_sound(g, k, ec) : {po.used(_, rest) == True{} : Bool}
+      eu
+    case False{}:
+      ih
+
+def po.m1_pick(+k: +List<Bool>, +g: +List<Bool>, +rest: +List<Q.Use>, u: Bool, eu: {po.used(g, rest) == u : Bool}, ih: {Laws.KeyIn(k, po.gord(rest)) == po.used(k, rest) : Bool})
+  -> {Laws.KeyIn(k, Bool.pick(List<&2, List<&2, Bool>>, u, po.gord(rest), g <> po.gord(rest))) == Bool.or(Laws.KeySame(g, k), po.used(k, rest)) : Bool}:
+  match u:
+    case True{}:
+      po.m1_hit(k, g, rest, Laws.KeySame(g, k), {==}, eu, ih)
+    case False{}:
+      Equal.cong(Bool, Bool, x => Bool.or(Laws.KeySame(g, k), x), Laws.KeyIn(k, po.gord(rest)), po.used(k, rest), ih)
+
+def po.m1(q: +List<Q.Use>, +k: +List<Bool>) -> {Laws.KeyIn(k, po.gord(q)) == po.used(k, q) : Bool}:
+  match q:
+    case Nil{}:
+      {==}
+    case Q.Use{+g, s} <> +rest:
+      po.m1_pick(k, g, rest, po.used(g, rest), {==}, po.m1(rest, k))
+
+def po.some_s(m: Maybe<&2, Q.Stat>) -> Bool:
+  match m:
+    case None{}:
+      False{}
+    case Some{x}:
+      True{}
+
+
+def po.m2_none(+k: +List<Bool>, +s: +List<Bool>, +s2: +List<Bool>, +rest: +List<Q.Use>, d: Bool, +ed: {Laws.KeySame(s2, s) == d : Bool},
+  ih: {Laws.KeyIn(s, po.sord(k, rest)) == po.some_s(po.exp(k, s, rest)) : Bool})
+  -> {Bool.or(Laws.KeySame(s2, s), Laws.KeyIn(s, po.sord(k, rest))) == po.some_s(Bool.pick(Maybe<&2, Q.Stat>, Laws.KeySame(s2, s), Some{Q.bump(po.exp(k, s, rest), po.len(rest))}, po.exp(k, s, rest))) : Bool}:
+  match d:
+    case True{}:
+      %Equal.sym(Bool, Laws.KeySame(s2, s), True{}, ed) : {Bool.or(_, Laws.KeyIn(s, po.sord(k, rest))) == po.some_s(Bool.pick(Maybe<&2, Q.Stat>, _, Some{Q.bump(po.exp(k, s, rest), po.len(rest))}, po.exp(k, s, rest))) : Bool}
+      {==}
+    case False{}:
+      %Equal.sym(Bool, Laws.KeySame(s2, s), False{}, ed) : {Bool.or(_, Laws.KeyIn(s, po.sord(k, rest))) == po.some_s(Bool.pick(Maybe<&2, Q.Stat>, _, Some{Q.bump(po.exp(k, s, rest), po.len(rest))}, po.exp(k, s, rest))) : Bool}
+      ih
+
+def po.m2_some(+k: +List<Bool>, +s: +List<Bool>, +s2: +List<Bool>, +rest: +List<Q.Use>, +st: Q.Stat, en: {po.exp(k, s2, rest) == Some{st} : Maybe<&2, Q.Stat>}, d: Bool, +ed: {Laws.KeySame(s2, s) == d : Bool},
+  ih: {Laws.KeyIn(s, po.sord(k, rest)) == po.some_s(po.exp(k, s, rest)) : Bool})
+  -> {Laws.KeyIn(s, po.sord(k, rest)) == po.some_s(Bool.pick(Maybe<&2, Q.Stat>, Laws.KeySame(s2, s), Some{Q.bump(po.exp(k, s, rest), po.len(rest))}, po.exp(k, s, rest))) : Bool}:
+  match d:
+    case True{}:
+      %Equal.sym(Bool, Laws.KeySame(s2, s), True{}, ed) : {Laws.KeyIn(s, po.sord(k, rest)) == po.some_s(Bool.pick(Maybe<&2, Q.Stat>, _, Some{Q.bump(po.exp(k, s, rest), po.len(rest))}, po.exp(k, s, rest))) : Bool}
+      %Equal.sym(Bool, Laws.KeyIn(s, po.sord(k, rest)), po.some_s(po.exp(k, s, rest)), ih) : {_ == True{} : Bool}
+      %po.same_sound(s2, s, ed) : {po.some_s(po.exp(k, _, rest)) == True{} : Bool}
+      Equal.cong(Maybe<&2, Q.Stat>, Bool, x => po.some_s(x), po.exp(k, s2, rest), Some{st}, en)
+    case False{}:
+      %Equal.sym(Bool, Laws.KeySame(s2, s), False{}, ed) : {Laws.KeyIn(s, po.sord(k, rest)) == po.some_s(Bool.pick(Maybe<&2, Q.Stat>, _, Some{Q.bump(po.exp(k, s, rest), po.len(rest))}, po.exp(k, s, rest))) : Bool}
+      ih
+
+def po.m2_hit(+k: +List<Bool>, +s: +List<Bool>, +s2: +List<Bool>, +rest: +List<Q.Use>, n: Maybe<&2, Q.Stat>, +en: {po.exp(k, s2, rest) == n : Maybe<&2, Q.Stat>},
+  ih: {Laws.KeyIn(s, po.sord(k, rest)) == po.some_s(po.exp(k, s, rest)) : Bool})
+  -> {Laws.KeyIn(s, Q.note(n, s2, po.sord(k, rest))) == po.some_s(Bool.pick(Maybe<&2, Q.Stat>, Laws.KeySame(s2, s), Some{Q.bump(po.exp(k, s, rest), po.len(rest))}, po.exp(k, s, rest))) : Bool}:
+  match n:
+    case None{}:
+      po.m2_none(k, s, s2, rest, Laws.KeySame(s2, s), {==}, ih)
+    case Some{+st}:
+      po.m2_some(k, s, s2, rest, st, en, Laws.KeySame(s2, s), {==}, ih)
+
+def po.m2_pick(+k: +List<Bool>, +s: +List<Bool>, +g: +List<Bool>, +s2: +List<Bool>, +rest: +List<Q.Use>, c: Bool,
+  ih: {Laws.KeyIn(s, po.sord(k, rest)) == po.some_s(po.exp(k, s, rest)) : Bool})
+  -> {Laws.KeyIn(s, Bool.pick(List<&2, List<&2, Bool>>, c, Q.note(po.exp(k, s2, rest), s2, po.sord(k, rest)), po.sord(k, rest))) == po.some_s(Bool.pick(Maybe<&2, Q.Stat>, Bool.and(c, Laws.KeySame(s2, s)), Some{Q.bump(po.exp(k, s, rest), po.len(rest))}, po.exp(k, s, rest))) : Bool}:
+  match c:
+    case True{}:
+      po.m2_hit(k, s, s2, rest, po.exp(k, s2, rest), {==}, ih)
+    case False{}:
+      ih
+
+def po.m2(q: +List<Q.Use>, +k: +List<Bool>, +s: +List<Bool>) -> {Laws.KeyIn(s, po.sord(k, q)) == po.some_s(po.exp(k, s, q)) : Bool}:
+  match q:
+    case Nil{}:
+      {==}
+    case Q.Use{+g, +s2} <> +rest:
+      po.m2_pick(k, s, g, s2, rest, Laws.KeySame(g, k), po.m2(rest, k, s))
+
+def po.pick_merge(-A: Type, a: Bool, b: Bool, x: A, y: A, z: A, hz: {Bool.pick(A, a, z, x) == x : A})
+  -> {Bool.pick(A, b, x, Bool.pick(A, a, z, y)) == Bool.pick(A, Bool.or(a, b), x, y) : A}:
+  match a:
+    case True{}:
+      match b:
+        case True{}:
+          {==}
+        case False{}:
+          hz
+    case False{}:
+      {==}
+
+def po.key_pick_at(-A: Type, +k: +List<Bool>, +g: +List<Bool>, f: List<&2, Bool> -> A, c: Bool, ec: {Laws.KeySame(k, g) == c : Bool})
+  -> {Bool.pick(A, c, f(k), f(g)) == f(g) : A}:
+  match c:
+    case True{}:
+      %Equal.sym(List<&2, Bool>, k, g, po.same_sound(k, g, ec)) : {Bool.pick(A, True{}, f(_), f(g)) == f(g) : A}
+      {==}
+    case False{}:
+      {==}
+
+def po.key_pick(-A: Type, +k: +List<Bool>, +g: +List<Bool>, f: List<&2, Bool> -> A) -> {Bool.pick(A, Laws.KeySame(k, g), f(k), f(g)) == f(g) : A}:
+  po.key_pick_at(A, k, g, f, Laws.KeySame(k, g), {==})
+
+def po.krev(ks: +List<List<&2, Bool>>, acc: +List<List<&2, Bool>>) -> List<&2, List<&2, Bool>>:
+  match ks:
+    case Nil{}:
+      acc
+    case k <> rest:
+      po.krev(rest, k <> acc)
+
+
+def po.uc_hist(+k: +List<Bool>, m: Maybe<&2, Q.Group>, +acc: +List<Q.History>) -> {Laws.UseCases(Q.history(k, m) <> acc) == k <> Laws.UseCases(acc) : List<&2, List<&2, Bool>>}:
+  match m:
+    case None{}:
+      {==}
+    case Some{Q.Group{c, o, src}}:
+      {==}
+
+def po.uc_go(ks: +List<List<&2, Bool>>, +gs: Q.Trie<Q.Group>, +acc: +List<Q.History>) -> {Laws.UseCases(Q.histories.go(ks, gs, acc)) == po.krev(ks, Laws.UseCases(acc)) : List<&2, List<&2, Bool>>}:
+  match ks:
+    case Nil{}:
+      {==}
+    case +k <> +rest:
+      Equal.trans(List<&2, List<&2, Bool>>, Laws.UseCases(Q.histories.go(rest, gs, Q.history(k, Q.get(Q.Group, k, gs)) <> acc)), po.krev(rest, Laws.UseCases(Q.history(k, Q.get(Q.Group, k, gs)) <> acc)), po.krev(rest, k <> Laws.UseCases(acc)),
+        po.uc_go(rest, gs, Q.history(k, Q.get(Q.Group, k, gs)) <> acc),
+        Equal.cong(List<&2, List<&2, Bool>>, List<&2, List<&2, Bool>>, x => po.krev(rest, x), Laws.UseCases(Q.history(k, Q.get(Q.Group, k, gs)) <> acc), k <> Laws.UseCases(acc), po.uc_hist(k, Q.get(Q.Group, k, gs), acc)))
+
+def po.hcur(+k: +List<Bool>, m: Maybe<&2, Q.Group>) -> Maybe<&2, List<&2, Bool>>:
+  match m:
+    case None{}:
+      Some{k}
+    case Some{grp}:
+      Some{po.cur(grp)}
+
+def po.cur_hist(+g: +List<Bool>, +k: +List<Bool>, m: Maybe<&2, Q.Group>, +acc: +List<Q.History>)
+  -> {Laws.CurrentOf(g, Q.history(k, m) <> acc) == Bool.pick(Maybe<&2, List<&2, Bool>>, Laws.KeySame(k, g), po.hcur(k, m), Laws.CurrentOf(g, acc)) : Maybe<&2, List<&2, Bool>>}:
+  match m:
+    case None{}:
+      {==}
+    case Some{Q.Group{c, o, src}}:
+      {==}
+
+
+def po.cur_go(ks: +List<List<&2, Bool>>, +g: +List<Bool>, +gs: Q.Trie<Q.Group>, +acc: +List<Q.History>)
+  -> {Laws.CurrentOf(g, Q.histories.go(ks, gs, acc)) == Bool.pick(Maybe<&2, List<&2, Bool>>, Laws.KeyIn(g, ks), po.hcur(g, Q.get(Q.Group, g, gs)), Laws.CurrentOf(g, acc)) : Maybe<&2, List<&2, Bool>>}:
+  match ks:
+    case Nil{}:
+      {==}
+    case +k <> +rest:
+      Equal.trans(Maybe<&2, List<&2, Bool>>, Laws.CurrentOf(g, Q.histories.go(rest, gs, Q.history(k, Q.get(Q.Group, k, gs)) <> acc)), Bool.pick(Maybe<&2, List<&2, Bool>>, Laws.KeyIn(g, rest), po.hcur(g, Q.get(Q.Group, g, gs)), Bool.pick(Maybe<&2, List<&2, Bool>>, Laws.KeySame(k, g), po.hcur(k, Q.get(Q.Group, k, gs)), Laws.CurrentOf(g, acc))), Bool.pick(Maybe<&2, List<&2, Bool>>, Bool.or(Laws.KeySame(k, g), Laws.KeyIn(g, rest)), po.hcur(g, Q.get(Q.Group, g, gs)), Laws.CurrentOf(g, acc)),
+        Equal.trans(Maybe<&2, List<&2, Bool>>, Laws.CurrentOf(g, Q.histories.go(rest, gs, Q.history(k, Q.get(Q.Group, k, gs)) <> acc)), Bool.pick(Maybe<&2, List<&2, Bool>>, Laws.KeyIn(g, rest), po.hcur(g, Q.get(Q.Group, g, gs)), Laws.CurrentOf(g, Q.history(k, Q.get(Q.Group, k, gs)) <> acc)), Bool.pick(Maybe<&2, List<&2, Bool>>, Laws.KeyIn(g, rest), po.hcur(g, Q.get(Q.Group, g, gs)), Bool.pick(Maybe<&2, List<&2, Bool>>, Laws.KeySame(k, g), po.hcur(k, Q.get(Q.Group, k, gs)), Laws.CurrentOf(g, acc))),
+          po.cur_go(rest, g, gs, Q.history(k, Q.get(Q.Group, k, gs)) <> acc),
+          Equal.cong(Maybe<&2, List<&2, Bool>>, Maybe<&2, List<&2, Bool>>, x => Bool.pick(Maybe<&2, List<&2, Bool>>, Laws.KeyIn(g, rest), po.hcur(g, Q.get(Q.Group, g, gs)), x), Laws.CurrentOf(g, Q.history(k, Q.get(Q.Group, k, gs)) <> acc), Bool.pick(Maybe<&2, List<&2, Bool>>, Laws.KeySame(k, g), po.hcur(k, Q.get(Q.Group, k, gs)), Laws.CurrentOf(g, acc)), po.cur_hist(g, k, Q.get(Q.Group, k, gs), acc))),
+        po.pick_merge(Maybe<&2, List<&2, Bool>>, Laws.KeySame(k, g), Laws.KeyIn(g, rest), po.hcur(g, Q.get(Q.Group, g, gs)), Laws.CurrentOf(g, acc), po.hcur(k, Q.get(Q.Group, k, gs)), po.key_pick(Maybe<&2, List<&2, Bool>>, k, g, +x => po.hcur(x, Q.get(Q.Group, x, gs)))))
+
+def po.zero(m: Maybe<&2, Q.Stat>) -> Q.Stat:
+  match m:
+    case None{}:
+      Q.Stat{0n, 0n, 0n}
+    case Some{st}:
+      st
+
+
+def po.ver_stat(+s: +List<Bool>, +k: +List<Bool>, m: Maybe<&2, Q.Stat>, +acc: +List<Q.Version>)
+  -> {Laws.StatIn(s, Q.version(k, m) <> acc) == Bool.pick(Maybe<&2, Q.Stat>, Laws.KeySame(k, s), Some{po.zero(m)}, Laws.StatIn(s, acc)) : Maybe<&2, Q.Stat>}:
+  match m:
+    case None{}:
+      {==}
+    case Some{st}:
+      {==}
+
+def po.ver_go(ks: +List<List<&2, Bool>>, +s: +List<Bool>, +src: Q.Trie<Q.Stat>, +acc: +List<Q.Version>)
+  -> {Laws.StatIn(s, Q.versions(ks, src, acc)) == Bool.pick(Maybe<&2, Q.Stat>, Laws.KeyIn(s, ks), Some{po.zero(Q.get(Q.Stat, s, src))}, Laws.StatIn(s, acc)) : Maybe<&2, Q.Stat>}:
+  match ks:
+    case Nil{}:
+      {==}
+    case +k <> +rest:
+      Equal.trans(Maybe<&2, Q.Stat>, Laws.StatIn(s, Q.versions(rest, src, Q.version(k, Q.get(Q.Stat, k, src)) <> acc)), Bool.pick(Maybe<&2, Q.Stat>, Laws.KeyIn(s, rest), Some{po.zero(Q.get(Q.Stat, s, src))}, Bool.pick(Maybe<&2, Q.Stat>, Laws.KeySame(k, s), Some{po.zero(Q.get(Q.Stat, k, src))}, Laws.StatIn(s, acc))), Bool.pick(Maybe<&2, Q.Stat>, Bool.or(Laws.KeySame(k, s), Laws.KeyIn(s, rest)), Some{po.zero(Q.get(Q.Stat, s, src))}, Laws.StatIn(s, acc)),
+        Equal.trans(Maybe<&2, Q.Stat>, Laws.StatIn(s, Q.versions(rest, src, Q.version(k, Q.get(Q.Stat, k, src)) <> acc)), Bool.pick(Maybe<&2, Q.Stat>, Laws.KeyIn(s, rest), Some{po.zero(Q.get(Q.Stat, s, src))}, Laws.StatIn(s, Q.version(k, Q.get(Q.Stat, k, src)) <> acc)), Bool.pick(Maybe<&2, Q.Stat>, Laws.KeyIn(s, rest), Some{po.zero(Q.get(Q.Stat, s, src))}, Bool.pick(Maybe<&2, Q.Stat>, Laws.KeySame(k, s), Some{po.zero(Q.get(Q.Stat, k, src))}, Laws.StatIn(s, acc))),
+          po.ver_go(rest, s, src, Q.version(k, Q.get(Q.Stat, k, src)) <> acc),
+          Equal.cong(Maybe<&2, Q.Stat>, Maybe<&2, Q.Stat>, x => Bool.pick(Maybe<&2, Q.Stat>, Laws.KeyIn(s, rest), Some{po.zero(Q.get(Q.Stat, s, src))}, x), Laws.StatIn(s, Q.version(k, Q.get(Q.Stat, k, src)) <> acc), Bool.pick(Maybe<&2, Q.Stat>, Laws.KeySame(k, s), Some{po.zero(Q.get(Q.Stat, k, src))}, Laws.StatIn(s, acc)), po.ver_stat(s, k, Q.get(Q.Stat, k, src), acc))),
+        po.pick_merge(Maybe<&2, Q.Stat>, Laws.KeySame(k, s), Laws.KeyIn(s, rest), Some{po.zero(Q.get(Q.Stat, s, src))}, Laws.StatIn(s, acc), Some{po.zero(Q.get(Q.Stat, k, src))}, po.key_pick(Maybe<&2, Q.Stat>, k, s, +x => Some{po.zero(Q.get(Q.Stat, x, src))})))
+
+def po.hstat(+s: +List<Bool>, m: Maybe<&2, Q.Group>) -> Maybe<&2, Q.Stat>:
+  match m:
+    case None{}:
+      None{}
+    case Some{Q.Group{c, o, src}}:
+      Laws.StatIn(s, Q.versions(o, src, Nil{}))
+
+def po.stat_hist(+g: +List<Bool>, +s: +List<Bool>, +k: +List<Bool>, m: Maybe<&2, Q.Group>, +acc: +List<Q.History>)
+  -> {Laws.StatOf(g, s, Q.history(k, m) <> acc) == Bool.pick(Maybe<&2, Q.Stat>, Laws.KeySame(k, g), po.hstat(s, m), Laws.StatOf(g, s, acc)) : Maybe<&2, Q.Stat>}:
+  match m:
+    case None{}:
+      {==}
+    case Some{Q.Group{c, o, src}}:
+      {==}
+
+
+def po.stat_go(ks: +List<List<&2, Bool>>, +g: +List<Bool>, +s: +List<Bool>, +gs: Q.Trie<Q.Group>, +acc: +List<Q.History>)
+  -> {Laws.StatOf(g, s, Q.histories.go(ks, gs, acc)) == Bool.pick(Maybe<&2, Q.Stat>, Laws.KeyIn(g, ks), po.hstat(s, Q.get(Q.Group, g, gs)), Laws.StatOf(g, s, acc)) : Maybe<&2, Q.Stat>}:
+  match ks:
+    case Nil{}:
+      {==}
+    case +k <> +rest:
+      Equal.trans(Maybe<&2, Q.Stat>, Laws.StatOf(g, s, Q.histories.go(rest, gs, Q.history(k, Q.get(Q.Group, k, gs)) <> acc)), Bool.pick(Maybe<&2, Q.Stat>, Laws.KeyIn(g, rest), po.hstat(s, Q.get(Q.Group, g, gs)), Bool.pick(Maybe<&2, Q.Stat>, Laws.KeySame(k, g), po.hstat(s, Q.get(Q.Group, k, gs)), Laws.StatOf(g, s, acc))), Bool.pick(Maybe<&2, Q.Stat>, Bool.or(Laws.KeySame(k, g), Laws.KeyIn(g, rest)), po.hstat(s, Q.get(Q.Group, g, gs)), Laws.StatOf(g, s, acc)),
+        Equal.trans(Maybe<&2, Q.Stat>, Laws.StatOf(g, s, Q.histories.go(rest, gs, Q.history(k, Q.get(Q.Group, k, gs)) <> acc)), Bool.pick(Maybe<&2, Q.Stat>, Laws.KeyIn(g, rest), po.hstat(s, Q.get(Q.Group, g, gs)), Laws.StatOf(g, s, Q.history(k, Q.get(Q.Group, k, gs)) <> acc)), Bool.pick(Maybe<&2, Q.Stat>, Laws.KeyIn(g, rest), po.hstat(s, Q.get(Q.Group, g, gs)), Bool.pick(Maybe<&2, Q.Stat>, Laws.KeySame(k, g), po.hstat(s, Q.get(Q.Group, k, gs)), Laws.StatOf(g, s, acc))),
+          po.stat_go(rest, g, s, gs, Q.history(k, Q.get(Q.Group, k, gs)) <> acc),
+          Equal.cong(Maybe<&2, Q.Stat>, Maybe<&2, Q.Stat>, x => Bool.pick(Maybe<&2, Q.Stat>, Laws.KeyIn(g, rest), po.hstat(s, Q.get(Q.Group, g, gs)), x), Laws.StatOf(g, s, Q.history(k, Q.get(Q.Group, k, gs)) <> acc), Bool.pick(Maybe<&2, Q.Stat>, Laws.KeySame(k, g), po.hstat(s, Q.get(Q.Group, k, gs)), Laws.StatOf(g, s, acc)), po.stat_hist(g, s, k, Q.get(Q.Group, k, gs), acc))),
+        po.pick_merge(Maybe<&2, Q.Stat>, Laws.KeySame(k, g), Laws.KeyIn(g, rest), po.hstat(s, Q.get(Q.Group, g, gs)), Laws.StatOf(g, s, acc), po.hstat(s, Q.get(Q.Group, k, gs)), po.key_pick(Maybe<&2, Q.Stat>, k, g, +x => po.hstat(s, Q.get(Q.Group, x, gs)))))
+
+def po.prog_ver(+k: +List<Bool>, m: Maybe<&2, Q.Stat>, +acc: +List<Q.Version>) -> {Laws.Programs(Q.version(k, m) <> acc) == k <> Laws.Programs(acc) : List<&2, List<&2, Bool>>}:
+  match m:
+    case None{}:
+      {==}
+    case Some{st}:
+      {==}
+
+def po.prog_go(ks: +List<List<&2, Bool>>, +src: Q.Trie<Q.Stat>, +acc: +List<Q.Version>) -> {Laws.Programs(Q.versions(ks, src, acc)) == po.krev(ks, Laws.Programs(acc)) : List<&2, List<&2, Bool>>}:
+  match ks:
+    case Nil{}:
+      {==}
+    case +k <> rest:
+      Equal.trans(List<&2, List<&2, Bool>>, Laws.Programs(Q.versions(rest, src, Q.version(k, Q.get(Q.Stat, k, src)) <> acc)), po.krev(rest, Laws.Programs(Q.version(k, Q.get(Q.Stat, k, src)) <> acc)), po.krev(rest, k <> Laws.Programs(acc)),
+        po.prog_go(rest, src, Q.version(k, Q.get(Q.Stat, k, src)) <> acc),
+        Equal.cong(List<&2, List<&2, Bool>>, List<&2, List<&2, Bool>>, x => po.krev(rest, x), Laws.Programs(Q.version(k, Q.get(Q.Stat, k, src)) <> acc), k <> Laws.Programs(acc), po.prog_ver(k, Q.get(Q.Stat, k, src), acc)))
+
+def po.hprog(m: Maybe<&2, Q.Group>) -> List<&2, List<&2, Bool>>:
+  match m:
+    case None{}:
+      Nil{}
+    case Some{Q.Group{c, o, src}}:
+      Laws.Programs(Q.versions(o, src, Nil{}))
+
+def po.progof_hist(+g: +List<Bool>, +k: +List<Bool>, m: Maybe<&2, Q.Group>, +acc: +List<Q.History>)
+  -> {Laws.ProgramsOf(g, Q.history(k, m) <> acc) == Bool.pick(List<&2, List<&2, Bool>>, Laws.KeySame(k, g), po.hprog(m), Laws.ProgramsOf(g, acc)) : List<&2, List<&2, Bool>>}:
+  match m:
+    case None{}:
+      {==}
+    case Some{Q.Group{c, o, src}}:
+      {==}
+
+
+def po.progof_go(ks: +List<List<&2, Bool>>, +g: +List<Bool>, +gs: Q.Trie<Q.Group>, +acc: +List<Q.History>)
+  -> {Laws.ProgramsOf(g, Q.histories.go(ks, gs, acc)) == Bool.pick(List<&2, List<&2, Bool>>, Laws.KeyIn(g, ks), po.hprog(Q.get(Q.Group, g, gs)), Laws.ProgramsOf(g, acc)) : List<&2, List<&2, Bool>>}:
+  match ks:
+    case Nil{}:
+      {==}
+    case +k <> +rest:
+      Equal.trans(List<&2, List<&2, Bool>>, Laws.ProgramsOf(g, Q.histories.go(rest, gs, Q.history(k, Q.get(Q.Group, k, gs)) <> acc)), Bool.pick(List<&2, List<&2, Bool>>, Laws.KeyIn(g, rest), po.hprog(Q.get(Q.Group, g, gs)), Bool.pick(List<&2, List<&2, Bool>>, Laws.KeySame(k, g), po.hprog(Q.get(Q.Group, k, gs)), Laws.ProgramsOf(g, acc))), Bool.pick(List<&2, List<&2, Bool>>, Bool.or(Laws.KeySame(k, g), Laws.KeyIn(g, rest)), po.hprog(Q.get(Q.Group, g, gs)), Laws.ProgramsOf(g, acc)),
+        Equal.trans(List<&2, List<&2, Bool>>, Laws.ProgramsOf(g, Q.histories.go(rest, gs, Q.history(k, Q.get(Q.Group, k, gs)) <> acc)), Bool.pick(List<&2, List<&2, Bool>>, Laws.KeyIn(g, rest), po.hprog(Q.get(Q.Group, g, gs)), Laws.ProgramsOf(g, Q.history(k, Q.get(Q.Group, k, gs)) <> acc)), Bool.pick(List<&2, List<&2, Bool>>, Laws.KeyIn(g, rest), po.hprog(Q.get(Q.Group, g, gs)), Bool.pick(List<&2, List<&2, Bool>>, Laws.KeySame(k, g), po.hprog(Q.get(Q.Group, k, gs)), Laws.ProgramsOf(g, acc))),
+          po.progof_go(rest, g, gs, Q.history(k, Q.get(Q.Group, k, gs)) <> acc),
+          Equal.cong(List<&2, List<&2, Bool>>, List<&2, List<&2, Bool>>, x => Bool.pick(List<&2, List<&2, Bool>>, Laws.KeyIn(g, rest), po.hprog(Q.get(Q.Group, g, gs)), x), Laws.ProgramsOf(g, Q.history(k, Q.get(Q.Group, k, gs)) <> acc), Bool.pick(List<&2, List<&2, Bool>>, Laws.KeySame(k, g), po.hprog(Q.get(Q.Group, k, gs)), Laws.ProgramsOf(g, acc)), po.progof_hist(g, k, Q.get(Q.Group, k, gs), acc))),
+        po.pick_merge(List<&2, List<&2, Bool>>, Laws.KeySame(k, g), Laws.KeyIn(g, rest), po.hprog(Q.get(Q.Group, g, gs)), Laws.ProgramsOf(g, acc), po.hprog(Q.get(Q.Group, k, gs)), po.key_pick(List<&2, List<&2, Bool>>, k, g, +x => po.hprog(Q.get(Q.Group, x, gs)))))
+
+
+def po.member_order(+q: +List<Q.Use>, +g: +List<Bool>) -> {Laws.KeyIn(g, po.order(po.build(q))) == po.some_g(Q.get(Q.Group, g, po.groups(po.build(q)))) : Bool}:
+  %Equal.sym(List<&2, List<&2, Bool>>, po.order(po.build(q)), po.gord(q), po.order_build(q)) : {Laws.KeyIn(g, _) == po.some_g(Q.get(Q.Group, g, po.groups(po.build(q)))) : Bool}
+  Equal.trans(Bool, Laws.KeyIn(g, po.gord(q)), po.used(g, q), po.some_g(Q.get(Q.Group, g, po.groups(po.build(q)))), po.m1(q, g), Equal.sym(Bool, po.some_g(Q.get(Q.Group, g, po.groups(po.build(q)))), po.used(g, q), po.used_build(q, g)))
+
+def po.cur_collapse(+g: +List<Bool>, m: Maybe<&2, Q.Group>) -> {Bool.pick(Maybe<&2, List<&2, Bool>>, po.some_g(m), po.hcur(g, m), None{}) == po.gcur(m) : Maybe<&2, List<&2, Bool>>}:
+  match m:
+    case None{}:
+      {==}
+    case Some{grp}:
+      {==}
+
+def po.out_current(+q: +List<Q.Use>, +g: +List<Bool>) -> {Laws.CurrentOf(g, Q.histories.go(po.order(po.build(q)), po.groups(po.build(q)), Nil{})) == po.lat(g, q) : Maybe<&2, List<&2, Bool>>}:
+  Equal.trans(Maybe<&2, List<&2, Bool>>, Laws.CurrentOf(g, Q.histories.go(po.order(po.build(q)), po.groups(po.build(q)), Nil{})), Bool.pick(Maybe<&2, List<&2, Bool>>, Laws.KeyIn(g, po.order(po.build(q))), po.hcur(g, Q.get(Q.Group, g, po.groups(po.build(q)))), None{}), po.lat(g, q),
+    po.cur_go(po.order(po.build(q)), g, po.groups(po.build(q)), Nil{}),
+    %Equal.sym(Bool, Laws.KeyIn(g, po.order(po.build(q))), po.some_g(Q.get(Q.Group, g, po.groups(po.build(q)))), po.member_order(q, g)) : {Bool.pick(Maybe<&2, List<&2, Bool>>, _, po.hcur(g, Q.get(Q.Group, g, po.groups(po.build(q)))), None{}) == po.lat(g, q) : Maybe<&2, List<&2, Bool>>}
+    Equal.trans(Maybe<&2, List<&2, Bool>>, Bool.pick(Maybe<&2, List<&2, Bool>>, po.some_g(Q.get(Q.Group, g, po.groups(po.build(q)))), po.hcur(g, Q.get(Q.Group, g, po.groups(po.build(q)))), None{}), po.gcur(Q.get(Q.Group, g, po.groups(po.build(q)))), po.lat(g, q), po.cur_collapse(g, Q.get(Q.Group, g, po.groups(po.build(q)))), po.cur_build(q, g)))
+
+def po.out_usecases(+q: +List<Q.Use>) -> {Laws.UseCases(Q.histories.go(po.order(po.build(q)), po.groups(po.build(q)), Nil{})) == po.krev(po.gord(q), Nil{}) : List<&2, List<&2, Bool>>}:
+  Equal.trans(List<&2, List<&2, Bool>>, Laws.UseCases(Q.histories.go(po.order(po.build(q)), po.groups(po.build(q)), Nil{})), po.krev(po.order(po.build(q)), Nil{}), po.krev(po.gord(q), Nil{}),
+    po.uc_go(po.order(po.build(q)), po.groups(po.build(q)), Nil{}),
+    Equal.cong(List<&2, List<&2, Bool>>, List<&2, List<&2, Bool>>, x => po.krev(x, Nil{}), po.order(po.build(q)), po.gord(q), po.order_build(q)))
+
+def po.prog_collapse(m: Maybe<&2, Q.Group>) -> {Bool.pick(List<&2, List<&2, Bool>>, po.some_g(m), po.hprog(m), Nil{}) == po.krev(po.ord(po.fresh(m)), Nil{}) : List<&2, List<&2, Bool>>}:
+  match m:
+    case None{}:
+      {==}
+    case Some{Q.Group{c, o, src}}:
+      po.prog_go(o, src, Nil{})
+
+def po.out_programs(+q: +List<Q.Use>, +g: +List<Bool>) -> {Laws.ProgramsOf(g, Q.histories.go(po.order(po.build(q)), po.groups(po.build(q)), Nil{})) == po.krev(po.sord(g, q), Nil{}) : List<&2, List<&2, Bool>>}:
+  Equal.trans(List<&2, List<&2, Bool>>, Laws.ProgramsOf(g, Q.histories.go(po.order(po.build(q)), po.groups(po.build(q)), Nil{})), Bool.pick(List<&2, List<&2, Bool>>, Laws.KeyIn(g, po.order(po.build(q))), po.hprog(Q.get(Q.Group, g, po.groups(po.build(q)))), Nil{}), po.krev(po.sord(g, q), Nil{}),
+    po.progof_go(po.order(po.build(q)), g, po.groups(po.build(q)), Nil{}),
+    %Equal.sym(Bool, Laws.KeyIn(g, po.order(po.build(q))), po.some_g(Q.get(Q.Group, g, po.groups(po.build(q)))), po.member_order(q, g)) : {Bool.pick(List<&2, List<&2, Bool>>, _, po.hprog(Q.get(Q.Group, g, po.groups(po.build(q)))), Nil{}) == po.krev(po.sord(g, q), Nil{}) : List<&2, List<&2, Bool>>}
+    Equal.trans(List<&2, List<&2, Bool>>, Bool.pick(List<&2, List<&2, Bool>>, po.some_g(Q.get(Q.Group, g, po.groups(po.build(q)))), po.hprog(Q.get(Q.Group, g, po.groups(po.build(q)))), Nil{}), po.krev(po.ord(po.fresh(Q.get(Q.Group, g, po.groups(po.build(q))))), Nil{}), po.krev(po.sord(g, q), Nil{}),
+      po.prog_collapse(Q.get(Q.Group, g, po.groups(po.build(q)))),
+      Equal.cong(List<&2, List<&2, Bool>>, List<&2, List<&2, Bool>>, x => po.krev(x, Nil{}), po.ord(po.fresh(Q.get(Q.Group, g, po.groups(po.build(q))))), po.sord(g, q), po.sord_build(q, g))))
+
+def po.stat_collapse(+s: +List<Bool>, m: Maybe<&2, Q.Group>)
+  -> {Bool.pick(Maybe<&2, Q.Stat>, po.some_g(m), po.hstat(s, m), None{}) == Bool.pick(Maybe<&2, Q.Stat>, Laws.KeyIn(s, po.ord(po.fresh(m))), Some{po.zero(Q.get(Q.Stat, s, po.src(po.fresh(m))))}, None{}) : Maybe<&2, Q.Stat>}:
+  match m:
+    case None{}:
+      {==}
+    case Some{Q.Group{c, o, src}}:
+      po.ver_go(o, s, src, Nil{})
+
+def po.exp_collapse(e: Maybe<&2, Q.Stat>) -> {Bool.pick(Maybe<&2, Q.Stat>, po.some_s(e), Some{po.zero(e)}, None{}) == e : Maybe<&2, Q.Stat>}:
+  match e:
+    case None{}:
+      {==}
+    case Some{st}:
+      {==}
+
+def po.out_stat(+q: +List<Q.Use>, +g: +List<Bool>, +s: +List<Bool>) -> {Laws.StatOf(g, s, Q.histories.go(po.order(po.build(q)), po.groups(po.build(q)), Nil{})) == po.exp(g, s, q) : Maybe<&2, Q.Stat>}:
+  Equal.trans(Maybe<&2, Q.Stat>, Laws.StatOf(g, s, Q.histories.go(po.order(po.build(q)), po.groups(po.build(q)), Nil{})), Bool.pick(Maybe<&2, Q.Stat>, Laws.KeyIn(g, po.order(po.build(q))), po.hstat(s, Q.get(Q.Group, g, po.groups(po.build(q)))), None{}), po.exp(g, s, q),
+    po.stat_go(po.order(po.build(q)), g, s, po.groups(po.build(q)), Nil{}),
+    %Equal.sym(Bool, Laws.KeyIn(g, po.order(po.build(q))), po.some_g(Q.get(Q.Group, g, po.groups(po.build(q)))), po.member_order(q, g)) : {Bool.pick(Maybe<&2, Q.Stat>, _, po.hstat(s, Q.get(Q.Group, g, po.groups(po.build(q)))), None{}) == po.exp(g, s, q) : Maybe<&2, Q.Stat>}
+    Equal.trans(Maybe<&2, Q.Stat>, Bool.pick(Maybe<&2, Q.Stat>, po.some_g(Q.get(Q.Group, g, po.groups(po.build(q)))), po.hstat(s, Q.get(Q.Group, g, po.groups(po.build(q)))), None{}), Bool.pick(Maybe<&2, Q.Stat>, Laws.KeyIn(s, po.ord(po.fresh(Q.get(Q.Group, g, po.groups(po.build(q)))))), Some{po.zero(Q.get(Q.Stat, s, po.src(po.fresh(Q.get(Q.Group, g, po.groups(po.build(q)))))))}, None{}), po.exp(g, s, q),
+      po.stat_collapse(s, Q.get(Q.Group, g, po.groups(po.build(q)))),
+      %Equal.sym(List<&2, List<&2, Bool>>, po.ord(po.fresh(Q.get(Q.Group, g, po.groups(po.build(q))))), po.sord(g, q), po.sord_build(q, g)) : {Bool.pick(Maybe<&2, Q.Stat>, Laws.KeyIn(s, _), Some{po.zero(Q.get(Q.Stat, s, po.src(po.fresh(Q.get(Q.Group, g, po.groups(po.build(q)))))))}, None{}) == po.exp(g, s, q) : Maybe<&2, Q.Stat>}
+      %Equal.sym(Maybe<&2, Q.Stat>, Q.get(Q.Stat, s, po.src(po.fresh(Q.get(Q.Group, g, po.groups(po.build(q)))))), po.exp(g, s, q), po.stat_build(q, g, s)) : {Bool.pick(Maybe<&2, Q.Stat>, Laws.KeyIn(s, po.sord(g, q)), Some{po.zero(_)}, None{}) == po.exp(g, s, q) : Maybe<&2, Q.Stat>}
+      %Equal.sym(Bool, Laws.KeyIn(s, po.sord(g, q)), po.some_s(po.exp(g, s, q)), po.m2(q, g, s)) : {Bool.pick(Maybe<&2, Q.Stat>, _, Some{po.zero(po.exp(g, s, q))}, None{}) == po.exp(g, s, q) : Maybe<&2, Q.Stat>}
+      po.exp_collapse(po.exp(g, s, q))))
+
+def po.kcat(a: +List<List<&2, Bool>>, b: +List<List<&2, Bool>>) -> List<&2, List<&2, Bool>>:
+  match a:
+    case Nil{}:
+      b
+    case x <> r:
+      x <> po.kcat(r, b)
+
+def po.kcat_nil(a: +List<List<&2, Bool>>) -> {po.kcat(a, Nil{}) == a : List<&2, List<&2, Bool>>}:
+  match a:
+    case Nil{}:
+      {==}
+    case +x <> r:
+      Equal.cong(List<&2, List<&2, Bool>>, List<&2, List<&2, Bool>>, t => x <> t, po.kcat(r, Nil{}), r, po.kcat_nil(r))
+
+def po.kcat_assoc(a: +List<List<&2, Bool>>, +b: +List<List<&2, Bool>>, +c: +List<List<&2, Bool>>) -> {po.kcat(po.kcat(a, b), c) == po.kcat(a, po.kcat(b, c)) : List<&2, List<&2, Bool>>}:
+  match a:
+    case Nil{}:
+      {==}
+    case +x <> r:
+      Equal.cong(List<&2, List<&2, Bool>>, List<&2, List<&2, Bool>>, t => x <> t, po.kcat(po.kcat(r, b), c), po.kcat(r, po.kcat(b, c)), po.kcat_assoc(r, b, c))
+
+def po.krev_acc(xs: +List<List<&2, Bool>>, +acc: +List<List<&2, Bool>>) -> {po.krev(xs, acc) == po.kcat(po.krev(xs, Nil{}), acc) : List<&2, List<&2, Bool>>}:
+  match xs:
+    case Nil{}:
+      {==}
+    case +x <> +r:
+      Equal.trans(List<&2, List<&2, Bool>>, po.krev(r, x <> acc), po.kcat(po.krev(r, Nil{}), x <> acc), po.kcat(po.krev(r, x <> Nil{}), acc),
+        po.krev_acc(r, x <> acc),
+        Equal.sym(List<&2, List<&2, Bool>>, po.kcat(po.krev(r, x <> Nil{}), acc), po.kcat(po.krev(r, Nil{}), x <> acc),
+          Equal.trans(List<&2, List<&2, Bool>>, po.kcat(po.krev(r, x <> Nil{}), acc), po.kcat(po.kcat(po.krev(r, Nil{}), x <> Nil{}), acc), po.kcat(po.krev(r, Nil{}), x <> acc),
+            Equal.cong(List<&2, List<&2, Bool>>, List<&2, List<&2, Bool>>, t => po.kcat(t, acc), po.krev(r, x <> Nil{}), po.kcat(po.krev(r, Nil{}), x <> Nil{}), po.krev_acc(r, x <> Nil{})),
+            po.kcat_assoc(po.krev(r, Nil{}), x <> Nil{}, acc))))
+
+def po.krev_step(+x: +List<Bool>, +xs: +List<List<&2, Bool>>, +f: +List<List<&2, Bool>>) -> {po.kcat(po.krev(x <> xs, Nil{}), f) == po.kcat(po.krev(xs, Nil{}), x <> f) : List<&2, List<&2, Bool>>}:
+  Equal.trans(List<&2, List<&2, Bool>>, po.kcat(po.krev(xs, x <> Nil{}), f), po.kcat(po.kcat(po.krev(xs, Nil{}), x <> Nil{}), f), po.kcat(po.krev(xs, Nil{}), x <> f),
+    Equal.cong(List<&2, List<&2, Bool>>, List<&2, List<&2, Bool>>, t => po.kcat(t, f), po.krev(xs, x <> Nil{}), po.kcat(po.krev(xs, Nil{}), x <> Nil{}), po.krev_acc(xs, x <> Nil{})),
+    po.kcat_assoc(po.krev(xs, Nil{}), x <> Nil{}, f))
+
+
+def po.bu_pick(+g: +List<Bool>, +rest: +List<Q.Use>, +q: +List<Q.Use>, u: Bool)
+  -> {po.kcat(po.krev(Bool.pick(List<&2, List<&2, Bool>>, u, po.gord(q), g <> po.gord(q)), Nil{}), Laws.FirstUseCases(rest, Bool.pick(List<&2, List<&2, Bool>>, u, po.gord(q), g <> po.gord(q)))) == po.kcat(po.krev(po.gord(q), Nil{}), Bool.pick(List<&2, List<&2, Bool>>, u, Laws.FirstUseCases(rest, po.gord(q)), g <> Laws.FirstUseCases(rest, g <> po.gord(q)))) : List<&2, List<&2, Bool>>}:
+  match u:
+    case True{}:
+      {==}
+    case False{}:
+      po.krev_step(g, po.gord(q), Laws.FirstUseCases(rest, g <> po.gord(q)))
+
+def po.bridge_u(ds: +List<Q.Use>, +q: +List<Q.Use>) -> {po.krev(po.gord(po.revonto(ds, q)), Nil{}) == po.kcat(po.krev(po.gord(q), Nil{}), Laws.FirstUseCases(ds, po.gord(q))) : List<&2, List<&2, Bool>>}:
+  match ds:
+    case Nil{}:
+      Equal.sym(List<&2, List<&2, Bool>>, po.kcat(po.krev(po.gord(q), Nil{}), Nil{}), po.krev(po.gord(q), Nil{}), po.kcat_nil(po.krev(po.gord(q), Nil{})))
+    case Q.Use{+g, +s} <> +rest:
+      Equal.trans(List<&2, List<&2, Bool>>, po.krev(po.gord(po.revonto(rest, Q.Use{g, s} <> q)), Nil{}), po.kcat(po.krev(po.gord(Q.Use{g, s} <> q), Nil{}), Laws.FirstUseCases(rest, po.gord(Q.Use{g, s} <> q))), po.kcat(po.krev(po.gord(q), Nil{}), Laws.FirstUseCases(Q.Use{g, s} <> rest, po.gord(q))),
+        po.bridge_u(rest, Q.Use{g, s} <> q),
+        %Equal.sym(Bool, Laws.KeyIn(g, po.gord(q)), po.used(g, q), po.m1(q, g)) : {po.kcat(po.krev(po.gord(Q.Use{g, s} <> q), Nil{}), Laws.FirstUseCases(rest, po.gord(Q.Use{g, s} <> q))) == po.kcat(po.krev(po.gord(q), Nil{}), Bool.pick(List<&2, List<&2, Bool>>, _, Laws.FirstUseCases(rest, po.gord(q)), g <> Laws.FirstUseCases(rest, g <> po.gord(q)))) : List<&2, List<&2, Bool>>}
+        po.bu_pick(g, rest, q, po.used(g, q)))
+
+
+def po.note_s(e: Maybe<&2, Q.Stat>, +s: +List<Bool>, +o: +List<List<&2, Bool>>) -> {Q.note(e, s, o) == Bool.pick(List<&2, List<&2, Bool>>, po.some_s(e), o, s <> o) : List<&2, List<&2, Bool>>}:
+  match e:
+    case None{}:
+      {==}
+    case Some{st}:
+      {==}
+
+
+def po.bp_pick(+k: +List<Bool>, +s: +List<Bool>, +rest: +List<Q.Use>, +q: +List<Q.Use>, c: Bool, n: Bool)
+  -> {po.kcat(po.krev(Bool.pick(List<&2, List<&2, Bool>>, c, Bool.pick(List<&2, List<&2, Bool>>, n, po.sord(k, q), s <> po.sord(k, q)), po.sord(k, q)), Nil{}), Laws.FirstPrograms(k, rest, Bool.pick(List<&2, List<&2, Bool>>, c, Bool.pick(List<&2, List<&2, Bool>>, n, po.sord(k, q), s <> po.sord(k, q)), po.sord(k, q)))) == po.kcat(po.krev(po.sord(k, q), Nil{}), Bool.pick(List<&2, List<&2, Bool>>, Bool.and(c, Bool.not(n)), s <> Laws.FirstPrograms(k, rest, s <> po.sord(k, q)), Laws.FirstPrograms(k, rest, po.sord(k, q)))) : List<&2, List<&2, Bool>>}:
+  match c:
+    case True{}:
+      match n:
+        case True{}:
+          {==}
+        case False{}:
+          po.krev_step(s, po.sord(k, q), Laws.FirstPrograms(k, rest, s <> po.sord(k, q)))
+    case False{}:
+      {==}
+
+
+def po.bridge_p(ds: +List<Q.Use>, +q: +List<Q.Use>, +k: +List<Bool>) -> {po.krev(po.sord(k, po.revonto(ds, q)), Nil{}) == po.kcat(po.krev(po.sord(k, q), Nil{}), Laws.FirstPrograms(k, ds, po.sord(k, q))) : List<&2, List<&2, Bool>>}:
+  match ds:
+    case Nil{}:
+      Equal.sym(List<&2, List<&2, Bool>>, po.kcat(po.krev(po.sord(k, q), Nil{}), Nil{}), po.krev(po.sord(k, q), Nil{}), po.kcat_nil(po.krev(po.sord(k, q), Nil{})))
+    case Q.Use{+g, +s} <> +rest:
+      Equal.trans(List<&2, List<&2, Bool>>, po.krev(po.sord(k, po.revonto(rest, Q.Use{g, s} <> q)), Nil{}), po.kcat(po.krev(po.sord(k, Q.Use{g, s} <> q), Nil{}), Laws.FirstPrograms(k, rest, po.sord(k, Q.Use{g, s} <> q))), po.kcat(po.krev(po.sord(k, q), Nil{}), Laws.FirstPrograms(k, Q.Use{g, s} <> rest, po.sord(k, q))),
+        po.bridge_p(rest, Q.Use{g, s} <> q, k),
+        %Equal.sym(List<&2, List<&2, Bool>>, Q.note(po.exp(k, s, q), s, po.sord(k, q)), Bool.pick(List<&2, List<&2, Bool>>, po.some_s(po.exp(k, s, q)), po.sord(k, q), s <> po.sord(k, q)), po.note_s(po.exp(k, s, q), s, po.sord(k, q))) : {po.kcat(po.krev(Bool.pick(List<&2, List<&2, Bool>>, Laws.KeySame(g, k), _, po.sord(k, q)), Nil{}), Laws.FirstPrograms(k, rest, Bool.pick(List<&2, List<&2, Bool>>, Laws.KeySame(g, k), _, po.sord(k, q)))) == po.kcat(po.krev(po.sord(k, q), Nil{}), Laws.FirstPrograms(k, Q.Use{g, s} <> rest, po.sord(k, q))) : List<&2, List<&2, Bool>>}
+        %Equal.sym(Bool, Laws.KeyIn(s, po.sord(k, q)), po.some_s(po.exp(k, s, q)), po.m2(q, k, s)) : {po.kcat(po.krev(Bool.pick(List<&2, List<&2, Bool>>, Laws.KeySame(g, k), Bool.pick(List<&2, List<&2, Bool>>, po.some_s(po.exp(k, s, q)), po.sord(k, q), s <> po.sord(k, q)), po.sord(k, q)), Nil{}), Laws.FirstPrograms(k, rest, Bool.pick(List<&2, List<&2, Bool>>, Laws.KeySame(g, k), Bool.pick(List<&2, List<&2, Bool>>, po.some_s(po.exp(k, s, q)), po.sord(k, q), s <> po.sord(k, q)), po.sord(k, q)))) == po.kcat(po.krev(po.sord(k, q), Nil{}), Bool.pick(List<&2, List<&2, Bool>>, Bool.and(Laws.KeySame(g, k), Bool.not(_)), s <> Laws.FirstPrograms(k, rest, s <> po.sord(k, q)), Laws.FirstPrograms(k, rest, po.sord(k, q)))) : List<&2, List<&2, Bool>>}
+        po.bp_pick(k, s, rest, q, Laws.KeySame(g, k), po.some_s(po.exp(k, s, q))))
+
+def po.merge(m: Maybe<&2, Q.Stat>, e: Maybe<&2, Q.Stat>) -> Maybe<&2, Q.Stat>:
+  match m:
+    case None{}:
+      e
+    case Some{Q.Stat{f, l, c}}:
+      match e:
+        case None{}:
+          Some{Q.Stat{f, l, c}}
+        case Some{Q.Stat{f2, l2, c2}}:
+          Some{Q.Stat{f, l2, Nat.add(c, c2)}}
+
+def po.merge_none(m: Maybe<&2, Q.Stat>) -> {po.merge(m, None{}) == m : Maybe<&2, Q.Stat>}:
+  match m:
+    case None{}:
+      {==}
+    case Some{Q.Stat{f, l, c}}:
+      {==}
+
+def po.add_one(c: Nat) -> {Nat.add(c, 1n) == 1n+c : Nat}:
+  match c:
+    case 0n:
+      {==}
+    case 1n+p:
+      Equal.cong(Nat, Nat, x => 1n+x, Nat.add(p, 1n), 1n+p, po.add_one(p))
+
+def po.add_succ(c: Nat, -d: Nat) -> {Nat.add(c, 1n+d) == 1n+Nat.add(c, d) : Nat}:
+  match c:
+    case 0n:
+      {==}
+    case 1n+p:
+      Equal.cong(Nat, Nat, x => 1n+x, Nat.add(p, 1n+d), 1n+Nat.add(p, d), po.add_succ(p, d))
+
+def po.merge_bump(x: Maybe<&2, Q.Stat>, +i: Nat, e: Maybe<&2, Q.Stat>) -> {po.merge(Some{Q.bump(x, i)}, e) == po.merge(x, Some{Laws.Earliest(i, e)}) : Maybe<&2, Q.Stat>}:
+  match x:
+    case None{}:
+      match e:
+        case None{}:
+          {==}
+        case Some{Q.Stat{f2, l2, c2}}:
+          {==}
+    case Some{Q.Stat{+f, l, +c}}:
+      match e:
+        case None{}:
+          Equal.cong(Nat, Maybe<&2, Q.Stat>, t => Some{Q.Stat{f, i, t}}, 1n+c, Nat.add(c, 1n), Equal.sym(Nat, Nat.add(c, 1n), 1n+c, po.add_one(c)))
+        case Some{Q.Stat{f2, +l2, c2}}:
+          Equal.cong(Nat, Maybe<&2, Q.Stat>, t => Some{Q.Stat{f, l2, t}}, 1n+Nat.add(c, c2), Nat.add(c, 1n+c2), Equal.sym(Nat, Nat.add(c, 1n+c2), 1n+Nat.add(c, c2), po.add_succ(c, c2)))
+
+def po.bs_pick(h: Bool, +x: Maybe<&2, Q.Stat>, +i: Nat, +e: Maybe<&2, Q.Stat>)
+  -> {po.merge(Bool.pick(Maybe<&2, Q.Stat>, h, Some{Q.bump(x, i)}, x), e) == po.merge(x, Bool.pick(Maybe<&2, Q.Stat>, h, Some{Laws.Earliest(i, e)}, e)) : Maybe<&2, Q.Stat>}:
+  match h:
+    case True{}:
+      po.merge_bump(x, i, e)
+    case False{}:
+      {==}
+
+def po.bridge_s(ds: +List<Q.Use>, +q: +List<Q.Use>, +k: +List<Bool>, +s: +List<Bool>)
+  -> {po.exp(k, s, po.revonto(ds, q)) == po.merge(po.exp(k, s, q), Laws.ExpectedStat(k, s, ds, po.len(q))) : Maybe<&2, Q.Stat>}:
+  match ds:
+    case Nil{}:
+      Equal.sym(Maybe<&2, Q.Stat>, po.merge(po.exp(k, s, q), None{}), po.exp(k, s, q), po.merge_none(po.exp(k, s, q)))
+    case Q.Use{+g2, +s2} <> +rest:
+      Equal.trans(Maybe<&2, Q.Stat>, po.exp(k, s, po.revonto(rest, Q.Use{g2, s2} <> q)), po.merge(po.exp(k, s, Q.Use{g2, s2} <> q), Laws.ExpectedStat(k, s, rest, 1n+po.len(q))), po.merge(po.exp(k, s, q), Laws.ExpectedStat(k, s, Q.Use{g2, s2} <> rest, po.len(q))),
+        po.bridge_s(rest, Q.Use{g2, s2} <> q, k, s),
+        po.bs_pick(Bool.and(Laws.KeySame(g2, k), Laws.KeySame(s2, s)), po.exp(k, s, q), po.len(q), Laws.ExpectedStat(k, s, rest, 1n+po.len(q))))
+
+def po.or_else(a: Maybe<&2, List<&2, Bool>>, b: Maybe<&2, List<&2, Bool>>) -> Maybe<&2, List<&2, Bool>>:
+  match a:
+    case Some{x}:
+      Some{x}
+    case None{}:
+      b
+
+def po.or_else_none(a: Maybe<&2, List<&2, Bool>>) -> {po.or_else(a, None{}) == a : Maybe<&2, List<&2, Bool>>}:
+  match a:
+    case Some{x}:
+      {==}
+    case None{}:
+      {==}
+
+def po.oe_later(l: Maybe<&2, List<&2, Bool>>, c: Bool, +s2: +List<Bool>, +z: Maybe<&2, List<&2, Bool>>)
+  -> {po.or_else(l, Bool.pick(Maybe<&2, List<&2, Bool>>, c, Some{s2}, z)) == po.or_else(Laws.Later(l, c, s2), z) : Maybe<&2, List<&2, Bool>>}:
+  match l:
+    case Some{x}:
+      {==}
+    case None{}:
+      match c:
+        case True{}:
+          {==}
+        case False{}:
+          {==}
+
+def po.bridge_c(ds: +List<Q.Use>, +q: +List<Q.Use>, +k: +List<Bool>) -> {po.lat(k, po.revonto(ds, q)) == po.or_else(Laws.LatestProgram(k, ds), po.lat(k, q)) : Maybe<&2, List<&2, Bool>>}:
+  match ds:
+    case Nil{}:
+      {==}
+    case Q.Use{+g2, +s2} <> +rest:
+      Equal.trans(Maybe<&2, List<&2, Bool>>, po.lat(k, po.revonto(rest, Q.Use{g2, s2} <> q)), po.or_else(Laws.LatestProgram(k, rest), po.lat(k, Q.Use{g2, s2} <> q)), po.or_else(Laws.LatestProgram(k, Q.Use{g2, s2} <> rest), po.lat(k, q)),
+        po.bridge_c(rest, Q.Use{g2, s2} <> q, k),
+        po.oe_later(Laws.LatestProgram(k, rest), Laws.KeySame(g2, k), s2, po.lat(k, q)))
+
+
+def po.finish_eq(st: Q.State) -> {Q.finish(st) == Q.histories.go(po.order(st), po.groups(st), Nil{}) : List<&2, Q.History>}:
+  match st:
+    case Q.State{o, gs}:
+      {==}
+
+def po.hist_eq(+ds: +List<Q.Use>) -> {Q.histories(ds) == Q.histories.go(po.order(po.build(po.revonto(ds, Nil{}))), po.groups(po.build(po.revonto(ds, Nil{}))), Nil{}) : List<&2, Q.History>}:
+  Equal.trans(List<&2, Q.History>, Q.finish(Q.go(ds, 0n, Q.State{Nil{}, Q.Tip{}})), Q.finish(po.build(po.revonto(ds, Nil{}))), Q.histories.go(po.order(po.build(po.revonto(ds, Nil{}))), po.groups(po.build(po.revonto(ds, Nil{}))), Nil{}),
+    Equal.cong(Q.State, List<&2, Q.History>, t => Q.finish(t), Q.go(ds, 0n, Q.State{Nil{}, Q.Tip{}}), po.build(po.revonto(ds, Nil{})), po.go_build(ds, Nil{})),
+    po.finish_eq(po.build(po.revonto(ds, Nil{}))))
+
+def po.law_usecases(+ds: +List<Q.Use>) -> {Laws.UseCases(Q.histories(ds)) == Laws.FirstUseCases(ds, Nil{}) : List<&2, List<&2, Bool>>}:
+  %Equal.sym(List<&2, Q.History>, Q.histories(ds), Q.histories.go(po.order(po.build(po.revonto(ds, Nil{}))), po.groups(po.build(po.revonto(ds, Nil{}))), Nil{}), po.hist_eq(ds)) : {Laws.UseCases(_) == Laws.FirstUseCases(ds, Nil{}) : List<&2, List<&2, Bool>>}
+  Equal.trans(List<&2, List<&2, Bool>>, Laws.UseCases(Q.histories.go(po.order(po.build(po.revonto(ds, Nil{}))), po.groups(po.build(po.revonto(ds, Nil{}))), Nil{})), po.krev(po.gord(po.revonto(ds, Nil{})), Nil{}), Laws.FirstUseCases(ds, Nil{}), po.out_usecases(po.revonto(ds, Nil{})), po.bridge_u(ds, Nil{}))
+
+def po.law_programs(+g: +List<Bool>, +ds: +List<Q.Use>) -> {Laws.ProgramsOf(g, Q.histories(ds)) == Laws.FirstPrograms(g, ds, Nil{}) : List<&2, List<&2, Bool>>}:
+  %Equal.sym(List<&2, Q.History>, Q.histories(ds), Q.histories.go(po.order(po.build(po.revonto(ds, Nil{}))), po.groups(po.build(po.revonto(ds, Nil{}))), Nil{}), po.hist_eq(ds)) : {Laws.ProgramsOf(g, _) == Laws.FirstPrograms(g, ds, Nil{}) : List<&2, List<&2, Bool>>}
+  Equal.trans(List<&2, List<&2, Bool>>, Laws.ProgramsOf(g, Q.histories.go(po.order(po.build(po.revonto(ds, Nil{}))), po.groups(po.build(po.revonto(ds, Nil{}))), Nil{})), po.krev(po.sord(g, po.revonto(ds, Nil{})), Nil{}), Laws.FirstPrograms(g, ds, Nil{}), po.out_programs(po.revonto(ds, Nil{}), g), po.bridge_p(ds, Nil{}, g))
+
+def po.law_stats(+g: +List<Bool>, +s: +List<Bool>, +ds: +List<Q.Use>) -> {Laws.StatOf(g, s, Q.histories(ds)) == Laws.ExpectedStat(g, s, ds, 0n) : Maybe<&2, Q.Stat>}:
+  %Equal.sym(List<&2, Q.History>, Q.histories(ds), Q.histories.go(po.order(po.build(po.revonto(ds, Nil{}))), po.groups(po.build(po.revonto(ds, Nil{}))), Nil{}), po.hist_eq(ds)) : {Laws.StatOf(g, s, _) == Laws.ExpectedStat(g, s, ds, 0n) : Maybe<&2, Q.Stat>}
+  Equal.trans(Maybe<&2, Q.Stat>, Laws.StatOf(g, s, Q.histories.go(po.order(po.build(po.revonto(ds, Nil{}))), po.groups(po.build(po.revonto(ds, Nil{}))), Nil{})), po.exp(g, s, po.revonto(ds, Nil{})), Laws.ExpectedStat(g, s, ds, 0n), po.out_stat(po.revonto(ds, Nil{}), g, s), po.bridge_s(ds, Nil{}, g, s))
+
+def po.law_current(+g: +List<Bool>, +ds: +List<Q.Use>) -> {Laws.CurrentOf(g, Q.histories(ds)) == Laws.LatestProgram(g, ds) : Maybe<&2, List<&2, Bool>>}:
+  %Equal.sym(List<&2, Q.History>, Q.histories(ds), Q.histories.go(po.order(po.build(po.revonto(ds, Nil{}))), po.groups(po.build(po.revonto(ds, Nil{}))), Nil{}), po.hist_eq(ds)) : {Laws.CurrentOf(g, _) == Laws.LatestProgram(g, ds) : Maybe<&2, List<&2, Bool>>}
+  Equal.trans(Maybe<&2, List<&2, Bool>>, Laws.CurrentOf(g, Q.histories.go(po.order(po.build(po.revonto(ds, Nil{}))), po.groups(po.build(po.revonto(ds, Nil{}))), Nil{})), po.lat(g, po.revonto(ds, Nil{})), Laws.LatestProgram(g, ds), po.out_current(po.revonto(ds, Nil{}), g),
+    Equal.trans(Maybe<&2, List<&2, Bool>>, po.lat(g, po.revonto(ds, Nil{})), po.or_else(Laws.LatestProgram(g, ds), None{}), Laws.LatestProgram(g, ds), po.bridge_c(ds, Nil{}, g), po.or_else_none(Laws.LatestProgram(g, ds))))
+
+def Laws.policies_list_each_use_case_once_in_order_of_first_use(ds):
+  po.law_usecases(ds)
+
+def Laws.policies_list_each_program_of_a_use_case_once_in_order_of_first_use(g, ds):
+  po.law_programs(g, ds)
+
+def Laws.policies_count_each_version_from_its_first_to_its_last_decision(g, s, ds):
+  po.law_stats(g, s, ds)
+
+def Laws.policies_mark_the_program_of_the_latest_decision_current(g, ds):
+  po.law_current(g, ds)

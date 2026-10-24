@@ -6,6 +6,7 @@ import ./spans.bend as S
 import ./parts.bend as P
 import ./mask.bend as K
 import ./decide.bend as D
+import ./policies.bend as Q
 
 def RoundedUp(r: Nat, o: Nat, q: Nat) -> Type:
   match r:
@@ -783,3 +784,145 @@ law decide_masks_in_redact_mode_only_when_every_finding_can_be_masked:
   for +f: Bool
   for +fs: +List<Bool>
   {D.decide(D.Redact{}, f <> fs) == Bool.pick(D.Action, Maskable(f <> fs), D.Masked{}, D.Unmaskable{}) : D.Action}
+
+def KeySame(a: +List<Bool>, b: +List<Bool>) -> Bool:
+  match a:
+    case Nil{}:
+      match b:
+        case Nil{}:
+          True{}
+        case Con{y, rb}:
+          False{}
+    case Con{x, ra}:
+      match x:
+        case True{}:
+          match b:
+            case Nil{}:
+              False{}
+            case Con{y, rb}:
+              match y:
+                case True{}:
+                  KeySame(ra, rb)
+                case False{}:
+                  False{}
+        case False{}:
+          match b:
+            case Nil{}:
+              False{}
+            case Con{y, rb}:
+              match y:
+                case True{}:
+                  False{}
+                case False{}:
+                  KeySame(ra, rb)
+
+def KeyIn(+k: +List<Bool>, ks: +List<List<&2, Bool>>) -> Bool:
+  match ks:
+    case Nil{}:
+      False{}
+    case x <> rest:
+      Bool.or(KeySame(x, k), KeyIn(k, rest))
+
+def UseCases(hs: +List<Q.History>) -> +List<List<&2, Bool>>:
+  match hs:
+    case Nil{}:
+      Nil{}
+    case Q.History{g, vs, cur} <> rest:
+      g <> UseCases(rest)
+
+def FirstUseCases(ds: +List<Q.Use>, +seen: +List<List<&2, Bool>>) -> +List<List<&2, Bool>>:
+  match ds:
+    case Nil{}:
+      Nil{}
+    case Q.Use{+g, s} <> +rest:
+      Bool.pick(List<&2, List<&2, Bool>>, KeyIn(g, seen), FirstUseCases(rest, seen), g <> FirstUseCases(rest, g <> seen))
+
+def Programs(vs: +List<Q.Version>) -> +List<List<&2, Bool>>:
+  match vs:
+    case Nil{}:
+      Nil{}
+    case Q.Version{s, st} <> rest:
+      s <> Programs(rest)
+
+def ProgramsOf(+g: +List<Bool>, hs: +List<Q.History>) -> +List<List<&2, Bool>>:
+  match hs:
+    case Nil{}:
+      Nil{}
+    case Q.History{g2, +vs, cur} <> +rest:
+      Bool.pick(List<&2, List<&2, Bool>>, KeySame(g2, g), Programs(vs), ProgramsOf(g, rest))
+
+def FirstPrograms(+g: +List<Bool>, ds: +List<Q.Use>, +seen: +List<List<&2, Bool>>) -> +List<List<&2, Bool>>:
+  match ds:
+    case Nil{}:
+      Nil{}
+    case Q.Use{g2, +s} <> +rest:
+      Bool.pick(List<&2, List<&2, Bool>>, Bool.and(KeySame(g2, g), Bool.not(KeyIn(s, seen))), s <> FirstPrograms(g, rest, s <> seen), FirstPrograms(g, rest, seen))
+
+def StatIn(+s: +List<Bool>, vs: +List<Q.Version>) -> Maybe<&2, Q.Stat>:
+  match vs:
+    case Nil{}:
+      None{}
+    case Q.Version{s2, +st} <> +rest:
+      Bool.pick(Maybe<&2, Q.Stat>, KeySame(s2, s), Some{st}, StatIn(s, rest))
+
+def StatOf(+g: +List<Bool>, +s: +List<Bool>, hs: +List<Q.History>) -> Maybe<&2, Q.Stat>:
+  match hs:
+    case Nil{}:
+      None{}
+    case Q.History{g2, +vs, cur} <> +rest:
+      Bool.pick(Maybe<&2, Q.Stat>, KeySame(g2, g), StatIn(s, vs), StatOf(g, s, rest))
+
+def Earliest(+i: Nat, m: Maybe<&2, Q.Stat>) -> Q.Stat:
+  match m:
+    case None{}:
+      Q.Stat{i, i, 1n}
+    case Some{Q.Stat{f, l, c}}:
+      Q.Stat{i, l, 1n+c}
+
+def ExpectedStat(+g: +List<Bool>, +s: +List<Bool>, ds: +List<Q.Use>, +i: Nat) -> Maybe<&2, Q.Stat>:
+  match ds:
+    case Nil{}:
+      None{}
+    case Q.Use{g2, s2} <> +rest:
+      Bool.pick(Maybe<&2, Q.Stat>, Bool.and(KeySame(g2, g), KeySame(s2, s)), Some{Earliest(i, ExpectedStat(g, s, rest, 1n+i))}, ExpectedStat(g, s, rest, 1n+i))
+
+def CurrentOf(+g: +List<Bool>, hs: +List<Q.History>) -> Maybe<&2, List<&2, Bool>>:
+  match hs:
+    case Nil{}:
+      None{}
+    case Q.History{g2, vs, +cur} <> +rest:
+      Bool.pick(Maybe<&2, List<&2, Bool>>, KeySame(g2, g), Some{cur}, CurrentOf(g, rest))
+
+def Later(m: Maybe<&2, List<&2, Bool>>, b: Bool, +s: +List<Bool>) -> Maybe<&2, List<&2, Bool>>:
+  match m:
+    case Some{x}:
+      Some{x}
+    case None{}:
+      Bool.pick(Maybe<&2, List<&2, Bool>>, b, Some{s}, None{})
+
+def LatestProgram(+g: +List<Bool>, ds: +List<Q.Use>) -> Maybe<&2, List<&2, Bool>>:
+  match ds:
+    case Nil{}:
+      None{}
+    case Q.Use{g2, s2} <> rest:
+      Later(LatestProgram(g, rest), KeySame(g2, g), s2)
+
+law policies_list_each_use_case_once_in_order_of_first_use:
+  for +ds: +List<Q.Use>
+  {UseCases(Q.histories(ds)) == FirstUseCases(ds, []) : List<&2, List<&2, Bool>>}
+
+law policies_list_each_program_of_a_use_case_once_in_order_of_first_use:
+  for +g: +List<Bool>
+  for +ds: +List<Q.Use>
+  {ProgramsOf(g, Q.histories(ds)) == FirstPrograms(g, ds, []) : List<&2, List<&2, Bool>>}
+
+law policies_count_each_version_from_its_first_to_its_last_decision:
+  for +g: +List<Bool>
+  for +s: +List<Bool>
+  for +ds: +List<Q.Use>
+  {StatOf(g, s, Q.histories(ds)) == ExpectedStat(g, s, ds, 0n) : Maybe<&2, Q.Stat>}
+
+law policies_mark_the_program_of_the_latest_decision_current:
+  for +g: +List<Bool>
+  for +ds: +List<Q.Use>
+  {CurrentOf(g, Q.histories(ds)) == LatestProgram(g, ds) : Maybe<&2, List<&2, Bool>>}

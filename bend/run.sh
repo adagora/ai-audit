@@ -7,7 +7,7 @@ found=$("$BEND" version 2>/dev/null)
 [ "$found" = "bend $BEND_VERSION" ] || { echo "FAIL need bend $BEND_VERSION, found '${found:-no bend}'"; exit 1; }
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 rc=0; ran=""
-MODULES="context arena usage spans parts mask decide"
+MODULES="context arena usage spans parts mask decide policies"
 
 verdict() {
   if (cd "$1" && "$BEND" "$2" 2>&1) | grep -qx "ALL PROOFS CHECK"; then echo pass; else echo fail; fi
@@ -78,6 +78,13 @@ mutant empty-blocks decide 's/case _ Nil\{\}:\n      Original\{\}/case _ Nil{}:\
 mutant advisory-blocks decide 's/case Advisory\{\} Con\{f, rest\}:\n      Original\{\}/case Advisory{} Con{f, rest}:\n      Blocked{}/'
 mutant no-go-forwards decide 's/case NoGo\{\} Con\{f, rest\}:\n      Blocked\{\}/case NoGo{} Con{f, rest}:\n      Masked{}/'
 mutant unmaskable-masked decide 's/case Con\{False\{\}, rest\}:\n      False\{\}/case Con{False{}, rest}:\n      all_maskable(rest)/'
+mutant count-not-added policies 's/Stat\{f, i, 1n\+c\}/Stat{f, i, c}/'
+mutant last-not-moved policies 's/Stat\{f, i, 1n\+c\}/Stat{f, l, 1n+c}/'
+mutant first-moved policies 's/Stat\{f, i, 1n\+c\}/Stat{i, i, 1n+c}/'
+mutant rollback-new-version policies 's/case Some\{st\}:\n      order/case Some{st}:\n      s <> order/'
+mutant group-listed-twice policies 's/case Some\{grp\}:\n      State\{order, /case Some{grp}:\n      State{g <> order, /'
+mutant group-dropped policies 's/case None\{\}:\n      State\{g <> order, /case None{}:\n      State{order, /'
+mutant current-is-group-key policies 's/History\{k, versions\(order, src, Nil\{\}\), cur\}/History{k, versions(order, src, Nil{}), k}/'
 for f in stops/*.bend; do case "$ran" in *" $(basename "$f" .bend) "*) ;; *) echo "FAIL $f has no mutant"; rc=1;; esac; done
 
 if command -v lean >/dev/null 2>&1; then

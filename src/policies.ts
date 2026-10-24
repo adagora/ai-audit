@@ -1,6 +1,27 @@
+import BendPolicies from "./bend/policies.mjs";
+import { bendList, bendListOf, fromBendList, type BendList } from "./context.js";
+
 export interface PolicyChange { path: string; from?: unknown; to?: unknown }
 export interface PolicyVersion { version: number; sourceHash: string; name?: string; firstUsed: string; lastUsed: string; decisions: number; current: boolean; changes?: PolicyChange[] | null }
 export interface PolicyHistory { systemId: string; useCase: string; versions: PolicyVersion[] }
+
+type BendKey = BendList<boolean>;
+type BendHistory = { group: BendKey; current: BendKey; versions: BendList<{ source: BendKey; stat: { first: number; last: number; count: number } }> };
+
+const keyOf = (id: number): BendKey => { const bits: boolean[] = []; for (let n = id; n > 0; n = Math.floor(n / 2)) bits.push(n % 2 === 1); return bendList(bits); };
+const idOf = (key: BendKey) => fromBendList(key).reduceRight((n, bit) => n * 2 + (bit ? 1 : 0), 0);
+
+class Interned<T> {
+  readonly values: T[] = [];
+  readonly keys: BendKey[] = [];
+  private readonly ids = new Map<string, number>();
+  id(name: string, value: T): number {
+    const known = this.ids.get(name);
+    if (known !== undefined) return known;
+    this.ids.set(name, this.values.length); this.keys.push(keyOf(this.values.length)); this.values.push(value);
+    return this.values.length - 1;
+  }
+}
 
 export function policyHistories(records: any[], filter: { systemId?: string; useCase?: string } = {}): PolicyHistory[] {
   const steps = new Map<string, any>(), names = new Map<string, string>();
@@ -8,22 +29,24 @@ export function policyHistories(records: any[], filter: { systemId?: string; use
     if (r?.qdl && typeof r.refId === "string") steps.set(r.refId, r.qdl);
     if (r?.kind === "program" && typeof r.name === "string") names.set(r.id, r.name);
   }
-  type Group = { systemId: string; useCase: string; versions: Map<string, PolicyVersion>; last?: string };
-  const groups = new Map<string, Group>();
+  const groups = new Interned<{ systemId: string; useCase: string }>(), sources = new Interned<string>();
+  const uses: { group: number; source: number }[] = [], times: string[] = [];
   for (const d of records) {
     if (d?.kind !== "decision" || d.qdl) continue;
     const sourceHash = steps.get(d.id)?.sourceHash;
     if (typeof sourceHash !== "string") continue;
     if ((filter.systemId !== undefined && d.systemId !== filter.systemId) || (filter.useCase !== undefined && d.useCase !== filter.useCase)) continue;
-    const key = JSON.stringify([d.systemId, d.useCase]);
-    const group: Group = groups.get(key) ?? { systemId: d.systemId, useCase: d.useCase, versions: new Map<string, PolicyVersion>() };
-    groups.set(key, group);
-    const name = names.get(sourceHash);
-    const v = group.versions.get(sourceHash) ?? { version: group.versions.size + 1, sourceHash, ...(name !== undefined && { name }), firstUsed: d.ts, lastUsed: d.ts, decisions: 0, current: false };
-    group.versions.set(sourceHash, v);
-    v.lastUsed = d.ts; v.decisions++; group.last = sourceHash;
+    uses.push({ group: groups.id(JSON.stringify([d.systemId, d.useCase]), { systemId: d.systemId, useCase: d.useCase }), source: sources.id(sourceHash, sourceHash) });
+    times.push(d.ts);
   }
-  return [...groups.values()].map((g) => ({ systemId: g.systemId, useCase: g.useCase, versions: [...g.versions.values()].map((v) => ({ ...v, current: v.sourceHash === g.last })) }));
+  const histories = fromBendList(BendPolicies.histories(bendListOf(uses, (u) => ({ $: "Use", group: groups.keys[u.group], source: sources.keys[u.source] }))) as BendList<BendHistory>);
+  return histories.map((h) => {
+    const { systemId, useCase } = groups.values[idOf(h.group)], current = idOf(h.current);
+    return { systemId, useCase, versions: fromBendList(h.versions).map((v, i): PolicyVersion => {
+      const source = idOf(v.source), sourceHash = sources.values[source], name = names.get(sourceHash);
+      return { version: i + 1, sourceHash, ...(name !== undefined && { name }), firstUsed: times[v.stat.first], lastUsed: times[v.stat.last], decisions: v.stat.count, current: source === current };
+    }) };
+  });
 }
 
 function leaves(a: unknown, b: unknown, path: string, out: PolicyChange[]) {

@@ -7,6 +7,10 @@ import { arenaReference } from "../dist/test/arenaReference.js";
 import { tokenTotalsReference } from "../dist/test/usageReference.js";
 import { mergeSpansReference } from "../dist/test/spanReference.js";
 import { takenAcrossPartsReference } from "../dist/test/crossReference.js";
+import { policyHistories } from "../dist/src/policies.js";
+import { policyHistoriesReference } from "../dist/test/policiesReference.js";
+import { policyRecords } from "../dist/test/fixtures/capture-policies-goldens.js";
+import { gen } from "../dist/test/helpers.js";
 import { fork } from "node:child_process";
 import { once } from "node:events";
 const median = (xs) => xs.sort((a, b) => a - b)[xs.length >> 1];
@@ -39,5 +43,7 @@ const findings = [{ rule: "pii-email", path: "$" }, { rule: "github-pat", path: 
 row("decide, 3 findings", 200000, () => decide("redact", findings), () => decideReference("redact", findings));
 const calls = Array.from({ length: 200_000 }, (_, i) => ({ kind: "llm-call", upstreamStatus: 200, decision: { action: "forward-original" }, usage: i % 50 ? { input: 1000 + (i % 977), output: 200 + (i % 31) } : {} }));
 row("usage totals, 200,000 calls", 3, () => tokenTotals(calls), () => tokenTotalsReference(calls));
+const qdlLog = policyRecords(gen(83), 100_000);
+row("policy histories, 100,000 decisions", 3, () => policyHistories(qdlLog), () => policyHistoriesReference(qdlLog));
 
 if (only === undefined) for (const name of names) { const child = fork(new URL(import.meta.url), [name]); const [line] = await once(child, "message"); console.log(line); child.kill(); }
