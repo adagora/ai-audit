@@ -199,7 +199,7 @@ The model never sees the shop rate, so its price is a guess. When it proposes 27
 `replayQdl(log, id)` takes the decision id or its `:qdl` id, rebuilds the program from the log in a fresh session and returns `reproduced: true` when the outcome matches, refusals and failures included. Edit a logged input and `verify` reports a broken chain; replaying the edited record gives `reproduced: false`. `npm run example:quote` runs the same policy offline (add `-- --live` for one real gpt-4o-mini call).
 
 ### From the command line
-Any script or agent, in any language, can do the same without JavaScript ([ADR 0023](docs/adr/0023-decision-records-cli-and-outcomes.md)). Take `REQUEST_ID` from the `x-request-id` header of the proxied call; `--llm-call` must name an `llm-call` record already in the log.
+Any script or agent, in any language, can do the same without JavaScript ([ADR 0023](docs/adr/0023-decision-records-cli-and-outcomes.md)). Take `REQUEST_ID` from the `x-request-id` header of the proxied call; `--llm-call` must name an `llm-call` record already in the log. The provider's own request id (OpenAI sends one) comes back as `x-upstream-request-id`.
 ```sh
 node dist/src/cli.js decide --log audit.jsonl --policy examples/quineling-quote/policy.json \
   --inputs examples/quineling-quote/inputs.json --system-id cad-quote --use-case machining-quote --llm-call "$REQUEST_ID"

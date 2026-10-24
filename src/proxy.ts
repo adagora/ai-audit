@@ -213,7 +213,7 @@ const str = (v: unknown) => (typeof v === "string" ? v.slice(0, 128) : undefined
 const contentFreeReason = (e: unknown) => e instanceof AuditLogUnavailable ? e.message : typeof (e as NodeJS.ErrnoException)?.code === "string" ? (e as NodeJS.ErrnoException).code! : e instanceof Error ? e.name : "unknown";
 
 async function pipe(up: Response, res: http.ServerResponse): Promise<string> {
-  const h: Record<string, string> = {}; up.headers.forEach((v, k) => { if (!RESP_DROP.has(k)) h[k] = v; });
+  const h: Record<string, string> = {}; up.headers.forEach((v, k) => { if (!RESP_DROP.has(k)) h[k === "x-request-id" ? "x-upstream-request-id" : k] = v; });
   res.writeHead(up.status, h); res.flushHeaders();
   const dec = new TextDecoder(); let all = "";
   try { if (up.body) for await (const c of up.body as any) { res.write(c); all += dec.decode(c, { stream: true }); } } catch { }

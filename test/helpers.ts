@@ -27,7 +27,7 @@ export async function mockUpstream() {
     const ch: Buffer[] = []; for await (const c of req) ch.push(c);
     const body = Buffer.concat(ch); seen.push({ path: req.url!, body, headers: req.headers });
     const j = body.length ? JSON.parse(body.toString()) : {};
-    res.setHeader("content-type", "application/json");
+    res.setHeader("content-type", "application/json"); res.setHeader("x-request-id", `req_upstream_${seen.length}`);
     if (req.url === "/v1/models") return void res.end(JSON.stringify({ data: [{ id: "mock-1" }] }));
     if (req.url!.startsWith("/v1/messages/count_tokens")) return void res.end(JSON.stringify({ input_tokens: 7 }));
     const sse = (evs: unknown[]) => { res.writeHead(200, { "content-type": "text/event-stream" });

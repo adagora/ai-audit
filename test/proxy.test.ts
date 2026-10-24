@@ -88,6 +88,17 @@ test("count_tokens + models passthrough, routing errors use static codes", async
   assert.equal((await post(proxies.redact.url, "/v1/nope", {})).status, 404);
 });
 
+test("x-request-id names the llm-call record even when the provider sends its own, which comes back as x-upstream-request-id", async () => {
+  for (const stream of [false, true]) {
+    const r = await post(proxies.redact.url, "/v1/chat/completions", { model: "gpt-x", stream, messages: [{ role: "user", content: "hi" }] });
+    assert.equal(r.status, 200); await r.text();
+    const id = r.headers.get("x-request-id")!;
+    assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-/); assert.match(r.headers.get("x-upstream-request-id") ?? "", /^req_upstream_\d+$/);
+    await new Promise((done) => setTimeout(done, 20));
+    assert.equal(proxies.redact.log.read().filter((rec) => rec.kind === "llm-call" && rec.id === id).length, 1);
+  }
+});
+
 test("a request nested deeper than MAX_JSON_DEPTH is refused with 400 before inspection, where it used to overflow the stack into a 500", async () => {
   const nested = (depth: number) => `{"model":"gpt-x","messages":[{"role":"user","content":"${"[{".repeat(5000)}"}],"metadata":${"[".repeat(depth - 1)}${"]".repeat(depth - 1)}}`;
   const sent = up.seen.length, logged = proxies.redact.log.read().length;
