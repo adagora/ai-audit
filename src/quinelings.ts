@@ -1,13 +1,29 @@
 import { canon, sha256 } from "./audit.js";
 import { texts } from "./injection.js";
 import type { Api } from "./extract.js";
+import { scanText } from "./scan.js";
 
 export interface QuinelingEvent { where: "call" | "result"; op: string; path: string; sourceHash?: string; intentHash?: string; status?: string; error?: { code: string; path?: string } }
 export const QUINELING_OPS: ReadonlySet<string> = new Set(["describe", "compile", "inspect", "verify", "recover", "frame", "run", "reproduce",
   "parse", "create", "annotate", "lineage", "offspring_preview", "offspring_frame", "offspring_admit", "world_create", "world_inspect", "world_command"]);
 const TOOL = /(?:^|_)quineling_(?:v1_)?([a-z_]+)$/;
-const SOURCE_HASH = /^ql_[0-9a-f]{64}$/, CODE = /^[a-z][a-z0-9-]{0,63}$/, QDL_PATH = /^\$[\w.[\]-]{0,255}$/;
+const SOURCE_HASH = /^ql_[0-9a-f]{64}$/, QDL_PATH = /^\$[\w.[\]-]{0,255}$/;
+const STATUSES = new Set(["completed", "failed", "refused"]);
+export const DIAGNOSTIC_CODES: ReadonlySet<string> = new Set([
+  "attempt-budget", "comparison-type", "cycle", "disconnected", "division-zero", "duplicate-id", "eager-effect", "effect-cone",
+  "identity", "integer-overflow", "invalid-context", "invalid-data", "invalid-fields", "invalid-input", "invalid-parameter", "json",
+  "kernel-arity", "limit", "missing", "missing-binding", "missing-field", "missing-input", "name", "nonfinite", "nonfinite-input",
+  "nonfinite-result", "parameter", "receipt-conflict", "reference", "refinement", "resource-limit", "type", "unicode", "unit",
+  "unit-type", "unknown-field", "unknown-kernel", "unsafe-key", "unsupported", "unsupported-registry",
+]);
+export const DIAGNOSTIC_FALLBACK = "unreadable";
 const keep = (v: unknown, re: RegExp) => (typeof v === "string" && re.test(v) ? v : undefined);
+const diagnosticCode = (v: unknown) => (typeof v === "string" && DIAGNOSTIC_CODES.has(v) ? v : DIAGNOSTIC_FALLBACK);
+const runStatus = (v: unknown) => (typeof v === "string" && STATUSES.has(v) ? v : undefined);
+function diagnosticPath(v: unknown): string | undefined {
+  if (typeof v !== "string" || !QDL_PATH.test(v) || scanText(v).length) return undefined;
+  return v;
+}
 
 export function quinelingOp(name: unknown): string | undefined {
   const m = typeof name === "string" ? TOOL.exec(name) : null;
@@ -24,14 +40,14 @@ function resultEvent(op: string | undefined, text: string, path: string): Quinel
   }
   const r = j?.result, base: QuinelingEvent = { where: "result", op: op ?? "other", path };
   if (r?.result?.format === "qdl-run") {
-    const sourceHash = keep(r.result.sourceHash, SOURCE_HASH), status = keep(r.result.status, CODE);
+    const sourceHash = keep(r.result.sourceHash, SOURCE_HASH), status = runStatus(r.result.status);
     return { ...base, ...(sourceHash && { sourceHash }), ...(status && { status }) };
   }
   if (r?.payload?.format === "qdl-program") { const sourceHash = keep(r.id, SOURCE_HASH); return { ...base, ...(sourceHash && { sourceHash }) }; }
   if (!op) return undefined;
   if (j?.error && typeof j.error === "object") {
-    const errorPath = keep(j.error.path, QDL_PATH);
-    return { ...base, error: { code: keep(j.error.code, CODE) ?? "unreadable", ...(errorPath && { path: errorPath }) } };
+    const errorPath = diagnosticPath(j.error.path);
+    return { ...base, error: { code: diagnosticCode(j.error.code), ...(errorPath && { path: errorPath }) } };
   }
   return base;
 }

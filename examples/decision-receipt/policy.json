@@ -1,0 +1,38 @@
+{
+  "format": "qdl-intent",
+  "version": 1,
+  "name": "Floor quote",
+  "thought": {
+    "observations": [
+      { "id": "obs-minutes", "text": "minutes were measured", "input": "minutes", "path": [], "basis": "confirmed" },
+      { "id": "obs-rate", "text": "rate is on the rate card", "input": "rate", "path": [], "basis": "confirmed" },
+      { "id": "obs-proposed", "text": "the model proposed this price", "input": "proposed", "path": [], "basis": "suspected" }
+    ],
+    "evidence": [],
+    "goals": [],
+    "decisions": [],
+    "plans": [],
+    "tasks": [
+      {
+        "id": "task",
+        "text": "price is at least the floor",
+        "nodes": ["minutes", "rate", "proposed", "floor", "machining", "price", "matches", "differs", "review"],
+        "outputs": ["price", "matches", "review"]
+      }
+    ]
+  },
+  "inputs": [
+    { "id": "minutes", "name": "minutes", "type": { "kind": "number", "unit": "min", "min": 0 } },
+    { "id": "rate", "name": "rate", "type": { "kind": "number", "unit": "PLN*min^-1", "min": 0 } },
+    { "id": "proposed", "name": "proposed", "type": { "kind": "number", "unit": "PLN", "min": 0 } },
+    { "id": "floor", "value": 150, "type": { "kind": "number", "unit": "PLN", "min": 0 } }
+  ],
+  "steps": [
+    { "id": "machining", "op": "arithmetic", "inputs": ["minutes", "rate"], "params": { "kind": "mul" } },
+    { "id": "price", "op": "arithmetic", "inputs": ["machining", "floor"], "params": { "kind": "max" } },
+    { "id": "matches", "op": "compareValues", "inputs": ["price", "proposed"], "params": { "operator": "eq" } },
+    { "id": "differs", "op": "compare", "inputs": ["matches"], "params": { "operator": "eq", "value": false } },
+    { "id": "review", "op": "action", "inputs": ["differs", "price"], "params": { "allowed": true, "action": "route-to-human-review" } }
+  ],
+  "outputs": ["price", "matches", "review"]
+}

@@ -24,6 +24,7 @@ export interface Entry {
   params?: Record<string, unknown>;
   output: unknown;
   step?: Step;
+  qdlDecision?: boolean;
 }
 export interface Rec {
   kind: "decision" | "review" | "llm-call" | "program"; id: string; ts: string; refId?: string;
@@ -107,7 +108,7 @@ export class AuditLog {
       inputHash: sha256(e.input), redactedInput: e.storeRedactedInput ? redact(e.input) : undefined,
       sources: e.sources, model: e.model,
       prompt: e.prompt && { templateId: e.prompt.templateId, hash: sha256(e.prompt.template) },
-      params: e.params, output: e.output, step,
+      params: e.params, output: e.output, step, ...(e.qdlDecision && { qdlDecision: true }),
     });
   }
 
@@ -146,6 +147,50 @@ export function replay(log: AuditLog, recId: string, opts = { timeoutMs: 200, ma
   return { output, reproduced: outputHash === r.step.outputHash, steps: n };
 }
 
+export type EvidenceReason = "companion-missing" | "program-missing" | "not-reconstructible" | "output-mismatch";
+export interface EvidenceGap { id: string; reason: EvidenceReason }
+
+function companionOf(records: any[], id: string) {
+  return records.find((r) => r?.qdl && r.refId === id);
+}
+function mainOf(records: any[], id: string) {
+  const direct = records.find((r) => r?.kind === "decision" && r.id === id && !r.qdl);
+  if (direct) return direct;
+  const companion = records.find((r) => r?.id === id && r.qdl);
+  return companion?.refId ? records.find((r) => r?.id === companion.refId && !r.qdl) : undefined;
+}
+export function replayableQdl(records: any[], id: string): boolean {
+  const main = mainOf(records, id);
+  if (!main) return false;
+  if (main.step) return true;
+  const q = companionOf(records, main.id)?.qdl;
+  if (!q || q.inputs === undefined) return false;
+  if (typeof q.sourceHash === "string" && typeof q.source !== "string" && !records.some((r) => r?.kind === "program" && r.id === q.sourceHash)) return false;
+  return true;
+}
+export function decisionConsistency(records: any[], id: string): { ok: boolean; reason?: EvidenceReason } {
+  const main = mainOf(records, id);
+  if (!main) return { ok: false, reason: "companion-missing" };
+  const companion = companionOf(records, main.id);
+  if (!companion) return { ok: false, reason: "companion-missing" };
+  const q = companion.qdl;
+  if (q.inputs === undefined) return { ok: false, reason: "not-reconstructible" };
+  if (typeof q.sourceHash === "string" && typeof q.source !== "string" && !records.some((r) => r?.kind === "program" && r.id === q.sourceHash)) return { ok: false, reason: "program-missing" };
+  const outputOk = q.outputsHash !== undefined ? sha256(canon(main.output)) === q.outputsHash : main.output === undefined;
+  return outputOk ? { ok: true } : { ok: false, reason: "output-mismatch" };
+}
+export function evidenceGaps(records: any[], decisions: any[]): EvidenceGap[] {
+  const gaps: EvidenceGap[] = [];
+  for (const d of decisions) {
+    if (d.step && !d.qdlDecision) continue;
+    const companion = companionOf(records, d.id);
+    if (!d.qdlDecision && !companion) continue;
+    const consistency = decisionConsistency(records, d.id);
+    if (!consistency.ok && consistency.reason) gaps.push({ id: d.id, reason: consistency.reason });
+  }
+  return gaps;
+}
+
 const billed = (c: any) => c.kind === "llm-call" && c.decision?.action !== "block" && c.upstreamStatus >= 200 && c.upstreamStatus < 400;
 export function tokenTotals(calls: any[]) {
   const t: { input: number; output: number; unknownInput: number; unknownOutput: number; unknownUsage: number } = BendUsage["totals.fast"](
@@ -158,9 +203,10 @@ export function report(log: AuditLog, from: string, to: string) {
   const all = log.read();
   const inRange = (ts: string) => ts >= from && ts < to;
   const dec = all.filter((r) => r.kind === "decision" && !r.qdl && inRange(r.ts));
-  const steps = all.filter((r) => r.qdl && inRange(r.ts)) as any[], stepRefs = new Set(steps.map((s) => s.refId));
+  const steps = all.filter((r) => r.qdl && inRange(r.ts)) as any[];
   const qdl = { completed: 0, refused: 0, failed: 0 };
-  const policies = policyHistories(all.filter((r) => r.kind === "program" || inRange(r.ts)));
+  const policies = periodPolicies(all, inRange);
+  const evidence = evidenceGaps(all, dec);
   steps.forEach((s) => qdl[(s.qdl.status ?? "completed") as keyof typeof qdl]++);
   const ids = new Set(dec.map((d) => d.id));
   const rev = all.filter((r) => r.kind === "review" && ids.has(r.refId!));
@@ -170,7 +216,7 @@ export function report(log: AuditLog, from: string, to: string) {
   dec.forEach((d) => d.sources?.forEach((s) => { const k = `${s.doc}${s.page ? ` s.${s.page}` : ""}`; src.set(k, (src.get(k) ?? 0) + 1); }));
   const v = log.verifyChain();
   const stats = { decisions: dec.length, reviewed: last.size, unreviewed: dec.length - last.size, overridden,
-    overrideRatePct: last.size ? Math.round((overridden / last.size) * 1000) / 10 : 0, withReplayableStep: dec.filter((d) => d.step || stepRefs.has(d.id)).length };
+    overrideRatePct: last.size ? Math.round((overridden / last.size) * 1000) / 10 : 0, withReplayableStep: dec.filter((d) => replayableQdl(all, d.id)).length };
   const calls = all.filter((r) => r.kind === "llm-call" && inRange(r.ts)) as any[];
   const llm = { calls: calls.length, blocked: calls.filter((c) => c.decision.action === "block").length,
     redacted: calls.filter((c) => c.decision.action === "forward-redacted").length,
@@ -183,8 +229,9 @@ export function report(log: AuditLog, from: string, to: string) {
     "| Metryka | Wartość |", "|---|---|",
     ...Object.entries(stats).map(([k, x]) => `| ${k} | ${x} |`), "",
     ...(steps.length ? ["## Kroki QDL", "| status | liczba |", "|---|---|", ...Object.entries(qdl).map(([k, x]) => `| ${k} | ${x} |`), ""] : []),
-    ...(policies.length ? ["## Wersje polityk QDL", ...policies.flatMap((p) => [`### ${p.systemId} / ${p.useCase}`,
+    ...(policies.length ? ["## Wersje polityk QDL", "Wersje są numerowane z całego dziennika. „aktualna” oznacza wersję ostatniej decyzji w całym dzienniku, nie ostatnią w tym oknie.", ...policies.flatMap((p) => [`### ${p.systemId} / ${p.useCase}`,
       ...p.versions.map((v) => `- v${v.version}${v.current ? " (aktualna)" : ""} ${v.sourceHash.slice(0, 15)}…${v.name ? ` „${v.name}”` : ""}: decyzje ${v.decisions}, ${v.firstUsed} – ${v.lastUsed}`)]), ""] : []),
+    ...(evidence.length ? ["## Niepełne dowody decyzji", ...evidence.map((g) => `- ${g.id}: ${GAP_TEXT[g.reason]}`), ""] : []),
     "## Decyzje według systemu", ...Object.entries(dec.reduce<Record<string, number>>((a, d) => ((a[`${d.systemId} / ${d.useCase}`] = (a[`${d.systemId} / ${d.useCase}`] ?? 0) + 1), a), {})).map(([k, x]) => `- ${k}: ${x}`), "",
     "## Cytowane źródła", ...(src.size ? [...src].map(([k, x]) => `- ${k}: ${x}`) : ["- brak"]), "",
     "## Modele", ...[...new Set(dec.filter((d) => d.model).map((d) => `${d.model!.name}@${d.model!.version}`))].map((m) => `- ${m}`), "",
@@ -196,7 +243,23 @@ export function report(log: AuditLog, from: string, to: string) {
     ...(llm.withQuinelings ? ["### Quinelings w ruchu (tylko hashe, ADR 0024)", ...count(calls.flatMap((c) => (c.quinelings ?? []).map((e: any) => `${e.where} ${e.op}${e.status ? ` ${e.status}` : ""}${e.error ? ` error ${e.error.code}` : ""}`))), ""] : []),
     "_Raport generowany automatycznie z dziennika. Nie stanowi porady prawnej._",
   ].join("\n");
-  return { md, stats, llm, qdl, policies };
+  return { md, stats, llm, qdl, policies, evidence };
+}
+
+const GAP_TEXT = { "companion-missing": "brak zapisu QDL", "program-missing": "brak programu", "not-reconstructible": "wynik zapisany, nie do odtworzenia", "output-mismatch": "wynik decyzji nie zgadza się z zapisem QDL" };
+
+function periodPolicies(all: Rec[], inRange: (ts: string) => boolean) {
+  const steps = new Map<string, any>();
+  for (const r of all) if (r.qdl && typeof r.refId === "string") steps.set(r.refId, r.qdl);
+  return policyHistories(all).map((h) => ({
+    ...h,
+    versions: h.versions.flatMap((v) => {
+      const used = all.filter((d) => d.kind === "decision" && !d.qdl && d.systemId === h.systemId && d.useCase === h.useCase && steps.get(d.id)?.sourceHash === v.sourceHash && inRange(d.ts));
+      if (!used.length) return [];
+      const times = used.map((d) => d.ts).sort();
+      return [{ ...v, decisions: used.length, firstUsed: times[0], lastUsed: times[times.length - 1] }];
+    }),
+  })).filter((h) => h.versions.length);
 }
 
 export function anchor(log: AuditLog, anchorsPath: string, now = new Date().toISOString()) {

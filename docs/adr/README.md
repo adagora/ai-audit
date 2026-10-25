@@ -38,3 +38,6 @@ Format: Nygard (Status, Context, Decision, Consequences), at most ~40 lines, fil
 - [28. Credentials without a shape are found by their name](0028-named-credentials.md)
 - [29. Pure functions with proved laws are written in Bend 2 and shipped as generated JavaScript](0029-proved-pure-core-in-bend.md)
 - [30. CI runs every gate on Linux; Bend comes from its pinned release archive](0030-ci-and-pinned-bend-archive.md)
+- [31. Values an LLM reads from a text are checked against quotes from that text](0031-check-llm-answers-by-quotes.md)
+- [32. Quinelings diagnostics are a fixed set, and a retained decision input is scanned](0032-fixed-diagnostic-and-retained-input.md)
+- [33. Overall verification is chain, linkage, and output consistency](0033-decision-verification-and-occurrence.md)

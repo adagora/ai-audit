@@ -2,7 +2,8 @@
 import { parseArgs } from "node:util";
 import { readFileSync, writeFileSync } from "node:fs";
 import { AuditLog, AuditLogUnavailable, anchor, report, sha256, stats, verifyAnchors, type Review } from "./audit.js";
-import { recordQdl, replayQdl } from "./qdl.js";
+import { recordQdl, verifyDecision } from "./qdl.js";
+import { decisionReceipt, renderReceipt } from "./receipt.js";
 import { policyHistories, withChanges } from "./policies.js";
 import { randomBytes } from "node:crypto";
 import { SANDBOX_AVAILABLE, TOOLS_OK, sandboxState } from "./attachments.js";
@@ -11,6 +12,7 @@ import { listSessions, renderSessionHtml } from "./contextView.js";
 import type { Mode } from "./scan.js";
 import { scrubHistory } from "./history.js";
 import { createInspectionProfile } from "./profile.js";
+import { checkQuotes } from "./quotes.js";
 
 const [cmd, ...rest] = process.argv.slice(2);
 const { values: a } = parseArgs({ args: rest, options: {
@@ -20,6 +22,7 @@ const { values: a } = parseArgs({ args: rest, options: {
   input: { type: "string" }, session: { type: "string" }, output: { type: "string" }, format: { type: "string" }, "max-record-bytes": { type: "string" },
   policy: { type: "string" }, inputs: { type: "string" }, "system-id": { type: "string" }, "use-case": { type: "string" }, "llm-call": { type: "string" },
   decision: { type: "string" }, reviewer: { type: "string" }, verdict: { type: "string" }, note: { type: "string" },
+  source: { type: "string" }, answer: { type: "string" },
 } });
 const NOT_REPRODUCED = new Set(["audit_qdl_source_missing", "audit_qdl_source_invalid", "audit_qdl_source_mismatch", "audit_qdl_intent_mismatch"]);
 const log = new AuditLog(a.log!);
@@ -53,11 +56,15 @@ if (cmd === "scrub" || cmd === "profile") {
   const env = process.env, cfg = a.config ? JSON.parse(readFileSync(a.config, "utf8")) : {};
   const unsafeNoSandbox = a["unsafe-no-sandbox"] === true || env.AI_AUDIT_UNSAFE_NO_SANDBOX === "1";
   const keys = [...(cfg.keys ?? []), ...(env.AI_AUDIT_CLIENT_KEY ? [{ name: "default", sha256: sha256(env.AI_AUDIT_CLIENT_KEY), logContent: env.AI_AUDIT_CLIENT_LOG_CONTENT === "1" }] : [])];
-  createProxy({ upstreamOpenai: a["upstream-openai"]!, upstreamAnthropic: a["upstream-anthropic"]!, mode: a.mode as Mode, log, carnet,
+  const server = createProxy({ upstreamOpenai: a["upstream-openai"]!, upstreamAnthropic: a["upstream-anthropic"]!, mode: a.mode as Mode, log, carnet,
     pageRedaction: !a["no-page-redaction"] && cfg.pageRedaction !== false, keys,
     aliases: cfg.aliases, adminKeySha256: env.AI_AUDIT_ADMIN_KEY ? sha256(env.AI_AUDIT_ADMIN_KEY) : cfg.adminKeySha256,
-    upstreamKeys: { openai: env.AI_AUDIT_UPSTREAM_OPENAI_KEY, anthropic: env.AI_AUDIT_UPSTREAM_ANTHROPIC_KEY }, unsafeNoSandbox })
-    .listen(Number(a.port), a.host, () => console.error(JSON.stringify({ event: "listening", url: `http://${a.host}:${a.port}`, mode: a.mode, log: a.log, sandbox: sandboxState(SANDBOX_AVAILABLE, unsafeNoSandbox), attachmentTools: TOOLS_OK, virtualKeys: keys.length, contentLoggingKeys: keys.filter((k: any) => k.logContent === true).length, aliases: Object.keys(cfg.aliases ?? {}) })));
+    upstreamKeys: { openai: env.AI_AUDIT_UPSTREAM_OPENAI_KEY, anthropic: env.AI_AUDIT_UPSTREAM_ANTHROPIC_KEY }, unsafeNoSandbox });
+  server.listen(Number(a.port), a.host, () => {
+    const addr = server.address();
+    const bound = addr && typeof addr === "object" ? addr : { address: a.host, port: Number(a.port) };
+    console.error(JSON.stringify({ event: "listening", url: `http://${bound.address}:${bound.port}`, mode: a.mode, log: a.log, sandbox: sandboxState(SANDBOX_AVAILABLE, unsafeNoSandbox), attachmentTools: TOOLS_OK, virtualKeys: keys.length, contentLoggingKeys: keys.filter((k: any) => k.logContent === true).length, aliases: Object.keys(cfg.aliases ?? {}) }));
+  });
 } else if (cmd === "keygen") {
   const key = "aia-" + randomBytes(24).toString("base64url");
   console.log(`key (give to the client, not stored): ${key}\nconfig entry: ${JSON.stringify({ name: a.name, sha256: sha256(key), models: ["*"], logContent: a["log-content"] })}`);
@@ -79,7 +86,7 @@ if (cmd === "scrub" || cmd === "profile") {
       if (a.output) writeFileSync(a.output, html); else process.stdout.write(html);
     } catch { console.error("audit_unknown_session"); process.exitCode = 2; }
   }
-} else if (cmd === "decide" || cmd === "approve" || cmd === "replay" || cmd === "policies") {
+} else if (cmd === "decide" || cmd === "approve" || cmd === "replay" || cmd === "policies" || cmd === "receipt") {
   const json = (file: string | undefined, code: string) => { try { return JSON.parse(readFileSync(file!, "utf8")); } catch { throw new Error(code); } };
   try {
     if (cmd === "decide") {
@@ -101,9 +108,14 @@ if (cmd === "scrub" || cmd === "profile") {
       console.log(JSON.stringify({ review: review.id, decision: a.decision, verdict: a.verdict }));
     } else if (cmd === "replay") {
       if (!a.decision) throw new Error("audit_missing_argument");
-      const r = await replayQdl(log, a.decision);
-      console.log(JSON.stringify({ decision: r.decision, reproduced: r.reproduced, status: r.status, ...(r.output !== undefined && { outputs: r.output }), ...(r.error && { error: r.error }) }));
-      process.exitCode = r.reproduced ? 0 : 1;
+      const check = await verifyDecision(log, a.decision, a.anchors ? { anchorsPath: a.anchors } : undefined);
+      if (check.replay.reason) throw new Error(check.replay.reason);
+      console.log(JSON.stringify({ decision: a.decision, reproduced: check.replay.reproduced, status: check.replay.status, ...(check.replay.output !== undefined && { outputs: check.replay.output }), ...(check.replay.error && { error: check.replay.error }), ok: check.ok, chain: check.chain, consistency: check.consistency, anchor: check.anchor }));
+      process.exitCode = check.replay.reproduced ? 0 : 1;
+    } else if (cmd === "receipt") {
+      if (!a.decision) throw new Error("audit_missing_argument");
+      const html = renderReceipt(await decisionReceipt(log, a.decision, a.anchors ? { anchorsPath: a.anchors } : undefined));
+      if (a.output) writeFileSync(a.output, html); else console.log(html);
     } else {
       const records = log.read();
       for (const h of await withChanges(policyHistories(records, { systemId: a["system-id"], useCase: a["use-case"] }), records)) console.log(JSON.stringify(h));
@@ -113,5 +125,17 @@ if (cmd === "scrub" || cmd === "profile") {
       : cause instanceof Error && /^audit_[a-z_]+$/.test(cause.message) ? cause.message : "audit_command_failed";
     console.error(code); process.exitCode = NOT_REPRODUCED.has(code) ? 1 : 2;
   }
+} else if (cmd === "check-quotes") {
+  try {
+    if (!a.source || !a.answer) throw new Error("audit_missing_argument");
+    let source: string, answer: unknown;
+    try { source = readFileSync(a.source, "utf8"); } catch { throw new Error("audit_invalid_source"); }
+    try { answer = JSON.parse(readFileSync(a.answer, "utf8")); } catch { throw new Error("audit_invalid_answer"); }
+    const check = checkQuotes(source, answer);
+    console.log(JSON.stringify(check));
+    process.exitCode = check.ok ? 0 : 1;
+  } catch (cause) {
+    console.error(cause instanceof Error && /^audit_[a-z_]+$/.test(cause.message) ? cause.message : "audit_command_failed"); process.exitCode = 2;
+  }
 } else if (cmd === "report") console.log(report(log, a.from!, a.to!).md);
-else { console.error("usage: ai-audit serve|verify|anchor|report|stats|context [--session ID --output FILE]|keygen|profile|scrub [--input FILE --output FILE --format json|jsonl --max-record-bytes N]|decide --policy FILE --inputs FILE --system-id ID --use-case UC [--llm-call ID] [--allow-hashes FILE]|approve --decision ID --reviewer NAME --verdict approved|overridden|rejected [--note TEXT]|replay --decision ID|policies [--system-id ID] [--use-case UC] [--allow-hashes FILE] [--config FILE] [--by key|model|hour] [--name N] [--log-content] [--anchors FILE] [--no-page-redaction] [--log ./audit.jsonl] [--mode redact|no-go|advisory] [--port 8787] [--from ISO --to ISO]"); process.exit(2); }
+else { console.error("usage: ai-audit serve|verify|anchor|report|stats|context [--session ID --output FILE]|keygen|profile|scrub [--input FILE --output FILE --format json|jsonl --max-record-bytes N]|decide --policy FILE --inputs FILE --system-id ID --use-case UC [--llm-call ID] [--allow-hashes FILE]|approve --decision ID --reviewer NAME --verdict approved|overridden|rejected [--note TEXT]|replay --decision ID|receipt --decision ID [--output FILE]|policies [--system-id ID] [--use-case UC]|check-quotes --source FILE --answer FILE [--allow-hashes FILE] [--config FILE] [--by key|model|hour] [--name N] [--log-content] [--anchors FILE] [--no-page-redaction] [--log ./audit.jsonl] [--mode redact|no-go|advisory] [--port 8787] [--from ISO --to ISO]"); process.exit(2); }

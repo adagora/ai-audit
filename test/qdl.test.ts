@@ -59,6 +59,29 @@ test("refused, failed and invalid programs are recorded and replay as the same o
   assert.deepEqual(log.verifyChain(), { ok: true });
 });
 
+test("a pre-change failure record with only code and path still replays", { skip }, async () => {
+  const { recordQdl, replayQdl } = await import("../src/qdl.js");
+  const log = fresh();
+  const failed = await recordQdl(log, entry, { intent: perPiece }, { total: 100, pieces: 0 });
+  assert.equal(Number.isInteger(failed.step.qdl.error?.occurrence), true);
+  const lines = readFileSync(log.path, "utf8").trim().split("\n");
+  const i = lines.findIndex((l) => JSON.parse(l).id === failed.step.id);
+  const rec = JSON.parse(lines[i]);
+  rec.qdl.error = { code: rec.qdl.error.code, path: rec.qdl.error.path };
+  lines[i] = JSON.stringify(rec);
+  writeFileSync(log.path, lines.join("\n") + "\n");
+  const again = await replayQdl(log, failed.decision.id);
+  assert.equal(again.reproduced, true);
+  assert.equal(again.error?.code, rec.qdl.error.code);
+  assert.equal(again.error?.path, rec.qdl.error.path);
+  const freshOccurrence = again.error?.occurrence;
+  assert.equal(Number.isInteger(freshOccurrence), true);
+  rec.qdl.error = { code: rec.qdl.error.code, path: rec.qdl.error.path, occurrence: Number(freshOccurrence) + 1 };
+  lines[i] = JSON.stringify(rec);
+  writeFileSync(log.path, lines.join("\n") + "\n");
+  assert.equal((await replayQdl(log, failed.decision.id)).reproduced, false);
+});
+
 test("llmCallId links the decision; approve and report treat the :qdl companion as a step; edited inputs do not reproduce", { skip }, async () => {
   const { recordQdl, replayQdl } = await import("../src/qdl.js");
   const log = fresh();

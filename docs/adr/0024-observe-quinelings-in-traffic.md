@@ -1,5 +1,5 @@
 # 24. Quinelings activity in LLM traffic is observed as identity hashes
-Status: Accepted (2026-10-22)
+Status: Superseded by [0032](0032-fixed-diagnostic-and-retained-input.md) (2026-10-25).
 ## Context
 ADR 0023 records decisions that an application makes with QDL. Agents can also run Quinelings themselves through the SDK's MCP server: tools `quineling_v1_*` (legacy `quineling_*`), usually prefixed by the client, for example `mcp__quinelings__quineling_v1_run`. Both halves pass through the proxy: the LLM's tool call in a response, and the tool's result in the next request (`{"result": …}` or `{"error": {code, path, message}}`). Today the log keeps only the tool name and an args hash.
 Before building anything that sits between agents (checking and forwarding Quinelings, ADR 0023 follow-up), we need evidence of whether and how agents use them. That evidence must stay content-free (ADR 0007), add no dependency (ADR 0001) and not change what is forwarded (ADR 0009).
