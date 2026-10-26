@@ -41,3 +41,4 @@ Format: Nygard (Status, Context, Decision, Consequences), at most ~40 lines, fil
 - [31. Values an LLM reads from a text are checked against quotes from that text](0031-check-llm-answers-by-quotes.md)
 - [32. Quinelings diagnostics are a fixed set, and a retained decision input is scanned](0032-fixed-diagnostic-and-retained-input.md)
 - [33. Overall verification is chain, linkage, and output consistency](0033-decision-verification-and-occurrence.md)
+- [34. A session governor replays retained observations](0034-session-governor-replays-observations.md)
