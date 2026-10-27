@@ -1,5 +1,7 @@
 # ai-audit
 
+For a browser-driven integration test with your own OpenAI API key, run `npm run example:workflow:real` and follow the [workflow cockpit guide](examples/workflow/README.md). The same guide shows how to point UniiChat at the running proxy. Use `npm run example:workflow` for deterministic mock-provider scenarios.
+
 <div align="center">
 <pre>
 client  --->  ai-audit  --->  api.openai.com
@@ -53,6 +55,8 @@ TypeScript, Node's standard library, no runtime dependencies. [Quinelings](https
 
 ## Quick example
 
+For one local Codex session, run `npm run codex:proxy` from the repo root. It builds the proxy, asks for your OpenAI API key if `AI_AUDIT_UPSTREAM_OPENAI_KEY` is unset, generates a temporary `aia-` client key, starts the proxy on `127.0.0.1:8788`, and launches Codex through it. The provider key stays out of Codex's environment; the proxy stops when Codex exits. The audit log and proxy diagnostics stay in ignored `live/`. Set `AI_AUDIT_PORT=8787` if you have stopped the existing demo proxy and want the native Grafana scrape to follow this session. This launcher starts the proxy and Codex, not Grafana.
+
 ```bash
 git clone https://github.com/adagora/ai-audit.git
 cd ai-audit
@@ -90,11 +94,21 @@ Claude Code and the Anthropic SDK:
 ANTHROPIC_BASE_URL=http://127.0.0.1:8787 claude
 ```
 
-Codex and the OpenAI SDK:
+The OpenAI SDK can use `OPENAI_BASE_URL`. For Codex CLI, the shortest supported URL override is `codex -c 'openai_base_url="http://127.0.0.1:8787/v1"'`. That uses Codex's existing OpenAI credential. It works with the proxy's credential-pass-through mode, where no virtual key is configured and the client holds the provider credential. With the recommended `aia-` virtual key, select an explicit custom Responses provider so Codex sends that key to the proxy:
 
 ```bash
-OPENAI_BASE_URL=http://127.0.0.1:8787/v1 codex
+export AI_AUDIT_CODEX_KEY="$AI_AUDIT_CLIENT_KEY"
+codex -m gpt-6-sol \
+  -c 'model_provider="ai_audit"' \
+  -c 'model_providers.ai_audit.name="ai-audit"' \
+  -c 'model_providers.ai_audit.base_url="http://127.0.0.1:8787/v1"' \
+  -c 'model_providers.ai_audit.env_key="AI_AUDIT_CODEX_KEY"' \
+  -c 'model_providers.ai_audit.wire_api="responses"' \
+  -c 'model_providers.ai_audit.requires_openai_auth=false' \
+  -c 'model_providers.ai_audit.supports_websockets=false'
 ```
+
+The OpenAI API key remains in the proxy process as `AI_AUDIT_UPSTREAM_OPENAI_KEY`. Codex sends only the `aia-` virtual key. The proxy supports `/v1/responses`; `gpt-6-sol` must be available to your API key. These flags apply to this Codex invocation and do not change your normal Codex configuration. [Codex provider settings](https://learn.chatgpt.com/docs/config-file/config-reference).
 
 Optional request headers `x-audit-system-id` and `x-audit-use-case` are copied onto the log record as labels.
 
@@ -242,6 +256,7 @@ After `npm link`, the binary is `ai-audit`. The examples below use that name. `n
 | `stats` | `ai-audit stats --log audit.jsonl --by key` | Table of tokens, cached tokens, latency and errors. `--by` is `key`, `model` or `hour`. |
 | `context` | `ai-audit context --log audit.jsonl` | Table of sessions. |
 | `context` | `ai-audit context --log audit.jsonl --session ID --output session.html` | One self-contained HTML page. |
+| `workbench` | `ai-audit workbench --log audit.jsonl --output workbench.html` | Private, self-contained index of sessions, context sizes, scan history, Quinelings observations and decisions from a verified log snapshot. |
 | `keygen` | `ai-audit keygen --name agent` | Prints the client key and a config object. Add `--log-content` to store redacted output for that key. |
 | `profile` | `ai-audit profile --mode redact --config gateway.json` | JSON identity of the current scanner, mode and config. |
 | `scrub` | `ai-audit scrub --input history.jsonl --output history.redacted.jsonl` | A separate sanitized copy, plus a receipt on stdout. |
@@ -249,8 +264,41 @@ After `npm link`, the binary is `ai-audit`. The examples below use that name. `n
 | `decide` | `ai-audit decide --policy policy.json --inputs inputs.json --system-id shop --use-case quote` | Records a policy decision. |
 | `approve` | `ai-audit approve --decision ID --reviewer ada --verdict approved` | Appends a review. Verdicts are `approved`, `overridden`, `rejected`. |
 | `replay` | `ai-audit replay --decision ID --anchors anchors.jsonl` | Recomputes that decision from the log. |
-| `receipt` | `ai-audit receipt --decision ID --output receipt.html` | HTML page for one decision. |
+| `lab` | `ai-audit lab --log audit.jsonl --session ID --baseline-limit 2 --candidate-limit 3 --output comparison.html` | Compares failure thresholds on recorded observations; never stops an agent. |
+| `receipt` | `ai-audit receipt --decision ID --output receipt.html` | HTML page with downloads for a completed QDL decision. `--format svg` or `--format json` exports a portable receipt. |
+| `verify-receipt` | `ai-audit verify-receipt --input receipt.svg` | Replays a portable JSON or SVG receipt without the original log. |
+| `attest-keygen` | `ai-audit attest-keygen --private-key reviewer.pem --public-key reviewer.pub.pem` | Creates an Ed25519 signing key pair in new files. |
+| `attest` | `ai-audit attest --log audit.jsonl --decision ID --verdict approved --private-key reviewer.pem --output decision.attestation.json` | Signs the replayable decision, latest matching review record and log checkpoint. |
+| `verify-attestation` | `ai-audit verify-attestation --input decision.svg --attestation decision.attestation.json --public-key reviewer.pub.pem` | Replays the receipt and verifies the detached signature with the supplied key. |
 | `policies` | `ai-audit policies --system-id shop --use-case quote` | One JSON object per policy version on that use case. |
+
+### Share a QDL decision
+
+```sh
+ai-audit receipt --log audit.jsonl --decision ID --output receipt.html
+ai-audit receipt --log audit.jsonl --decision ID --format svg --output decision.svg
+ai-audit receipt --log audit.jsonl --decision ID --format json --output decision.json
+ai-audit verify-receipt --input decision.svg
+```
+
+The HTML page includes SVG and JSON downloads for a completed, consistent QDL decision. The SVG shows the Quinelings body beside its calculation steps and embeds the exact program and inputs in XML metadata. You can place it in a report or send it to someone who has the compatible Quinelings SDK. The SVG, JSON and HTML output paths must be new files; they never replace the source log.
+
+`verify-receipt` checks that the program can be recovered and that the recorded calculation runs again. For SVG, it also checks that the visible drawing matches the embedded data. It returns `origin: "not-verified"` and `humanApproval: "not-verified"`: a recipient cannot authenticate the log, its external anchor, the author or a human review from this file alone. Keep the original log and an independently stored anchor for those checks. A PNG or screenshot loses the replay metadata. [ADR 0036](docs/adr/0036-portable-qdl-decision-receipts.md).
+
+### Sign a reviewed decision and checkpoint
+
+```sh
+ai-audit attest-keygen --private-key reviewer.pem --public-key reviewer.pub.pem
+ai-audit approve --log audit.jsonl --decision ID --reviewer "Ada" --verdict approved
+ai-audit receipt --log audit.jsonl --decision ID --format svg --output decision.svg
+ai-audit attest --log audit.jsonl --decision ID --verdict approved --private-key reviewer.pem --output decision.attestation.json
+ai-audit verify-attestation --input decision.svg --attestation decision.attestation.json --public-key reviewer.pub.pem
+ai-audit workbench --log audit.jsonl --output signed-workbench.html --input decision.svg --attestation decision.attestation.json --public-key reviewer.pub.pem
+```
+
+Keep the private key outside the log and backups of the log. Give the public key to recipients through a channel they already trust. The attestation binds the portable receipt to one signed checkpoint and the latest recorded review verdict; it omits the reviewer name and note. Verification authenticates the key and signed review record, not the person's identity, the truth of the review, or a trusted timestamp. If the key is not independently trusted, the signature only proves internal consistency. The workbench checks that its verified log contains the signed checkpoint before displaying the status. [ADR 0038](docs/adr/0038-detached-signed-decision-attestations.md).
+
+**Review before sharing.** The portable files include exact policy source, inputs and outputs. Export applies the scanner, but that is not complete anonymisation. The full HTML receipt can also contain reviewer names, notes and caller assertions. Refused, failed and incomplete decisions remain diagnostic HTML; they cannot become a portable replay receipt.
 
 `--log` defaults to `./audit.jsonl` on every command that reads the log. `--from` defaults to `1970-01-01` and `--to` defaults to `9999-12-31`. `anchor` with no `--anchors` writes `<log>.anchors` beside the log. Keep that file somewhere else if it is supposed to catch a replaced log.
 
@@ -363,6 +411,19 @@ node examples/context-map/generate.mjs
 ```
 
 `generate.mjs` builds a similar page from fake data and does not call a provider.
+
+#### Evidence workbench
+
+Use the workbench to move from a Grafana signal to individual records without adding session IDs or content to `/metrics`:
+
+```bash
+ai-audit workbench --log audit.jsonl --output workbench.html \
+  --from 2026-10-27T00:00:00Z --to 2026-10-28T00:00:00Z
+```
+
+The command verifies one hash-chained snapshot before it writes a new file. The HTML starts with expandable request investigations: a metadata fact sheet and a path through inspection, forwarding, provider result, tool observations and linked QDL decisions. Each stage labels observed, derived or unknown evidence. The rest of the page shows linked sessions, context sizes, usage, scan rule paths, Quinelings operations and reviews. It has local search and links between calls and sessions. Tables and investigations show the latest 500 calls; totals count the full interval. Narrow the interval to inspect older rows. Run the command again with a new output filename after new traffic.
+
+The workbench omits retained output text, QDL source and inputs, reviewer names and notes. It cannot recover prompt text or a detected value because the proxy never stored them. The workbench is a private investigation file, not a shareable proof of origin. For one completed QDL decision, use `receipt --format svg` or `--format json`, inspect its exact contents, then give the recipient the artifact and `verify-receipt`. [ADR 0037](docs/adr/0037-offline-evidence-workbench.md), [ADR 0042](docs/adr/0042-request-investigation-from-metadata.md).
 
 #### Metrics
 

@@ -1,7 +1,7 @@
 # Deterministic decisions (optional, Quinelings, Node ≥ 22)
 **TL;DR: where Quinelings helps this project**
 - **Proves why a decision was made, long after.** The log carries the decision program itself. `ai-audit replay` rebuilds it from the log alone and recomputes the result, and `ai-audit policies` shows which policy version decided and what changed since. The proxy proves what the AI said; the Quineling proves what was decided ([DESIGN.md](../DESIGN.md), AI Act Art. 12 and 14).
-- **Compares two rules on one recorded session.** `npm run example:lab` replays two session governors over the same proxy log, shows the first decision where they disagree, and reruns a changed threshold in a fresh process ([ADR 0034](adr/0034-session-governor-replays-observations.md)).
+- **Compares two rules on one recorded session.** `npm run example:lab` replays two session governors over the same proxy log, shows the first decision where they disagree, and reruns a changed threshold in a fresh process ([ADR 0035](adr/0035-read-only-session-policy-comparison.md)).
 - **Runs a fixed program, safely.** A program always stops, cannot read files or the network, and is refused if it invents an operation or mixes up units. The built-in `replay()` runs JavaScript in `node:vm`, which is only safe for trusted code.
 - **Keeps secrets out of the evidence.** Inputs and programs are checked with the proxy's rules before anything runs; a customer e-mail or an API key stops the decision instead of landing in the log.
 - **Keeps the hard cases and shows real use.** Refused and failed evaluations are recorded too, each decision links to the proxied LLM call (`llmCallId` is the proxy's `x-request-id`), and when agents run Quinelings on their own through MCP, the proxy logs which programs they compiled and ran, as hashes only.
@@ -36,7 +36,33 @@ console.log(new Session().recover({ source: program.source }).id === program.id)
 It prints `[ 189 ]`, then `true`: a fresh session rebuilt the same program from its source. Bad programs and inputs are refused with a `QdlError` before anything runs: mixed-up units (`unit-type`), a value outside its declared range such as `minutes: -5` (`refinement`), a missing input (`missing-input`) or an operation that does not exist, for example an LLM inventing a `fetch` step (`invalid-input`). Errors at run time, such as division by zero, give a `failed` run with a diagnostic.
 
 ## Policy lab
-`npm run example:lab` is the demo. It loads one synthetic session through the proxy and a mock provider: repeated upstream failures, provider-reported usage that grows, and one turn with no usage. It then runs two session-governor Quinelings on the retained fields, a failure count and the reported token total. The programs differ only by the failure threshold. The run prints the first turn where they agree and the first later turn where they do not, writes an inspection page, lowers the threshold, and runs the exported program in a new process. The page is a table of the snapshot, the threshold, the steps and both outputs. A creature sits beside that table; choosing a region selects the step. The page is a view. The audit is the log. The proxy does not run the governor ([ADR 0034](adr/0034-session-governor-replays-observations.md)).
+`npm run example:lab` builds and runs a synthetic session through the proxy and a mock provider. Two governors evaluate every recorded call, including calls without usage. The demo compares thresholds, exports changed source, and reproduces the result in a fresh process. The inspection page checks that both decisions belong to the same call and inputs and that their records and replay agree. Selecting a creature region selects a calculation step.
+
+To compare thresholds on an existing log:
+
+```sh
+node dist/src/cli.js context --log audit.jsonl
+node dist/src/cli.js lab --log audit.jsonl --session SESSION_ID \
+  --baseline-limit 2 --candidate-limit 3 --output comparison.html
+node dist/src/cli.js lab --log audit.jsonl --session SESSION_ID \
+  --baseline-limit 2 --candidate-limit 3 --format json --output comparison.json
+```
+
+The session can be omitted when the log has exactly one inferred session. Without `--output`, the command prints JSON. Output files must be new; the original log is never modified. Invalid evidence, missing sessions, invalid limits and unavailable QDL produce a content-free error on stderr and exit 2. A completed comparison exits 0 even when policies disagree.
+
+The rule is deliberately small: pause when cumulative failed calls reach the threshold. A success does not reset the count. Retries and branches appear separately and do not count as failures themselves. Successful Responses completions and Anthropic tool handoffs are recognized. Token totals are per call, remain unknown when incomplete, and do not affect the rule. Calls appear in audit append order, which is not necessarily request-start or conversation-turn order.
+
+The report shows every disagreement and explains the failure count and limit. After a policy first recommends pausing, later observations are labeled hypothetical under that policy. They do not prove savings or task quality. Neither the lab nor its simulated actions stop an agent.
+
+JSON includes exact programs, inputs, outputs, runtime registry identity, snapshot-rule version and references to contributing audit records. Both programs are recovered and evaluated again in a fresh SDK session. The chain is checked from the same file snapshot; external anchors are explicitly **not checked**. Use `verify --anchors` separately when you have an independently retained anchor. Replaying the program reproduces the rule calculation; rerunning `lab` with the original log and matching snapshot rules is needed to check how the failure counts were derived. [ADR 0035](adr/0035-read-only-session-policy-comparison.md).
+
+### Do I need Quinelings?
+
+For ordinary proxy use, no. Redaction and request logging work without it. A simple failure threshold is also easy to implement as a normal function.
+
+Quinelings is useful when the exact calculation must travel with its evidence, when policies change and you need to compare versions, or when a model proposes a bounded typed program that must be checked before running. Think of it as a saved recipe with its ingredients and result. It helps reproduce the recipe; it cannot establish that the ingredients were true or that the recipe was a good decision.
+
+The quote example below exercises more of that value than a single threshold: typed units, several calculations, comparison with a model proposal and a review rule. Keep QDL optional until a workflow needs those properties.
 
 ## With ai-audit: the LLM proposes, the policy decides
 ```mermaid
@@ -98,6 +124,20 @@ The model never sees the shop rate, so its price is a guess. When it proposes 27
 | `review` | `log.approve` or `approve` | reviewer, approved/overridden/rejected, note |
 
 `replayQdl(log, id)` takes the decision id or its `:qdl` id, rebuilds the program from the log in a fresh session and returns `reproduced: true` when the outcome matches, refusals and failures included. Edit a logged input and `verify` reports a broken chain; replaying the edited record gives `reproduced: false`.
+
+## Share a decision
+
+The HTML decision receipt now offers a static SVG and replay JSON download for a completed, consistent QDL decision. The SVG uses the Quinelings frame as a visual index, with named calculation steps beside it. Its XML metadata contains exact source and inputs; the shape itself does not identify the program. The verifier rebuilds the program and checks the whole SVG presentation against those inputs.
+
+```sh
+node dist/src/cli.js receipt --log audit.jsonl --decision DECISION_ID --output receipt.html
+node dist/src/cli.js receipt --log audit.jsonl --decision DECISION_ID --format svg --output decision.svg
+node dist/src/cli.js verify-receipt --input decision.svg
+```
+
+The recipient can replay the calculation with the vendored compatible SDK without access to the original log. This verifies what the supplied program computes on the supplied inputs. It does not authenticate who supplied them, the log chain, external anchors or human approval. The portable package carries hashes referencing its source log so an owner can look it up, but anyone could make a different package and recompute its checksum. The viewer labels origin and approval as unverified. See [ADR 0036](adr/0036-portable-qdl-decision-receipts.md).
+
+Review exact source, inputs and outputs before sharing. They may contain material the scanner does not recognize. The full HTML may also carry reviewer names, notes and caller assertions, so it is a different disclosure choice from the portable files. A screenshot or converted PNG keeps the picture but loses replay data.
 
 ## From the command line
 Any script or agent, in any language, can do the same without JavaScript ([ADR 0023](adr/0023-decision-records-cli-and-outcomes.md)). Take `REQUEST_ID` from the `x-request-id` header of the proxied call; `--llm-call` must name an `llm-call` record already in the log. The provider's own request id (OpenAI sends one) comes back as `x-upstream-request-id`.

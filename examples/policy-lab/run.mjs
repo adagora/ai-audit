@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { AuditLog } from "../../dist/src/audit.js";
 import { recordQdl, replayQdl } from "../../dist/src/qdl.js";
-import { firstDisagreement, governorIntent, governorSnapshots, labView, renderLab, withReported } from "../../dist/src/lab.js";
+import { firstDisagreement, governorIntent, governorSnapshots, labView, renderLab } from "../../dist/src/lab.js";
 import { createProxy } from "../../dist/src/proxy.js";
 
 const script = [
@@ -75,11 +75,11 @@ try {
   for (const step of script) if (raw.includes(step.user)) throw new Error("message text entered the log");
   console.log("forwarding: llm-calls only");
 
-  const snaps = withReported(governorSnapshots(log.read()));
+  const snaps = governorSnapshots(log.read());
   const strictIntent = governorIntent(2);
   const looseIntent = governorIntent(3);
   async function govern(intent, policy, snap) {
-    const inputs = { failures: snap.failures, reported: snap.reported };
+    const inputs = { failures: snap.failures };
     const result = await recordQdl(log, { systemId: "policy-lab", useCase: "session-governor", llmCallId: snap.callId, input: `turn ${snap.turn}`, params: { policy } }, { intent }, inputs);
     if (result.step.qdl.status !== "completed") throw new Error(`${policy} ${result.step.qdl.status} ${result.step.qdl.error?.code}`);
     return { decisionId: result.decision.id, output: result.decision.output, sourceHash: result.step.qdl.sourceHash };
@@ -87,12 +87,12 @@ try {
   const rows = [];
   for (const snap of snaps) rows.push({ snapshot: snap, strict: await govern(strictIntent, "strict", snap), loose: await govern(looseIntent, "loose", snap) });
   const found = firstDisagreement(rows);
-  if (!found) throw new Error("no disagreement");
+  if (!found?.agreed) throw new Error("no agreement before disagreement");
   if (found.agreed.snapshot.turn >= found.split.snapshot.turn) throw new Error("agreement is not earlier");
   if (found.split.strict.sourceHash === found.split.loose.sourceHash) throw new Error("policies share a source hash");
   if (found.agreed.strict.sourceHash !== found.split.strict.sourceHash || found.agreed.loose.sourceHash !== found.split.loose.sourceHash) throw new Error("policies changed before the disagreement");
   const revisedIntent = governorIntent(1);
-  const revisedInputs = { failures: found.split.snapshot.failures, reported: found.split.snapshot.reported };
+  const revisedInputs = { failures: found.split.snapshot.failures };
   const revised = await recordQdl(log, { systemId: "policy-lab", useCase: "session-governor", llmCallId: found.split.snapshot.callId, input: `turn ${found.split.snapshot.turn}`, params: { policy: "revised" } }, { intent: revisedIntent }, revisedInputs);
   if (revised.step.qdl.status !== "completed") throw new Error(`revised ${revised.step.qdl.status}`);
   if (revised.step.qdl.sourceHash === found.split.loose.sourceHash) throw new Error("revision kept the loose source");

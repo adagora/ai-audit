@@ -1,3 +1,4 @@
+import { renderQuinelingBody } from "./quinelingSvg.js";
 import { AuditLog, type Rec } from "./audit.js";
 import { policyHistories, withChanges, type PolicyChange } from "./policies.js";
 import { verifyDecision, type AnchorStatus, type QdlTraceStep } from "./qdl.js";
@@ -48,27 +49,6 @@ function mainRecord(recs: Rec[], id: string): Rec | undefined {
   return companion?.refId ? recs.find((r) => r.id === companion.refId && !r.qdl) : undefined;
 }
 
-function bodySvg(frame: any): string {
-  const n = frame?.owners?.length ?? 0;
-  if (!n || !frame.points?.length) return "";
-  const stride = frame.points.length / n;
-  const xs = Array.from({ length: n }, (_, i) => frame.points[i * stride]);
-  const ys = Array.from({ length: n }, (_, i) => frame.points[i * stride + 1]);
-  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
-  const spanX = x1 - x0 || 1, spanY = y1 - y0 || 1;
-  const scale = Math.min(560 / spanX, 420 / spanY);
-  const sx = (x: number) => (16 + (x - x0) * scale).toFixed(1);
-  const sy = (y: number) => (16 + (y1 - y) * scale).toFixed(1);
-  const dots: string[][] = frame.nodeIds.map(() => []);
-  for (let i = 0; i < n; i++) dots[frame.owners[i]].push(`M${sx(xs[i])} ${sy(ys[i])}h0`);
-  const palette = ["#f2c14e", "#f78154", "#4d9de0", "#3bb273", "#e15554", "#7b6cf6", "#2a9d8f", "#e9c46a", "#e76f51"];
-  const ridges = Array.isArray(frame.ridges) ? frame.ridges : [];
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 460" role="img" aria-label="Calculation body">`
-    + `<rect width="100%" height="100%" fill="#10141c"/>`
-    + dots.map((d: string[], i: number) => `<path data-step="${esc(frame.nodeIds[i])}" d="${d.join("")}" stroke="${palette[i % palette.length]}" stroke-opacity="0.55" stroke-width="2.4" stroke-linecap="round"/>`).join("")
-    + ridges.map((r: any) => `<polyline points="${(r.line ?? []).map((p: any) => `${sx(p.x)},${sy(p.y)}`).join(" ")}" fill="none" stroke="#f0f1eb" stroke-opacity="0.35" stroke-width="1"/>`).join("")
-    + `</svg>`;
-}
 
 async function programView(recs: Rec[], sourceHash?: string) {
   const empty = { payload: undefined as any, body: undefined as string | undefined, nodeIds: [] as string[], registry: undefined as string | undefined, registryDigest: undefined as string | undefined };
@@ -88,7 +68,7 @@ async function programView(recs: Rec[], sourceHash?: string) {
     if (artifact.payload?.registryDigest) view.registryDigest = artifact.payload.registryDigest;
     const frame = s.frame(artifact.id, 0.25);
     view.nodeIds = [...frame.nodeIds];
-    view.body = bodySvg(frame);
+    view.body = renderQuinelingBody(frame);
   } catch { return view; }
   return view;
 }
@@ -137,7 +117,7 @@ export async function decisionReceipt(log: AuditLog, id: string, opts?: { anchor
   const retained = [
     call ? "The request body was not stored. Inspection kept rule ids and paths." : "No llm-call record is linked.",
     main?.redactedInput ? "A redacted decision input was stored." : main?.inputHash ? "The raw decision input was not stored. Its hash was kept." : "No decision input hash was stored.",
-    (call as any)?.content ? "A redacted response copy was stored." : "Response content was not stored.",
+    call?.content === "redacted" ? "A redacted response copy was stored." : "Response content was not stored.",
   ].join(" ");
   const reviewRec = [...recs].reverse().find((r) => r.kind === "review" && r.refId === decisionId);
   const review = reviewRec?.review;
@@ -174,7 +154,7 @@ export function stepForRegion(receipt: DecisionReceipt, regionId: string): Recei
 
 const stateText = { pending: "pending", automated: "automated check", explicit: "explicit human decision" };
 
-export function renderReceipt(receipt: DecisionReceipt): string {
+export function renderReceipt(receipt: DecisionReceipt, sharing?: { json: string; svg: string } | { reason: string }): string {
   const row = (cells: unknown[]) => `<tr>${cells.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`;
   const steps = receipt.calculation.steps.map((s) => {
     const label = `${s.stepId} = ${typeof s.value === "string" ? s.value : JSON.stringify(s.value)}`;
@@ -187,6 +167,9 @@ export function renderReceipt(receipt: DecisionReceipt): string {
   const regions = receipt.regions.map((r) => `<button type="button" data-step="${esc(r.regionId)}">${esc(r.stepId)}</button>`).join("");
   const reviewNote = receipt.review.state === "explicit" ? " The reviewer name is not an identity check." : "";
   const simulated = receipt.review.simulated.length ? `<p>${esc(receipt.review.simulated.join(", "))}. A simulated action was not sent.</p>` : "";
+  const downloads = sharing && "json" in sharing
+    ? `<section class="share"><h2>Share this calculation</h2><p>The downloads include exact policy source, inputs and outputs. Review these values before sharing. They omit prompts, responses, reviewer names and notes. This full HTML report may contain review details and caller assertions.</p><p><a download="decision.svg" href="data:image/svg+xml;base64,${Buffer.from(sharing.svg).toString("base64")}">Download SVG with replay data</a> <a download="decision.json" href="data:application/json;charset=utf-8,${encodeURIComponent(sharing.json)}">Download replay JSON</a></p><p>Recipient check: <code>ai-audit verify-receipt --input decision.svg</code>. This checks the calculation and SVG presentation, not the author's identity or human approval.</p></section>`
+    : sharing ? `<section class="share"><h2>Share this calculation</h2><p>Replay export unavailable: ${esc(sharing.reason)}. This diagnostic report can still be saved.</p></section>` : "";
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -210,12 +193,20 @@ export function renderReceipt(receipt: DecisionReceipt): string {
   button { background: #fff; border: 1px solid #ddd6c8; padding: 6px 10px; font: inherit; }
   [data-selected="true"] { outline: 2px solid #1c1915; }
   code { font-family: ui-monospace, monospace; font-size: 0.86rem; word-break: break-all; }
+  td, th { overflow-wrap: anywhere; }
+  .share { border: 1px solid #cbbfa9; padding: 0 16px 12px; margin-top: 24px; background: #fff; }
+  a { color: #174c81; }
+  .share a { display: inline-block; padding: 10px 12px; border: 1px solid #174c81; margin: 4px 8px 4px 0; }
+  button:focus-visible, a:focus-visible { outline: 3px solid #174c81; outline-offset: 3px; }
+  g[data-step][data-selected="true"] { fill-opacity: 1; stroke: #fff; stroke-width: 0.7px; }
+  @media print { body { background: white; } main { max-width: none; padding: 0; } .regions, .share a { display: none; } table, figure { break-inside: avoid; } }
 </style>
 </head>
 <body>
 <main>
   <h1>Decision receipt</h1>
   <p class="note">Decision <code>${esc(receipt.decisionId)}</code>. This page is a view of the log. Choosing a region selects the calculation step. The page does not run the program.</p>
+  ${downloads}
   <h2>LLM call</h2>
   <p>${receipt.llm.linked ? `Linked call <code>${esc(receipt.llm.id)}</code>.` : "No linked call."} llmCallId links the call. It does not prove those inputs were extracted from the call.</p>
   <table><tr><th>Rule</th><th>Path</th></tr>${findings || row(["none", ""])}</table>
@@ -238,9 +229,9 @@ export function renderReceipt(receipt: DecisionReceipt): string {
     <tr><th>Changes from the previous version</th><td>${esc(receipt.policy.changeNote)}</td></tr>
   </table>
   <h2>Calculation</h2>
-  <p id="selected-step"></p>
+  <p id="selected-step" aria-live="polite"></p>
   <table><tr><th>Step</th><th>Op</th><th>Value</th></tr>${steps || row(["none", "", ""])}</table>
-  <p>Final amount: ${esc(typeof receipt.calculation.final === "string" ? receipt.calculation.final : JSON.stringify(receipt.calculation.final))}</p>
+  <p>Result: ${esc(typeof receipt.calculation.final === "string" ? receipt.calculation.final : JSON.stringify(receipt.calculation.final))}</p>
   <p>Reasons for review: ${esc(receipt.calculation.reasons.join("; ") || "none")}</p>
   ${receipt.body ? `<figure>${receipt.body}</figure>` : ""}
   <div class="regions">${regions}</div>
@@ -265,7 +256,7 @@ export function renderReceipt(receipt: DecisionReceipt): string {
 <script>
 (function () {
   function label(id) {
-    var row = document.querySelector('[data-step-row="' + id + '"]');
+    var row = Array.from(document.querySelectorAll('[data-step-row]')).find(function (item) { return item.getAttribute('data-step-row') === id; });
     return row ? row.getAttribute("data-step-label") : id;
   }
   function select(id) {

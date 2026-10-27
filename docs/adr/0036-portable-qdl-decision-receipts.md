@@ -1,0 +1,15 @@
+# 36. Portable QDL decision receipts have separate replay and origin claims
+Status: Accepted (2026-10-26). Extends [0023](0023-decision-records-cli-and-outcomes.md), [0026](0026-store-each-program-once.md) and [0033](0033-decision-verification-and-occurrence.md).
+## Context
+The HTML decision receipt is useful for the log owner but cannot be replayed by a recipient without the original log. A program picture alone cannot recover the source. A screenshot or plain SVG could be changed while still looking plausible. A shareable artifact also risks disclosing retained inputs or implying that a checksum authenticates its author.
+## Decision
+- Completed, consistent QDL decisions can be exported as a versioned JSON package or static SVG. The SVG embeds the same package in XML metadata. The generated HTML receipt offers downloads for both. The proxy remains unchanged and QDL stays optional.
+- A package contains exact QDL source and identity, runtime registry identity, recorded inputs and output, the SDK input hash, output hash, decision and companion record hashes, and a digest of the source log snapshot. It excludes prompts, responses, review notes and reviewer names. The export rechecks these fields for scanner findings and refuses on a finding. Scanning does not guarantee anonymisation; owners review exact inputs and program text before sharing.
+- Export reads and verifies one audit-log snapshot, checks main and companion consistency, and reproduces the completed result. It creates separate output files with exclusive create. Refused, failed, incomplete or inconsistent decisions have diagnostic HTML only.
+- The SVG uses the SDK frame as a visual index beside named trace steps. It displays a shortened summary when necessary and says the embedded package holds exact values. The visible body shape is not source identity. The SVG contains no scripts, external resources or network requests.
+- `verify-receipt` accepts bounded JSON or the exact generated SVG. It checks package shape and digest, the runtime registry, source recovery, SDK input hash and outputs. For SVG it regenerates the presentation and compares the entire file. It does not require the original log.
+- A recipient cannot authenticate the origin, log chain, external anchor or human approval from the package alone. The package's origin hashes are claims, not proof; they can be replaced and rehashed. The verifier reports origin and approval as `not-verified`. Verify the source log and independently held anchors separately when origin matters.
+## Consequences
+- JSON and SVG require the compatible `@quinelings/agent-sdk/v1` to replay. An SVG rasterised to PNG or compressed into a screenshot loses the embedded package and cannot be verified through this command.
+- Full HTML may include reviewer names, notes and caller assertions; the portable package omits them. Users review every exported artifact before sharing.
+- Package version and exact SVG rendering are part of the verification contract. A future visual redesign needs a new version or a versioned renderer so old SVG files remain checkable.

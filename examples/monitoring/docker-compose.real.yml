@@ -1,0 +1,8 @@
+services:
+  proxy:
+    command: ["serve", "--host", "0.0.0.0", "--log", "/data/audit.jsonl"]
+    environment:
+      AI_AUDIT_UPSTREAM_OPENAI_KEY: ${AI_AUDIT_UPSTREAM_OPENAI_KEY:?Set the OpenAI API key in the shell}
+      AI_AUDIT_CLIENT_KEY: ${AI_AUDIT_CLIENT_KEY:?Set the ai-audit virtual key in the shell}
+      AI_AUDIT_UPSTREAM_ANTHROPIC_KEY: ${AI_AUDIT_UPSTREAM_ANTHROPIC_KEY:-}
+      AI_AUDIT_ADMIN_KEY: ${AI_AUDIT_ADMIN_KEY:-}

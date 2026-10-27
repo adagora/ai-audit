@@ -1,10 +1,14 @@
+import { renderQuinelingBody } from "./quinelingSvg.js";
+import { readEvidenceRecords } from "./evidence.js";
 import type { Rec } from "./audit.js";
-import { AuditLog } from "./audit.js";
+import { AuditLog, canon, decisionConsistency } from "./audit.js";
 import { replayQdl, type QdlTraceStep } from "./qdl.js";
+import type { Session } from "@quinelings/agent-sdk/v1";
 
-export interface TurnSnapshot { callId: string; turn: number; failures: number; reported?: number }
+export const SNAPSHOT_VERSION = "session-governor-v2";
+export interface TurnSnapshot { callId: string; sessionId: string; turn: number; failures: number; retries: number; branches: number; reported?: number }
 export interface Governed {
-  snapshot: TurnSnapshot & { reported: number };
+  snapshot: TurnSnapshot;
   strict: { decisionId: string; output: unknown; sourceHash: string };
   loose: { decisionId: string; output: unknown; sourceHash: string };
 }
@@ -20,7 +24,7 @@ export interface LabView {
   body?: string;
 }
 
-const SUCCESS_STOP = new Set(["stop", "tool_calls", "end_turn"]);
+const SUCCESS_STOP = new Set(["stop", "tool_calls", "function_call", "completed", "end_turn", "tool_use", "stop_sequence", "pause_turn"]);
 type Link = { id?: string; turn?: number; digest?: string; parent?: string | null };
 type Usage = { input?: unknown; output?: unknown };
 
@@ -37,15 +41,17 @@ export function callFailed(call: Rec): boolean {
 
 export function reportedTokens(call: Rec): number | undefined {
   const usage = usageOf(call);
-  if (!usage || typeof usage.input !== "number" || typeof usage.output !== "number") return undefined;
-  return usage.input + usage.output;
+  if (!usage || !Number.isSafeInteger(usage.input) || !Number.isSafeInteger(usage.output)) return undefined;
+  const input = usage.input as number, output = usage.output as number;
+  const total = input + output;
+  return input >= 0 && output >= 0 && Number.isSafeInteger(total) ? total : undefined;
 }
 
 function relation(call: Rec, earlier: Rec[]): "" | "retry" | "branch" {
   const session = linkOf(call);
   if (!session?.digest) return "";
   if (earlier.some((other) => linkOf(other)?.digest === session.digest)) return "retry";
-  if (earlier.some((other) => linkOf(other)?.parent === session.parent && linkOf(other)?.turn === session.turn)) return "branch";
+  if (session.parent !== undefined && session.turn !== undefined && earlier.some((other) => linkOf(other)?.parent === session.parent && linkOf(other)?.turn === session.turn)) return "branch";
   return "";
 }
 
@@ -59,40 +65,37 @@ export function governorSnapshots(recs: Rec[]): TurnSnapshot[] {
   }
   const out: TurnSnapshot[] = [];
   for (const group of groups.values()) {
-    group.sort((a, b) => (linkOf(a)?.turn ?? 0) - (linkOf(b)?.turn ?? 0) || String(a.ts).localeCompare(String(b.ts)));
-    let failures = 0;
+    let failures = 0, retries = 0, branches = 0;
     const seen: Rec[] = [];
     for (const call of group) {
       const rel = relation(call, seen);
       seen.push(call);
-      if (callFailed(call) || rel === "retry" || rel === "branch") failures += 1;
+      if (callFailed(call)) failures += 1;
+      if (rel === "retry") retries += 1;
+      if (rel === "branch") branches += 1;
       const reported = reportedTokens(call);
-      out.push({ callId: call.id, turn: linkOf(call)?.turn ?? seen.length, failures, ...(reported !== undefined && { reported }) });
+      out.push({ callId: call.id, sessionId: linkOf(call)!.id!, turn: linkOf(call)?.turn ?? seen.length, failures, retries, branches, ...(reported !== undefined && { reported }) });
     }
   }
   return out;
 }
 
-export function withReported(snaps: TurnSnapshot[]): (TurnSnapshot & { reported: number })[] {
-  return snaps.filter((s): s is TurnSnapshot & { reported: number } => typeof s.reported === "number");
-}
-
-export function governorIntent(limit: number) {
+export function governorIntent(limit: number): Parameters<Session["compile"]>[0] {
+  if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("audit_invalid_failure_limit");
   return {
     format: "qdl-intent", version: 1, name: "Session governor",
     thought: {
       observations: [], evidence: [], goals: [], decisions: [], plans: [],
-      tasks: [{ id: "govern", text: "halt when failures reach the limit", nodes: ["failures", "reported", "limit", "reached", "halt", "pause"], outputs: ["halt", "pause"] }],
+      tasks: [{ id: "govern", text: "halt when cumulative failed calls reach the limit", nodes: ["failures", "limit", "reached", "halt", "pause"], outputs: ["halt", "pause"] }],
     },
     inputs: [
       { id: "failures", name: "failures", type: { kind: "number", unit: "one", min: 0 } },
-      { id: "reported", name: "reported", type: { kind: "number", unit: "one", min: 0 } },
       { id: "limit", value: limit, type: { kind: "number", unit: "one", min: 0 } },
     ],
     steps: [
       { id: "reached", op: "compareValues", inputs: ["failures", "limit"], params: { operator: "gte" } },
       { id: "halt", op: "compare", inputs: ["reached"], params: { operator: "eq", value: true } },
-      { id: "pause", op: "action", inputs: ["halt", "reported"], params: { allowed: true, action: "pause-session" } },
+      { id: "pause", op: "action", inputs: ["halt", "failures"], params: { allowed: true, action: "pause-session" } },
     ],
     outputs: ["halt", "pause"],
   };
@@ -100,35 +103,17 @@ export function governorIntent(limit: number) {
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
-export function firstDisagreement(rows: Governed[]): { agreed: Governed; split: Governed } | undefined {
+export function firstDisagreement(rows: Governed[]): { agreed?: Governed; split: Governed } | undefined {
   const splitAt = rows.findIndex((row) => !same(row.strict.output, row.loose.output));
-  if (splitAt <= 0) return undefined;
+  if (splitAt < 0) return undefined;
   const agreed = rows.slice(0, splitAt).find((row) => same(row.strict.output, row.loose.output));
-  return agreed ? { agreed, split: rows[splitAt] } : undefined;
+  return { agreed, split: rows[splitAt] };
 }
+
 
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 const show = (v: unknown) => typeof v === "string" ? v : JSON.stringify(v);
 
-function bodySvg(frame: any): string {
-  const n = frame?.owners?.length ?? 0;
-  if (!n || !frame.points?.length) return "";
-  const stride = frame.points.length / n;
-  const xs = Array.from({ length: n }, (_, i) => frame.points[i * stride]);
-  const ys = Array.from({ length: n }, (_, i) => frame.points[i * stride + 1]);
-  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
-  const spanX = x1 - x0 || 1, spanY = y1 - y0 || 1;
-  const scale = Math.min(560 / spanX, 420 / spanY);
-  const sx = (x: number) => (16 + (x - x0) * scale).toFixed(1);
-  const sy = (y: number) => (16 + (y1 - y) * scale).toFixed(1);
-  const dots: string[][] = frame.nodeIds.map(() => []);
-  for (let i = 0; i < n; i++) dots[frame.owners[i]].push(`M${sx(xs[i])} ${sy(ys[i])}h0`);
-  const palette = ["#f2c14e", "#f78154", "#4d9de0", "#3bb273", "#e15554", "#7b6cf6"];
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 460" role="img" aria-label="Calculation body">`
-    + `<rect width="100%" height="100%" fill="#10141c"/>`
-    + dots.map((d: string[], i: number) => `<path data-step="${esc(frame.nodeIds[i])}" d="${d.join("")}" stroke="${palette[i % palette.length]}" stroke-opacity="0.55" stroke-width="2.4" stroke-linecap="round"><title>${esc(frame.nodeIds[i])}</title></path>`).join("")
-    + `</svg>`;
-}
 
 async function creature(source: string, sourceHash: string): Promise<{ body?: string; nodeIds: string[] }> {
   const m = await import("@quinelings/agent-sdk/v1").catch(() => null);
@@ -138,7 +123,7 @@ async function creature(source: string, sourceHash: string): Promise<{ body?: st
     const artifact = s.recover({ source });
     if (artifact.id !== sourceHash) return { nodeIds: [] };
     const frame = s.frame(artifact.id, 0.25);
-    const body = bodySvg(frame);
+    const body = renderQuinelingBody(frame);
     return { nodeIds: [...frame.nodeIds], ...(body && { body }) };
   } catch { return { nodeIds: [] }; }
 }
@@ -153,13 +138,18 @@ export function stepForRegion(view: LabView, regionId: string): LabStep | undefi
 }
 
 export async function labView(log: AuditLog, strictId: string, looseId: string): Promise<LabView> {
-  const recs = log.read();
+  const { records: recs } = readEvidenceRecords(log);
   const strictMain = recs.find((r) => r.id === strictId && r.kind === "decision" && !r.qdl);
   const looseMain = recs.find((r) => r.id === looseId && r.kind === "decision" && !r.qdl);
   const strictQ = companion(recs, strictId)?.qdl as { inputs?: Record<string, unknown>; sourceHash?: string } | undefined;
-  const looseQ = companion(recs, looseId)?.qdl as { sourceHash?: string } | undefined;
+  const looseQ = companion(recs, looseId)?.qdl as { inputs?: Record<string, unknown>; sourceHash?: string } | undefined;
+  if (!strictMain?.llmCallId || strictMain.llmCallId !== looseMain?.llmCallId
+    || !recs.some((r) => r.kind === "llm-call" && r.id === strictMain.llmCallId)
+    || !strictQ?.inputs || !looseQ?.inputs || canon(strictQ.inputs) !== canon(looseQ.inputs)) throw new Error("audit_lab_incomparable_decisions");
+  if (!decisionConsistency(recs, strictId).ok || !decisionConsistency(recs, looseId).ok) throw new Error("audit_lab_inconsistent_decision");
   const strictReplay = await replayQdl(log, strictId, recs);
   const looseReplay = await replayQdl(log, looseId, recs);
+  if (!strictReplay.reproduced || !looseReplay.reproduced || strictReplay.status !== "completed" || looseReplay.status !== "completed") throw new Error("audit_lab_replay_failed");
   const looseById = new Map((looseReplay.trace ?? []).map((step) => [step.nodeId, step.value]));
   const steps: LabStep[] = (strictReplay.trace ?? []).map((step: QdlTraceStep) => ({ stepId: step.nodeId, op: step.op, value: step.value, ...(looseById.has(step.nodeId) && { other: looseById.get(step.nodeId) }) }));
   const limit = (pick: "value" | "other") => { const found = steps.find((s) => s.stepId === "limit"); const value = found?.[pick]; return typeof value === "number" ? value : undefined; };
@@ -172,7 +162,7 @@ export async function labView(log: AuditLog, strictId: string, looseId: string):
   const turn = governorSnapshots(recs).find((s) => s.callId === callId)?.turn ?? 0;
   return {
     callId, turn, inputs, thresholds: { strict: limit("value"), loose: limit("other") }, steps,
-    outputs: { strict: strictMain?.output, loose: looseMain?.output }, regions, ...(drawn.body && { body: drawn.body }),
+    outputs: { strict: strictReplay.output, loose: looseReplay.output }, regions, ...(drawn.body && { body: drawn.body }),
   };
 }
 
@@ -213,6 +203,7 @@ export function renderLab(view: LabView): string {
 <main>
   <h1>Policy lab</h1>
   <p class="note">Turn ${esc(view.turn)}, call <code>${esc(view.callId)}</code>. This page is a view of two recorded decisions. Choosing a region selects that calculation step. The page does not run the program.</p>
+  <p>Chain and decision consistency checked. Both calculations reproduced from the same recorded inputs. External anchors were not checked.</p>
   <h2>Recorded inputs</h2>
   <table><tr><th>Name</th><th>Value</th></tr>${inputs || row(["none", ""])}</table>
   <h2>Threshold</h2>

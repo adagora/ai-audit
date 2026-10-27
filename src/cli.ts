@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { AuditLog, AuditLogUnavailable, anchor, report, sha256, stats, verifyAnchors, type Review } from "./audit.js";
 import { recordQdl, verifyDecision } from "./qdl.js";
 import { decisionReceipt, renderReceipt } from "./receipt.js";
@@ -13,6 +13,9 @@ import type { Mode } from "./scan.js";
 import { scrubHistory } from "./history.js";
 import { createInspectionProfile } from "./profile.js";
 import { checkQuotes } from "./quotes.js";
+import { readEvidenceRecords } from "./evidence.js";
+import { renderWorkbench } from "./workbench.js";
+import { createAttestation, generateAttestationKeys, parseAttestation, verifyAttestation } from "./attestation.js";
 
 const [cmd, ...rest] = process.argv.slice(2);
 const { values: a } = parseArgs({ args: rest, options: {
@@ -21,8 +24,10 @@ const { values: a } = parseArgs({ args: rest, options: {
   host: { type: "string", default: "127.0.0.1" }, anchors: { type: "string" }, config: { type: "string" }, by: { type: "string", default: "model" }, name: { type: "string", default: "client" }, "no-page-redaction": { type: "boolean", default: false }, "unsafe-no-sandbox": { type: "boolean", default: false }, "log-content": { type: "boolean", default: false }, "allow-hashes": { type: "string" }, from: { type: "string", default: "1970-01-01" }, to: { type: "string", default: "9999-12-31" },
   input: { type: "string" }, session: { type: "string" }, output: { type: "string" }, format: { type: "string" }, "max-record-bytes": { type: "string" },
   policy: { type: "string" }, inputs: { type: "string" }, "system-id": { type: "string" }, "use-case": { type: "string" }, "llm-call": { type: "string" },
+  "private-key": { type: "string" }, "public-key": { type: "string" }, attestation: { type: "string" },
   decision: { type: "string" }, reviewer: { type: "string" }, verdict: { type: "string" }, note: { type: "string" },
   source: { type: "string" }, answer: { type: "string" },
+  "baseline-limit": { type: "string", default: "2" }, "candidate-limit": { type: "string", default: "3" },
 } });
 const NOT_REPRODUCED = new Set(["audit_qdl_source_missing", "audit_qdl_source_invalid", "audit_qdl_source_mismatch", "audit_qdl_intent_mismatch"]);
 const log = new AuditLog(a.log!);
@@ -33,7 +38,86 @@ const allowlist = () => {
   if (!Array.isArray(hashes) || hashes.some((h) => typeof h !== "string")) throw new Error("audit_invalid_allowlist");
   return new Set<string>(hashes as string[]);
 };
-if (cmd === "scrub" || cmd === "profile") {
+if (cmd === "attest-keygen") {
+  try {
+    if (!a["private-key"] || !a["public-key"]) throw new Error("audit_missing_argument");
+    const keyId = generateAttestationKeys(a["private-key"], a["public-key"]);
+    console.log(JSON.stringify({ publicKey: a["public-key"], privateKey: a["private-key"], keyId }));
+  } catch (cause) {
+    console.error(cause instanceof Error && /^audit_[a-z_]+$/.test(cause.message) ? cause.message : "audit_command_failed");
+    process.exitCode = 2;
+  }
+} else if (cmd === "attest") {
+  try {
+    if (!a.decision || !a["private-key"] || !a.output || !a.verdict) throw new Error("audit_missing_argument");
+    if (statSync(a["private-key"]).size > 16 * 1024) throw new Error("audit_invalid_private_key");
+    const attestation = await createAttestation(log, a.decision, readFileSync(a["private-key"], "utf8"), a.verdict as Review["decision"]);
+    try { writeFileSync(a.output, JSON.stringify(attestation, null, 2) + "\n", { flag: "wx", mode: 0o600 }); }
+    catch (cause) { throw new Error((cause as NodeJS.ErrnoException).code === "EEXIST" ? "audit_output_exists" : "audit_output_unavailable"); }
+    console.log(JSON.stringify({ output: a.output, decision: attestation.decision.id, verdict: attestation.review.verdict, keyId: attestation.keyId, checkpoint: attestation.checkpoint }));
+  } catch (cause) {
+    console.error(cause instanceof Error && /^audit_[a-z_]+$/.test(cause.message) ? cause.message : "audit_command_failed");
+    process.exitCode = 2;
+  }
+} else if (cmd === "verify-attestation") {
+  try {
+    if (!a.input || !a.attestation || !a["public-key"]) throw new Error("audit_missing_argument");
+    if (statSync(a.input).size > 16 * 1024 * 1024 || statSync(a.attestation).size > 64 * 1024 || statSync(a["public-key"]).size > 16 * 1024) throw new Error("audit_package_too_large");
+    console.log(JSON.stringify(await verifyAttestation(readFileSync(a.input, "utf8"), readFileSync(a.attestation, "utf8"), readFileSync(a["public-key"], "utf8"))));
+  } catch (cause) {
+    console.error(cause instanceof Error && /^audit_[a-z_]+$/.test(cause.message) ? cause.message : "audit_invalid_attestation");
+    process.exitCode = 1;
+  }
+} else if (cmd === "verify-receipt") {
+  try {
+    if (!a.input) throw new Error("audit_missing_argument");
+    if (statSync(a.input).size > 16 * 1024 * 1024) throw new Error("audit_package_too_large");
+    const { verifyPortableReceipt } = await import("./decisionPackage.js");
+    console.log(JSON.stringify(await verifyPortableReceipt(readFileSync(a.input, "utf8"))));
+  } catch (cause) {
+    console.error(cause instanceof Error && /^audit_[a-z_]+$/.test(cause.message) ? cause.message : "audit_invalid_decision_package");
+    process.exitCode = 1;
+  }
+} else if (cmd === "workbench") {
+  try {
+    if (!a.output) throw new Error("audit_missing_argument");
+    const snapshot = readEvidenceRecords(log);
+    const trustFiles = [a.input, a.attestation, a["public-key"]];
+    if (trustFiles.some(Boolean) && !trustFiles.every(Boolean)) throw new Error("audit_missing_argument");
+    let trusted: { decisionId: string; verdict: string; keyId: string; checkpointCount: number; head: string } | undefined;
+    if (trustFiles.every(Boolean)) {
+      if (statSync(a.input!).size > 16 * 1024 * 1024 || statSync(a.attestation!).size > 64 * 1024 || statSync(a["public-key"]!).size > 16 * 1024) throw new Error("audit_package_too_large");
+      const attestationText = readFileSync(a.attestation!, "utf8");
+      const verified = await verifyAttestation(readFileSync(a.input!, "utf8"), attestationText, readFileSync(a["public-key"]!, "utf8"));
+      const signed = parseAttestation(attestationText);
+      if (snapshot.records.length < signed.checkpoint.count || snapshot.records[signed.checkpoint.count - 1]?.hash !== signed.checkpoint.head) throw new Error("audit_attestation_log_mismatch");
+      trusted = { decisionId: verified.decision, verdict: verified.verdict, keyId: verified.keyId, checkpointCount: signed.checkpoint.count, head: signed.checkpoint.head };
+    }
+    const result = renderWorkbench(snapshot.records, snapshot.digest, { from: a.from!, to: a.to!, attestation: trusted });
+    try { writeFileSync(a.output, result.html + "\n", { flag: "wx", mode: 0o600 }); }
+    catch (error) { throw new Error((error as NodeJS.ErrnoException).code === "EEXIST" ? "audit_output_exists" : "audit_output_unavailable"); }
+    console.log(JSON.stringify({ output: a.output, calls: result.calls, sessions: result.sessions, findings: result.findings, decisions: result.decisions, observedQuinelings: result.observedQuinelings, snapshot: snapshot.digest }));
+  } catch (cause) {
+    console.error(cause instanceof Error && /^audit_[a-z_]+$/.test(cause.message) ? cause.message : "audit_command_failed");
+    process.exitCode = 2;
+  }
+} else if (cmd === "lab") {
+  try {
+    const { compareSession, renderComparison } = await import("./labCompare.js");
+    const format = a.format ?? (a.output ? "html" : "json");
+    if (format !== "html" && format !== "json") throw new Error("audit_invalid_format");
+    const comparison = await compareSession(log, { sessionId: a.session, baselineLimit: Number(a["baseline-limit"]), candidateLimit: Number(a["candidate-limit"]) });
+    const result = format === "html" ? renderComparison(comparison) : JSON.stringify(comparison, null, 2);
+    if (a.output) {
+      try { writeFileSync(a.output, result + "\n", { flag: "wx", mode: 0o600 }); }
+      catch (error) { throw new Error((error as NodeJS.ErrnoException).code === "EEXIST" ? "audit_output_exists" : "audit_output_unavailable"); }
+      console.log(JSON.stringify(comparison.summary));
+    } else console.log(result);
+  } catch (cause) {
+    console.error(cause instanceof Error && /^audit_[a-z_]+$/.test(cause.message) ? cause.message : "audit_command_failed");
+    process.exitCode = 2;
+  }
+} else if (cmd === "scrub" || cmd === "profile") {
   try {
     const carnet = allowlist();
     if (cmd === "scrub") {
@@ -114,8 +198,28 @@ if (cmd === "scrub" || cmd === "profile") {
       process.exitCode = check.replay.reproduced ? 0 : 1;
     } else if (cmd === "receipt") {
       if (!a.decision) throw new Error("audit_missing_argument");
-      const html = renderReceipt(await decisionReceipt(log, a.decision, a.anchors ? { anchorsPath: a.anchors } : undefined));
-      if (a.output) writeFileSync(a.output, html); else console.log(html);
+      const format = a.format ?? "html";
+      if (!["html", "svg", "json"].includes(format)) throw new Error("audit_invalid_format");
+      const { createDecisionPackage, renderDecisionSvg } = await import("./decisionPackage.js");
+      let result: string;
+      if (format === "html") {
+        const receipt = await decisionReceipt(log, a.decision, a.anchors ? { anchorsPath: a.anchors } : undefined);
+        let sharing: { json: string; svg: string } | { reason: string };
+        try {
+          const bundle = await createDecisionPackage(log, a.decision);
+          sharing = { json: JSON.stringify(bundle, null, 2), svg: await renderDecisionSvg(bundle) };
+        } catch (cause) {
+          sharing = { reason: cause instanceof Error && /^audit_[a-z_]+$/.test(cause.message) ? cause.message : "audit_package_unavailable" };
+        }
+        result = renderReceipt(receipt, sharing);
+      } else {
+        const bundle = await createDecisionPackage(log, a.decision);
+        result = format === "json" ? JSON.stringify(bundle, null, 2) : await renderDecisionSvg(bundle);
+      }
+      if (a.output) {
+        try { writeFileSync(a.output, result + "\n", { flag: "wx", mode: 0o600 }); }
+        catch (cause) { throw new Error((cause as NodeJS.ErrnoException).code === "EEXIST" ? "audit_output_exists" : "audit_output_unavailable"); }
+      } else console.log(result);
     } else {
       const records = log.read();
       for (const h of await withChanges(policyHistories(records, { systemId: a["system-id"], useCase: a["use-case"] }), records)) console.log(JSON.stringify(h));
@@ -138,4 +242,4 @@ if (cmd === "scrub" || cmd === "profile") {
     console.error(cause instanceof Error && /^audit_[a-z_]+$/.test(cause.message) ? cause.message : "audit_command_failed"); process.exitCode = 2;
   }
 } else if (cmd === "report") console.log(report(log, a.from!, a.to!).md);
-else { console.error("usage: ai-audit serve|verify|anchor|report|stats|context [--session ID --output FILE]|keygen|profile|scrub [--input FILE --output FILE --format json|jsonl --max-record-bytes N]|decide --policy FILE --inputs FILE --system-id ID --use-case UC [--llm-call ID] [--allow-hashes FILE]|approve --decision ID --reviewer NAME --verdict approved|overridden|rejected [--note TEXT]|replay --decision ID|receipt --decision ID [--output FILE]|policies [--system-id ID] [--use-case UC]|check-quotes --source FILE --answer FILE [--allow-hashes FILE] [--config FILE] [--by key|model|hour] [--name N] [--log-content] [--anchors FILE] [--no-page-redaction] [--log ./audit.jsonl] [--mode redact|no-go|advisory] [--port 8787] [--from ISO --to ISO]"); process.exit(2); }
+else { console.error("usage: ai-audit serve|verify|anchor|report|stats|context|workbench|keygen|profile|scrub|check-quotes|decide|approve|replay|lab|receipt|verify-receipt|attest-keygen|attest|verify-attestation|policies [options]; see README.md for command examples"); process.exit(2); }

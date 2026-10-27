@@ -13,4 +13,4 @@ http.createServer(async (req, res) => {
   const withUsage = model !== "no-usage";
   const body = req.url.startsWith("/v1/messages") ? messages(withUsage) : chat(withUsage);
   res.writeHead(200, { "content-type": "application/json" }); res.end(body);
-}).listen(9000, "0.0.0.0");
+}).listen(9000, process.env.MOCK_UPSTREAM_HOST ?? "0.0.0.0");

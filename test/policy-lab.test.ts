@@ -42,6 +42,7 @@ test("a policy lab session, its first disagreement, the inspection page, and a f
   for (const marker of ["Job check A", "Job check B", "Job check C", "Job check D"]) assert.equal(text.includes(marker), false);
 
   const mains = recs.filter((r) => r.kind === "decision" && !r.qdl && r.qdlDecision);
+  assert.equal(mains.filter((r) => r.llmCallId === unknown.id).length, 2);
   const byCall = new Map<string, Rec[]>();
   for (const decision of mains) {
     if (decision.params?.policy === "revised" || typeof decision.llmCallId !== "string") continue;

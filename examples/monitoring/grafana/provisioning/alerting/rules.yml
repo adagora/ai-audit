@@ -5,6 +5,32 @@ groups:
     folder: ai-audit
     interval: 1m
     rules:
+      - uid: ai-audit-proxy-metrics-down
+        title: "Proxy metrics unavailable"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 1800, to: 0 }
+            datasourceUid: victoriametrics
+            model:
+              refId: A
+              instant: true
+              expr: "min(up{job=\"ai-audit\"})"
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: lt, params: [1] }
+        noDataState: Alerting
+        execErrState: Error
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "VictoriaMetrics cannot scrape the ai-audit proxy. Live dashboard values may be stale; check the proxy and scrape target."
       - uid: ai-audit-log-integrity
         title: "Audit log cannot take records"
         condition: C
@@ -31,6 +57,32 @@ groups:
           severity: critical
         annotations:
           summary: "The audit log refused or lost records in the last 5 minutes. Requests are refused with 503 until the log is repaired (run ai-audit verify)."
+      - uid: ai-audit-session-index-rebuild
+        title: "Session index rebuild failed"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 1800, to: 0 }
+            datasourceUid: victoriametrics
+            model:
+              refId: A
+              instant: true
+              expr: "sum(ai_audit_session_index_rebuild_failures_total)"
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels:
+          severity: warning
+        annotations:
+          summary: "The proxy could not rebuild its session index from the local audit log at startup. Session links may be incomplete. Run ai-audit verify and inspect proxy startup logs."
       - uid: ai-audit-injection-spike
         title: "Prompt-injection signal spike"
         condition: C

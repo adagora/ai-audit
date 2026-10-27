@@ -1,5 +1,5 @@
 # 34. A session governor replays retained observations
-Status: Accepted (2026-10-26). Follows [0004](0004-quinelings-optional.md), [0007](0007-log-stores-no-values.md), [0011](0011-response-content-per-key.md) and [0012](0012-unknown-usage-never-zero.md).
+Status: Superseded by [0035](0035-read-only-session-policy-comparison.md). Follows [0004](0004-quinelings-optional.md), [0007](0007-log-stores-no-values.md), [0011](0011-response-content-per-key.md) and [0012](0012-unknown-usage-never-zero.md).
 ## Context
 A policy lab compares rules on one recorded agent session. The proxy already keeps upstream status, abort, stop, session linkage and provider usage. It does not keep message text. QDL cannot read the log. Running a Quineling inside `serve` would put it on the forwarding path.
 ## Decision

@@ -1,0 +1,23 @@
+{
+  "format": "ai-audit-decision-attestation",
+  "version": 1,
+  "decision": {
+    "id": "606a4705-4fda-4ab1-9900-d6ba3787bc44",
+    "packageDigest": "288effcf21c3499f02b2ae2e1aa832b18552f5f24cde9e523d40fdbfb86a3a5e",
+    "decisionHash": "f3c78da80ca11dbf88fb881207868b5d246666993b235ab049e2114d1f5b22e8",
+    "stepHash": "8ebb63773c350cf03e1f0ac8d548857682f9e4ffaaea462dee795504c24c9909"
+  },
+  "review": {
+    "id": "28b59241-62c5-4836-995d-7c8a7a4f0095",
+    "hash": "c75dcd5d8769b18aa866eede849932f4f66a89b0e5c9e3184785e7214d49f4ab",
+    "verdict": "approved"
+  },
+  "checkpoint": {
+    "count": 27,
+    "head": "c75dcd5d8769b18aa866eede849932f4f66a89b0e5c9e3184785e7214d49f4ab",
+    "logDigest": "81cbeb3041305b38724fb981beef0a3d683bedd30b9a24ad5ef10d34bcd08666"
+  },
+  "keyId": "c25b4511d79f78e11c407566ac58839bba9726788dbf71c620cd8c928da6face",
+  "signedAt": "2026-10-27T15:55:11.912Z",
+  "signature": "RWPOpyNeTuH0JrBtMrSSMZ9HC+ghZpT+XRPuHJn7LkuNjiIYBFmB4omqvpigMm/WGj4iQDJZ977z5tBr1pWNCg=="
+}

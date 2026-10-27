@@ -1,28 +1,320 @@
 {
   "uid": "ai-audit",
-  "title": "ai-audit proxy",
+  "title": "ai-audit | operations and evidence",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 5,
   "refresh": "30s",
   "time": {
-    "from": "now-6h",
+    "from": "now-15m",
     "to": "now"
   },
   "tags": [
-    "ai-audit"
+    "ai-audit",
+    "proxy",
+    "evidence"
   ],
   "panels": [
     {
       "id": 1,
-      "type": "timeseries",
-      "title": "Requests by decision",
+      "type": "text",
+      "title": "Live overview",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 2
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "Aggregate signals from the proxy. Pick a time range above; counts use that range, and time series use Grafana's scrape-aware rate interval."
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Scrape",
+      "description": "1 means VictoriaMetrics can scrape the proxy; 0 means it cannot. This does not prove the audit log is valid.",
       "datasource": {
         "type": "prometheus",
         "uid": "victoriametrics"
       },
       "gridPos": {
         "x": 0,
-        "y": 0,
+        "y": 2,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "victoriametrics"
+          },
+          "expr": "min(up{job=\"ai-audit\"}) or vector(0)",
+          "legendFormat": "Scrape",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "LLM calls",
+      "description": "Completed LLM requests during the selected time range, including rejected requests.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "victoriametrics"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 2,
+        "w": 5,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "victoriametrics"
+          },
+          "expr": "sum(increase(ai_audit_requests_total{route=~\"/v1/(chat/completions|responses|messages)\"}[$__range])) or vector(0)",
+          "legendFormat": "LLM calls",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Blocked",
+      "description": "Policy blocks and inspection rejections during the selected time range. A block is not an upstream error.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "victoriametrics"
+      },
+      "gridPos": {
+        "x": 9,
+        "y": 2,
+        "w": 5,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "victoriametrics"
+          },
+          "expr": "sum(increase(ai_audit_requests_total{decision=~\"block|reject\",route=~\"/v1/(chat/completions|responses|messages)\"}[$__range])) or vector(0)",
+          "legendFormat": "Blocked",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Log errors",
+      "description": "Requests refused because the log was unavailable, plus records lost after delivery. Inspect the log with ai-audit verify.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "victoriametrics"
+      },
+      "gridPos": {
+        "x": 14,
+        "y": 2,
+        "w": 5,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "victoriametrics"
+          },
+          "expr": "(sum(increase(ai_audit_log_unavailable_total[$__range])) or vector(0)) + (sum(increase(ai_audit_log_write_failures_total[$__range])) or vector(0)) or vector(0)",
+          "legendFormat": "Log errors",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1e-7
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Sandbox off",
+      "description": "1 means attachment workers run without a sandbox on this proxy. A healthy scrape is required to trust this value.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "victoriametrics"
+      },
+      "gridPos": {
+        "x": 19,
+        "y": 2,
+        "w": 5,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "victoriametrics"
+          },
+          "expr": "max(ai_audit_sandbox_disabled) or vector(0)",
+          "legendFormat": "Sandbox off",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1e-7
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Requests by decision",
+      "description": "Decision labels include forward, forward-redacted, block, reject and requests that could not be classified.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "victoriametrics"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 6,
         "w": 12,
         "h": 8
       },
@@ -33,7 +325,7 @@
             "type": "prometheus",
             "uid": "victoriametrics"
           },
-          "expr": "sum by (decision) (rate(ai_audit_requests_total{route=~\"/v1/(chat/completions|responses|messages)\"}[5m]))",
+          "expr": "sum by (decision) (rate(ai_audit_requests_total{route=~\"/v1/(chat/completions|responses|messages)\"}[$__rate_interval]))",
           "legendFormat": "{{decision}}"
         }
       ],
@@ -46,16 +338,17 @@
       "options": {}
     },
     {
-      "id": 2,
+      "id": 8,
       "type": "timeseries",
-      "title": "Latency p50 / p95 / p99",
+      "title": "End-to-end latency",
+      "description": "Includes request processing and streamed response delivery for all routes.",
       "datasource": {
         "type": "prometheus",
         "uid": "victoriametrics"
       },
       "gridPos": {
         "x": 12,
-        "y": 0,
+        "y": 6,
         "w": 12,
         "h": 8
       },
@@ -66,7 +359,7 @@
             "type": "prometheus",
             "uid": "victoriametrics"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(ai_audit_request_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(ai_audit_request_duration_seconds_bucket[$__rate_interval])))",
           "legendFormat": "p50"
         },
         {
@@ -75,7 +368,7 @@
             "type": "prometheus",
             "uid": "victoriametrics"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(ai_audit_request_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(ai_audit_request_duration_seconds_bucket[$__rate_interval])))",
           "legendFormat": "p95"
         },
         {
@@ -84,7 +377,7 @@
             "type": "prometheus",
             "uid": "victoriametrics"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(ai_audit_request_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(ai_audit_request_duration_seconds_bucket[$__rate_interval])))",
           "legendFormat": "p99"
         }
       ],
@@ -97,16 +390,66 @@
       "options": {}
     },
     {
-      "id": 3,
-      "type": "stat",
-      "title": "Audit log refused / lost records (5m)",
+      "id": 9,
+      "type": "text",
+      "title": "Safety and evidence collection",
+      "gridPos": {
+        "x": 0,
+        "y": 14,
+        "w": 24,
+        "h": 2
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "These are event counts, not audit records. Prompt-injection signals are advisory; they are not proof that an attack succeeded."
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Prompt-injection signals by rule",
+      "description": "Rolling ten-minute signal count. One request may trigger several rules.",
       "datasource": {
         "type": "prometheus",
         "uid": "victoriametrics"
       },
       "gridPos": {
         "x": 0,
-        "y": 8,
+        "y": 16,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "victoriametrics"
+          },
+          "expr": "sum by (rule) (increase(ai_audit_injection_signals_total{rule!=\"\"}[10m]))",
+          "legendFormat": "{{rule}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Audit-log failures",
+      "description": "Rolling five-minute counts. Any positive value needs investigation.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "victoriametrics"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 16,
         "w": 8,
         "h": 8
       },
@@ -131,53 +474,25 @@
         }
       ],
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "unit": "short"
+        },
         "overrides": []
       },
       "options": {}
     },
     {
-      "id": 4,
+      "id": 12,
       "type": "timeseries",
-      "title": "Injection signals by rule (10m)",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "victoriametrics"
-      },
-      "gridPos": {
-        "x": 8,
-        "y": 8,
-        "w": 8,
-        "h": 8
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "victoriametrics"
-          },
-          "expr": "sum by (rule) (increase(ai_audit_injection_signals_total[10m]))",
-          "legendFormat": "{{rule}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "options": {}
-    },
-    {
-      "id": 5,
-      "type": "timeseries",
-      "title": "Upstream 5xx ratio",
+      "title": "Attachment inspection and sandbox refusals",
+      "description": "Inspected attachments and requests refused because the attachment sandbox was unavailable.",
       "datasource": {
         "type": "prometheus",
         "uid": "victoriametrics"
       },
       "gridPos": {
         "x": 16,
-        "y": 8,
+        "y": 16,
         "w": 8,
         "h": 8
       },
@@ -188,8 +503,66 @@
             "type": "prometheus",
             "uid": "victoriametrics"
           },
-          "expr": "sum(rate(ai_audit_upstream_responses_total{class=\"5xx\"}[5m])) / clamp_min(sum(rate(ai_audit_upstream_responses_total[5m])), 1e-9)",
-          "legendFormat": "5xx ratio"
+          "expr": "sum(rate(ai_audit_attachments_inspected_total[$__rate_interval]))",
+          "legendFormat": "inspected"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "victoriametrics"
+          },
+          "expr": "sum(rate(ai_audit_sandbox_unavailable_total[$__rate_interval]))",
+          "legendFormat": "sandbox unavailable"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 13,
+      "type": "text",
+      "title": "Upstream and usage quality",
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 24,
+        "h": 2
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "Provider status, connectivity, and missing token usage are separate failure modes. Missing usage must not be read as zero tokens."
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Upstream 5xx share since start",
+      "description": "Fraction of upstream HTTP responses in the 5xx class since this proxy process started. The alert uses a rolling five-minute window.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "victoriametrics"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 26,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "victoriametrics"
+          },
+          "expr": "sum(ai_audit_upstream_responses_total{class=\"5xx\"}) / clamp_min(sum(ai_audit_upstream_responses_total), 1)",
+          "legendFormat": "5xx share"
         }
       ],
       "fieldConfig": {
@@ -201,17 +574,18 @@
       "options": {}
     },
     {
-      "id": 6,
+      "id": 15,
       "type": "timeseries",
-      "title": "Unknown usage share (30m)",
+      "title": "Unknown usage share since start",
+      "description": "Share of successful responses missing input or output usage since this proxy process started. Each field is counted independently.",
       "datasource": {
         "type": "prometheus",
         "uid": "victoriametrics"
       },
       "gridPos": {
-        "x": 0,
-        "y": 16,
-        "w": 12,
+        "x": 8,
+        "y": 26,
+        "w": 8,
         "h": 8
       },
       "targets": [
@@ -221,7 +595,7 @@
             "type": "prometheus",
             "uid": "victoriametrics"
           },
-          "expr": "sum by (field) (increase(ai_audit_unknown_usage_total[30m])) / ignoring(field) group_left clamp_min(sum(increase(ai_audit_upstream_responses_total{class=\"2xx\"}[30m])), 1)",
+          "expr": "sum by (field) (ai_audit_unknown_usage_total{field!=\"\"}) / ignoring(field) group_left clamp_min(sum(ai_audit_upstream_responses_total{class=\"2xx\"}), 1)",
           "legendFormat": "{{field}}"
         }
       ],
@@ -234,16 +608,66 @@
       "options": {}
     },
     {
-      "id": 7,
+      "id": 16,
       "type": "timeseries",
-      "title": "Upstream errors (no response)",
+      "title": "Upstream errors without a response",
+      "description": "Network failures and deadlines before an upstream HTTP response, counted since this proxy process started.",
       "datasource": {
         "type": "prometheus",
         "uid": "victoriametrics"
       },
       "gridPos": {
-        "x": 12,
-        "y": 16,
+        "x": 16,
+        "y": 26,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "victoriametrics"
+          },
+          "expr": "sum by (provider, reason) (ai_audit_upstream_errors_total{provider!=\"\"})",
+          "legendFormat": "{{provider}} {{reason}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 17,
+      "type": "text",
+      "title": "Quinelings and session workflow",
+      "gridPos": {
+        "x": 0,
+        "y": 34,
+        "w": 24,
+        "h": 2
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "Quinelings activity is observed in LLM tool traffic. Counts do not mean a decision was approved, replayed, or verified."
+      }
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Observed Quinelings activity since start",
+      "description": "Observed tool calls and results by operation since this proxy process started. This does not count direct CLI decisions.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "victoriametrics"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 36,
         "w": 12,
         "h": 8
       },
@@ -254,8 +678,42 @@
             "type": "prometheus",
             "uid": "victoriametrics"
           },
-          "expr": "sum by (provider, reason) (rate(ai_audit_upstream_errors_total[5m]))",
-          "legendFormat": "{{provider}} {{reason}}"
+          "expr": "sum by (where, op) (ai_audit_quineling_events_total{where!=\"\"})",
+          "legendFormat": "{{where}} · {{op}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "HTTP outcomes by LLM route",
+      "description": "Shows which API route returned each HTTP status. Use request IDs and the local log for individual cases.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "victoriametrics"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 36,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "victoriametrics"
+          },
+          "expr": "sum by (route, status) (rate(ai_audit_requests_total{route=~\"/v1/(chat/completions|responses|messages)\"}[$__rate_interval]))",
+          "legendFormat": "{{route}} · {{status}}"
         }
       ],
       "fieldConfig": {
@@ -265,6 +723,158 @@
         "overrides": []
       },
       "options": {}
+    },
+    {
+      "id": 20,
+      "type": "text",
+      "title": "Session linking and attachment cache",
+      "gridPos": {
+        "x": 0,
+        "y": 44,
+        "w": 24,
+        "h": 2
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "Session detail stays in the local log. These two process-level indicators show whether the session index rebuilt and whether attachment inspection is reusing cached work."
+      }
+    },
+    {
+      "id": 21,
+      "type": "stat",
+      "title": "Session index rebuild failures",
+      "description": "Failures since the current proxy process started. A positive value can leave session links incomplete after restart.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "victoriametrics"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 46,
+        "w": 12,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "victoriametrics"
+          },
+          "expr": "sum(ai_audit_session_index_rebuild_failures_total) or vector(0)",
+          "legendFormat": "Session index rebuild failures",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1e-7
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 22,
+      "type": "stat",
+      "title": "Attachment cache hit share",
+      "description": "Cache hits divided by hits plus misses since the current proxy process started. No inspections yet displays as zero.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "victoriametrics"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 46,
+        "w": 12,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "victoriametrics"
+          },
+          "expr": "sum(ai_audit_attachment_cache_hits) / clamp_min(sum(ai_audit_attachment_cache_hits) + sum(ai_audit_attachment_cache_misses), 1) or vector(0)",
+          "legendFormat": "Attachment cache hit share",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 23,
+      "type": "text",
+      "title": "Investigate, report, share",
+      "gridPos": {
+        "x": 0,
+        "y": 50,
+        "w": 24,
+        "h": 2
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "Grafana holds bounded aggregate metrics. The hash-chained local log holds session links, context sizes, decision records, and evidence. Keep those records out of metric labels."
+      }
+    },
+    {
+      "id": 24,
+      "type": "text",
+      "title": "From a signal to an evidence package",
+      "gridPos": {
+        "x": 0,
+        "y": 52,
+        "w": 24,
+        "h": 9
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "| Need | Local command inside the proxy container |\n|---|---|\n| Audit-log integrity | `node dist/src/cli.js verify --log /data/audit.jsonl` |\n| Browse all evidence | `node dist/src/cli.js workbench --log /data/audit.jsonl --output /data/workbench.html` |\n| Find sessions | `node dist/src/cli.js context --log /data/audit.jsonl` |\n| Context map for one session | `node dist/src/cli.js context --log /data/audit.jsonl --session ID --output /data/session.html` |\n| Time-bounded report | `node dist/src/cli.js report --log /data/audit.jsonl --from ISO --to ISO` |\n| Compare session policy limits | `node dist/src/cli.js lab --log /data/audit.jsonl --session ID --baseline-limit 2 --candidate-limit 3 --output /data/comparison.html` |\n| Share a QDL decision | `node dist/src/cli.js receipt --log /data/audit.jsonl --decision ID --format svg --output /data/decision.svg` |\n\nFor Docker, use `docker compose exec proxy` before each command and export generated files with `docker compose cp proxy:/data/workbench.html ./workbench.html`. For a native run, use the CLI directly and replace `/data/audit.jsonl` with the local log path. The workbench is private; review a selected receipt before sharing it. This dashboard cannot list individual sessions, token totals, log lines, or QDL verdicts because `/metrics` does not publish them."
+      }
     }
   ],
   "templating": {
