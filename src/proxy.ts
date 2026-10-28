@@ -11,12 +11,15 @@ import { Counter, Gauge, Histogram, OPENMETRICS_CONTENT_TYPE, exposition } from 
 import { discover, inspectAttachment, cacheStats, TOOLS_OK, SANDBOX_AVAILABLE, sandboxState } from "./attachments.js";
 import { timingSafeEqual } from "node:crypto";
 import { createInspectionProfile } from "./profile.js";
+import { BudgetError, BudgetStore, validateBudget, type Reservation, type TokenBudget } from "./budget.js";
+import { tokenCount } from "./extract.js";
 
 export interface ProxyOpts {
   upstreamOpenai: string; upstreamAnthropic: string; mode: Mode; log: AuditLog; maxBodyBytes?: number; timeoutMs?: number; carnet?: Set<string>;
   pageRedaction?: boolean;
   sessionKey?: Buffer;
   keys?: VKey[];
+  budgetDirectory?: string;
   upstreamKeys?: { openai?: string; anthropic?: string };
   aliases?: Record<string, Alias>;
   adminKeySha256?: string;
@@ -25,7 +28,7 @@ export interface ProxyOpts {
   sandboxAvailable?: boolean;
   workerOutputLimit?: number;
 }
-export interface VKey { name: string; sha256: string; models?: string[]; providers?: ("openai" | "anthropic")[]; logContent?: boolean }
+export interface VKey { name: string; sha256: string; models?: string[]; providers?: ("openai" | "anthropic")[]; logContent?: boolean; tokenBudget?: TokenBudget }
 export interface Alias { model: string; upstream?: string }
 export const LATENCY_BUCKETS_SECONDS = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300] as const;
 let unsandboxedProxies = 0;
@@ -37,6 +40,7 @@ export const metrics = {
   attachments: new Counter("ai_audit_attachments_inspected", "Attachments sent to inspection."),
   logUnavailable: new Counter("ai_audit_log_unavailable", "Requests refused with 503 because the audit log could not take a record."),
   logWriteFailures: new Counter("ai_audit_log_write_failures", "Records lost after the response was delivered (ADR 0016)."),
+  budgetFailures: new Counter("ai_audit_budget_failures", "Budget state operations that failed closed or retained an outstanding reservation."),
   injectionSignals: new Counter("ai_audit_injection_signals", "Advisory prompt-injection signals by rule id (ADR 0010)."),
   quinelingEvents: new Counter("ai_audit_quineling_events", "Quinelings tool calls and results seen in LLM traffic, by where and op (ADR 0024)."),
   upstreamResponses: new Counter("ai_audit_upstream_responses", "Upstream responses by provider and status class."),
@@ -46,7 +50,7 @@ export const metrics = {
   cacheHits: new Gauge("ai_audit_attachment_cache_hits", "Attachment inspection cache hits since start.", () => cacheStats.hits),
   cacheMisses: new Gauge("ai_audit_attachment_cache_misses", "Attachment inspection cache misses since start.", () => cacheStats.misses),
 };
-const METRIC_ROUTES = new Set(["/v1/chat/completions", "/v1/responses", "/v1/messages", "/v1/messages/count_tokens", "/v1/models", "/healthz", "/readyz", "/metrics", "/audit/stats"]);
+const METRIC_ROUTES = new Set(["/v1/chat/completions", "/v1/responses", "/v1/messages", "/v1/messages/count_tokens", "/v1/models", "/healthz", "/readyz", "/metrics", "/audit/stats", "/audit/budgets"]);
 const routeLabel = (pathname: string) => METRIC_ROUTES.has(pathname) ? pathname : pathname.startsWith("/v1/models/") ? "/v1/models/:id" : "other";
 const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 const ROUTES: Record<string, Api | "count" | undefined> = {
@@ -56,6 +60,16 @@ const HOP = new Set(["host", "connection", "content-length", "transfer-encoding"
 const RESP_DROP = new Set(["content-encoding", "content-length", "transfer-encoding", "connection", "keep-alive"]);
 
 export function createProxy(o: ProxyOpts) {
+  for (const key of o.keys ?? []) if (key.tokenBudget !== undefined) {
+    validateBudget(key.tokenBudget);
+    if (!/^[a-f0-9]{64}$/.test(key.sha256)) throw new Error("audit_budget_config_invalid");
+  }
+  const duplicateKeys = new Map<string, boolean>();
+  for (const key of o.keys ?? []) {
+    if (duplicateKeys.has(key.sha256) && (duplicateKeys.get(key.sha256) || key.tokenBudget)) throw new Error("audit_budget_duplicate_key");
+    duplicateKeys.set(key.sha256, !!key.tokenBudget);
+  }
+  const budgets = new BudgetStore(o.budgetDirectory ?? o.log.path + ".budgets");
   const max = o.maxBodyBytes ?? 32 * 1024 * 1024, timeoutMs = o.timeoutMs ?? 180_000;
   const profile = createInspectionProfile(o);
   const sandbox = sandboxState(o.sandboxAvailable ?? SANDBOX_AVAILABLE, o.unsafeNoSandbox === true);
@@ -67,6 +81,7 @@ export function createProxy(o: ProxyOpts) {
   return http.createServer(async (req, res) => {
     const rid = randomUUID(), t0 = Date.now(); res.setHeader("x-request-id", rid);
     let decisionTag = "none", routeTag = "", forwarded = false;
+    let reservation: Reservation | undefined, budgetSent = false;
     res.on("finish", () => {
       const ms = Date.now() - t0;
       metrics.requests.inc({ route: routeLabel(routeTag), decision: decisionTag, status: String(res.statusCode) });
@@ -85,9 +100,10 @@ export function createProxy(o: ProxyOpts) {
       if (req.method === "GET" && url.pathname === "/healthz") return void res.end("ok");
       if (req.method === "GET" && url.pathname === "/readyz") return void (!TOOLS_OK ? fail(503, "audit_tools_missing") : sandbox === "unavailable" ? fail(503, "audit_sandbox_unavailable") : res.end("ready"));
       if (req.method === "GET" && url.pathname === "/metrics") { res.setHeader("content-type", OPENMETRICS_CONTENT_TYPE); return void res.end(exposition(Object.values(metrics))); }
-      if (req.method === "GET" && url.pathname === "/audit/stats") {
+      if (req.method === "GET" && (url.pathname === "/audit/stats" || url.pathname === "/audit/budgets")) {
         const k = str(req.headers["x-admin-key"]) ?? "";
         if (!o.adminKeySha256 || !same(sha256(k), o.adminKeySha256)) return fail(401, "audit_admin_unauthorized");
+        if (url.pathname === "/audit/budgets") return void res.end(JSON.stringify((o.keys ?? []).filter((k) => k.tokenBudget).map((k) => ({ name: k.name, ...budgets.status(k.sha256, k.tokenBudget!) }))));
         const by = url.searchParams.get("by") ?? "model";
         if (!["key", "model", "hour"].includes(by)) return fail(400, "audit_bad_group");
         return void res.end(JSON.stringify(stats(o.log, by as any, url.searchParams.get("from") ?? "", url.searchParams.get("to") ?? "~")));
@@ -173,23 +189,68 @@ export function createProxy(o: ProxyOpts) {
       res.setHeader("x-audit-finding-count", String(findings.length));
       if (signals.length) res.setHeader("x-audit-signal-count", String(signals.length));
       if (d.action === "forward-redacted") sanitize.forEach((f) => f());
-      const fwd = d.action === "forward-redacted" ? Buffer.from(JSON.stringify(value)) : alias ? Buffer.from(JSON.stringify(body)) : raw;
+      const forwardedBody = d.action === "forward-redacted" ? value : body;
+      let fwd = d.action === "forward-redacted" ? Buffer.from(JSON.stringify(value)) : alias ? Buffer.from(JSON.stringify(body)) : raw;
       const rec = {
         ...context, forwardedPromptDigest: sha256(fwd.toString("latin1")), ...(composition && { context: composition }), ...(session && { session }),
+        ...(vkey?.tokenBudget && { tokenBudget: { policy: vkey.tokenBudget } }),
         decision: { mode: profile.mode, action: d.action, findings: d.findings.map((f) => ({ rule: f.rule, path: f.path })), ...(signals.length && { signals }), ...(d.action === "forward-redacted" && rasterized.length && { rasterized }), ...(atts.length && { sandbox }) },
       };
       const write = (extra: object) => { if (route !== "count") o.log.append({ kind: "llm-call", id: rid, ts: new Date(t0).toISOString(), ...rec, ...extra, latencyMs: Date.now() - t0 } as any); };
       if (d.action === "block") { clearTimeout(timer); write({ upstreamStatus: null, ...observe(traced) }); return fail(d.status!, d.code!, d.findings.map((f) => f.rule)); }
 
+      if (vkey?.tokenBudget && route !== "count") {
+        try {
+          const budget = vkey.tokenBudget;
+          if (route === "openai-chat") throw new BudgetError(422, "audit_budget_unsupported_route");
+          if (forwardedBody.previous_response_id || forwardedBody.conversation || forwardedBody.background || forwardedBody.prompt
+            || forwardedBody.mcp_servers || forwardedBody.context_management || forwardedBody.container
+            || (Array.isArray(forwardedBody.input) && forwardedBody.input.some((item: any) => item?.type === "item_reference"))
+            || (Array.isArray(forwardedBody.tools) && forwardedBody.tools.some((t: any) => anthropic ? t?.type && t.type !== "custom" : t?.type !== "function"))) throw new BudgetError(422, "audit_budget_unsupported_request");
+          const outputField = anthropic ? "max_tokens" : "max_output_tokens";
+          const requested = forwardedBody[outputField];
+          if (requested !== undefined && (tokenCount(requested) === undefined || requested < 1)) throw new BudgetError(422, "audit_budget_invalid_output_limit");
+          const output = Math.min(requested ?? budget.maxOutputTokens, budget.maxOutputTokens);
+          forwardedBody[outputField] = output;
+          const status = budgets.status(vkey.sha256, budget);
+          if (status.blocked) throw new BudgetError(503, "audit_budget_usage_overrun");
+          if (status.remaining.input < 1 || output > status.remaining.output) throw new BudgetError(429, "audit_token_budget_exceeded");
+          const fields = anthropic ? ["model", "messages", "system", "tools", "tool_choice", "thinking", "output_config", "cache_control", "speed"]
+            : ["model", "input", "instructions", "tools", "tool_choice", "text", "truncation", "parallel_tool_calls", "reasoning", "personality"];
+          const countBody = Object.fromEntries(fields.filter((k) => forwardedBody[k] !== undefined).map((k) => [k, forwardedBody[k]]));
+          const counted = await fetch(base.replace(/\/$/, "") + (anthropic ? "/v1/messages/count_tokens" : "/v1/responses/input_tokens"), {
+            method: "POST", headers, body: JSON.stringify(countBody), signal: ac.signal,
+          });
+          if (!counted.ok) throw new BudgetError(503, "audit_budget_count_unavailable");
+          const input = tokenCount((await counted.json() as any)?.input_tokens);
+          if (input === undefined) throw new BudgetError(503, "audit_budget_count_unavailable");
+          reservation = budgets.reserve(vkey.sha256, budget, input, output);
+          fwd = Buffer.from(JSON.stringify(forwardedBody));
+          rec.forwardedPromptDigest = sha256(fwd.toString("latin1"));
+        } catch (e) {
+          const error = e instanceof BudgetError ? e : new BudgetError(503, "audit_budget_count_unavailable");
+          if (error.status === 503) metrics.budgetFailures.inc();
+          clearTimeout(timer); decisionTag = "budget-reject";
+          write({ decision: { ...rec.decision, action: "block" }, upstreamStatus: null, error: error.message, ...observe(traced) });
+          return fail(error.status, error.message);
+        }
+      }
+
       if (route !== "count") try { o.log.ensureWritable(); } catch (e) { clearTimeout(timer); decisionTag = "log-unavailable"; return logUnavailable(e); }
       let up: Response;
-      try { up = await fetch(target, { method: "POST", headers, body: fwd, signal: ac.signal }); }
+      try { budgetSent = true; up = await fetch(target, { method: "POST", headers, body: fwd, signal: ac.signal }); }
       catch { clearTimeout(timer); metrics.upstreamErrors.inc({ provider: context.provider, reason: ac.signal.aborted ? "deadline" : "unreachable" }); const code = ac.signal.aborted ? "audit_deadline_exceeded" : "audit_upstream_unreachable"; write({ upstreamStatus: null, error: code, ...observe(traced) }); return fail(ac.signal.aborted ? 408 : 502, code); }
       clearTimeout(timer); forwarded = true;
       metrics.upstreamResponses.inc({ provider: context.provider, class: `${Math.floor(up.status / 100)}xx` });
       const sse = (up.headers.get("content-type") ?? "").includes("text/event-stream");
       const captured = await pipe(up, res);
       const out = route === "count" ? undefined : extract(route, captured, sse);
+      let tokenBudget: Record<string, unknown> | undefined;
+      if (reservation) {
+        try { tokenBudget = { policy: vkey!.tokenBudget, reserved: reservation.tokens, ...budgets.settle(reservation, out?.usage, !!anthropic) }; }
+        catch (e) { metrics.budgetFailures.inc(); event("audit_budget_settlement_failed", e); tokenBudget = { reserved: reservation.tokens, status: "unavailable" }; }
+        reservation = undefined;
+      }
       const red = (s: string) => {
         const result = inspect(s, profile.carnet);
         return result.findings.some((f) => f.inKey || f.unredactable) ? "[REDACTED:unredactable-content]" : result.value as string;
@@ -199,13 +260,17 @@ export function createProxy(o: ProxyOpts) {
         if (out.usage?.output == null) metrics.unknownUsage.inc({ provider: context.provider, field: "output" });
       }
       const full = vkey?.logContent === true;
-      write({ ...(composition && { context: scaleToProvider(composition, up.status < 400 ? promptTokens(route as Api, out?.usage) : undefined) }), upstreamStatus: up.status, clientAborted: !res.writableFinished || undefined, responseModel: out?.model, usage: out?.usage, stop: out?.stop,
+      write({ ...(tokenBudget && { tokenBudget }), ...(composition && { context: scaleToProvider(composition, up.status < 400 ? promptTokens(route as Api, out?.usage) : undefined) }), upstreamStatus: up.status, clientAborted: !res.writableFinished || undefined, responseModel: out?.model, usage: out?.usage, stop: out?.stop,
         ...(out && { content: full ? "redacted" : "hash", outputHash: sha256(out.text), ...(full && { output: red(out.text) }),
           toolCalls: out.toolCalls.map((t) => ({ name: t.name, argsHash: sha256(t.args), ...(full && { args: red(t.args) }) })) }),
         ...observe([...traced, ...(out ? quinelingCalls(out.toolCalls) : [])]) });
     } catch (e) {
+      if (e instanceof BudgetError) { metrics.budgetFailures.inc(); if (!res.writableEnded) fail(e.status, e.message); return; }
       if (e instanceof AuditLogUnavailable || forwarded) { metrics.logWriteFailures.inc(); event("audit_log_write_failed", e); }
       if (!res.writableEnded) fail(500, "audit_internal_error");
+    } finally {
+      if (reservation) try { if (budgetSent) budgets.settle(reservation); else budgets.cancel(reservation); }
+      catch (e) { metrics.budgetFailures.inc(); event("audit_budget_settlement_failed", e); }
     }
   });
 }

@@ -242,6 +242,38 @@ docker build --build-arg BASE=platformatic/node-caged:26.12.1-slim -t ai-audit .
 
 With an empty `keys` array and no `AI_AUDIT_CLIENT_KEY`, the proxy forwards the client's `Authorization` or `x-api-key` unchanged. The request is still scanned. The client is holding the provider key.
 
+### Optional employee token budgets
+
+For an OpenAI monthly spending cap, use its [organization or project hard spend limit](https://developers.openai.com/api/docs/guides/spend-limits). Several official keys in one project share that project's allowance. Our optional quota is useful for separate employee token allowances in a shared project or across OpenAI and Anthropic, with every request passing through inspection.
+
+Add `tokenBudget` to the employee's existing key entry in `gateway.json`:
+
+```json
+{
+  "budgetDirectory": "live/employee-budgets",
+  "keys": [{
+    "name": "anna",
+    "sha256": "paste-the-sha256-keygen-printed",
+    "models": ["*"],
+    "tokenBudget": { "period": "month", "inputTokens": 1000000, "outputTokens": 100000, "maxOutputTokens": 4096 }
+  }]
+}
+```
+
+`day` and `month` reset at UTC calendar boundaries. The proxy counts inspected input at the provider, reserves that input and the capped output before generation, then settles reported usage. Missing usage keeps its full reservation. Concurrent processes using the same directory cannot reserve the same balance. Exhaustion returns `429 audit_token_budget_exceeded`. Keep the directory across restarts and log rotation; deleting it or changing key hashes creates a new allowance. Requests still in flight at rollover belong to their admission period.
+
+Budgeted keys support OpenAI Responses and Anthropic Messages, including streaming. They add a provider count request and set or clamp `max_output_tokens` / `max_tokens` to `maxOutputTokens`. Chat Completions, stateful Responses references, background execution and provider-executed tools return 422 for budgeted keys. Keys without a budget retain their existing routes. These token quotas are not dollar budgets: cached tokens count toward input, while provider pricing and non-token charges differ.
+
+Counting or accounting failures refuse generation with 503. A provider count can differ from final usage; any reported overrun is charged fully and blocks that key until its next period. This cannot undo provider-side overspending on that request. Crash reservations remain charged conservatively, and abandoned lock files require investigation while writers are stopped. State is intended for a shared local filesystem, not separate hosts or network filesystems. [ADR 0044](docs/adr/0044-durable-virtual-key-token-budgets.md).
+
+Inspect current allowances with the admin credential:
+
+```bash
+curl -H "x-admin-key: $AI_AUDIT_ADMIN_KEY" http://127.0.0.1:8787/audit/budgets
+```
+
+The response lists each budgeted key's name, limits, spent, reserved, remaining and blocked status. Request records also carry the budget policy, reservation and settlement status. Accounting files contain no prompts, responses or raw credentials and must stay out of Git.
+
 ## Commands
 
 After `npm link`, the binary is `ai-audit`. The examples below use that name. `node dist/src/cli.js` is the same program.
@@ -563,6 +595,8 @@ A policy file is either a QDL intent, `"format": "qdl-intent"`, or `{"source": "
 | `keys[].models` | Model ids this key may request. `"*"` allows any. The check uses the name the client sent and the name after an alias. |
 | `keys[].providers` | `openai`, `anthropic`, or both. Omit the field to allow both. |
 | `keys[].logContent` | `true` stores redacted output text and redacted tool arguments. Default is hashes only. |
+| `keys[].tokenBudget` | Optional UTC `period: day\|month`, nonnegative `inputTokens` / `outputTokens`, and positive per-request `maxOutputTokens`. |
+| `budgetDirectory` | Persistent local accounting directory shared by proxy processes. Default is `<log>.budgets`. |
 | `aliases` | Map from the client's model string to `{ "model", "upstream" }`. `upstream` is optional. The API format stays the same. |
 | `pageRedaction` | `false` disables PDF rasterizing. Default is on. `--no-page-redaction` also disables it. |
 | `adminKeySha256` | SHA-256 of the admin key. Ignored when `AI_AUDIT_ADMIN_KEY` is set, because the proxy hashes that variable itself. |
@@ -581,7 +615,7 @@ Replace the placeholder. Each entry is the lowercase hex SHA-256 of one exact va
 | `AI_AUDIT_UPSTREAM_ANTHROPIC_KEY` | `serve` | Sent as `x-api-key` on Anthropic routes. |
 | `AI_AUDIT_CLIENT_KEY` | `serve` | Adds a virtual key named `default`, next to any keys in the config. |
 | `AI_AUDIT_CLIENT_LOG_CONTENT` | `serve` | Set to `1` to turn on `logContent` for that default key. |
-| `AI_AUDIT_ADMIN_KEY` | `serve` | Unlocks `GET /audit/stats`. The hash of this value wins over `adminKeySha256`. |
+| `AI_AUDIT_ADMIN_KEY` | `serve` | Unlocks `GET /audit/stats` and `GET /audit/budgets`. The hash of this value wins over `adminKeySha256`. |
 | `AI_AUDIT_UNSAFE_NO_SANDBOX` | `serve` | Set to `1` for the same effect as `--unsafe-no-sandbox`. |
 | `AI_AUDIT_URL`, `AI_AUDIT_CLIENT_KEY` | `examples/context-map/live.mjs` | Where the example sends its session. The proxy does not read `AI_AUDIT_URL`. |
 

@@ -51,3 +51,4 @@ Format: Nygard (Status, Context, Decision, Consequences), at most ~40 lines, fil
 - [41. Context inspection stays client scoped; public showcase is recorded synthetic evidence](0041-context-inspection-and-public-showcase.md)
 - [42. Offline request investigation from verified metadata](0042-request-investigation-from-metadata.md)
 - [43. Offline labeled evaluation of QDL and model judgments](0043-offline-labeled-decision-evaluation.md)
+- [44. Durable token budgets for virtual keys](0044-durable-virtual-key-token-budgets.md)

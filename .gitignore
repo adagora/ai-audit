@@ -8,6 +8,7 @@ demo-log.jsonl
 demo-report.md
 *.jsonl.lock
 *.session-key
+*.budgets/
 fuzz/corpus/
 fuzz/artifacts/
 fuzz/seeds/
