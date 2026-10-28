@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "cases": [
+    { "id": "floor-accept", "split": "development", "facts": { "minutes": 20, "rate": 4, "setup": 40, "material": 20, "llmPrice": 150 }, "expectedReview": false },
+    { "id": "floor-gap", "split": "development", "facts": { "minutes": 20, "rate": 4, "setup": 40, "material": 20, "llmPrice": 160 }, "expectedReview": true },
+    { "id": "ceiling-accept", "split": "development", "facts": { "minutes": 100, "rate": 8, "setup": 100, "material": 100, "llmPrice": 1000 }, "expectedReview": false },
+    { "id": "ceiling-exceed", "split": "development", "facts": { "minutes": 101, "rate": 8, "setup": 100, "material": 100, "llmPrice": 1008 }, "expectedReview": true },
+    { "id": "small-gap-accept", "split": "development", "facts": { "minutes": 50, "rate": 5, "setup": 50, "material": 25, "llmPrice": 340 }, "expectedReview": false },
+    { "id": "small-gap-exceed", "split": "development", "facts": { "minutes": 50, "rate": 5, "setup": 50, "material": 25, "llmPrice": 350 }, "expectedReview": true },
+    { "id": "hold-floor-boundary", "split": "holdout", "facts": { "minutes": 0, "rate": 0, "setup": 0, "material": 0, "llmPrice": 157.5 }, "expectedReview": false },
+    { "id": "hold-floor-over", "split": "holdout", "facts": { "minutes": 0, "rate": 0, "setup": 0, "material": 0, "llmPrice": 157.51 }, "expectedReview": true },
+    { "id": "hold-ceiling-boundary", "split": "holdout", "facts": { "minutes": 90, "rate": 10, "setup": 50, "material": 50, "llmPrice": 950 }, "expectedReview": false },
+    { "id": "hold-ceiling-gap", "split": "holdout", "facts": { "minutes": 90, "rate": 10, "setup": 50, "material": 50, "llmPrice": 949.99 }, "expectedReview": true },
+    { "id": "hold-normal-accept", "split": "holdout", "facts": { "minutes": 60, "rate": 12, "setup": 100, "material": 90, "llmPrice": 910 }, "expectedReview": false },
+    { "id": "hold-large-review", "split": "holdout", "facts": { "minutes": 70, "rate": 12, "setup": 100, "material": 90, "llmPrice": 1030 }, "expectedReview": true }
+  ]
+}

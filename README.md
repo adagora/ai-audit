@@ -531,6 +531,8 @@ A policy file is either a QDL intent, `"format": "qdl-intent"`, or `{"source": "
 
 `npm run example:lab` loads a fake session through the proxy and a mock provider, then compares two policies on it. The walkthrough, including what Quinelings will and will not do, is [docs/decisions.md](docs/decisions.md).
 
+`npm run example:evaluate` checks a QDL machining quote policy on labeled cases. `npm run example:evaluate:openai -- --output /private/tmp/quote-evaluation.json` also evaluates the same facts with OpenAI Decisions, recording misses, false alerts, repeat changes, latency and usage. The evaluator runs offline from proxy traffic; see [the evaluation guide](examples/evaluation/README.md).
+
 ## Configuration
 
 `gateway.json` is JSON. Comments in the file make `JSON.parse` fail. This is a working file:

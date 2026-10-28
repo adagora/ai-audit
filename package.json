@@ -13,6 +13,8 @@
     "fuzz:coverage": "npm run build && bash fuzz/run.sh",
     "demo": "npm run build && node dist/src/demo.js",
     "example:lab": "npm run build && node examples/policy-lab/run.mjs",
+    "example:evaluate": "npm run build && node examples/evaluation/run.mjs",
+    "example:evaluate:openai": "npm run build && node examples/evaluation/run.mjs --openai",
     "example:workflow": "npm run build && node examples/workflow/serve.mjs",
     "example:workflow:real": "npm run build && bash scripts/workflow-real.sh",
     "example:workflow:smoke": "npm run build && node examples/workflow/smoke-real.mjs",

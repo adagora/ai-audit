@@ -1,6 +1,6 @@
 # Deterministic decisions (optional, Quinelings, Node ≥ 22)
 **TL;DR: where Quinelings helps this project**
-- **Proves why a decision was made, long after.** The log carries the decision program itself. `ai-audit replay` rebuilds it from the log alone and recomputes the result, and `ai-audit policies` shows which policy version decided and what changed since. The proxy proves what the AI said; the Quineling proves what was decided ([DESIGN.md](../DESIGN.md), AI Act Art. 12 and 14).
+- **Reproduces how a decision was calculated, long after.** The log carries the decision program itself. `ai-audit replay` rebuilds it from the log alone and recomputes the result, and `ai-audit policies` shows which policy version decided and what changed since. This does not authenticate the input facts or establish that the rule was wise.
 - **Compares two rules on one recorded session.** `npm run example:lab` replays two session governors over the same proxy log, shows the first decision where they disagree, and reruns a changed threshold in a fresh process ([ADR 0035](adr/0035-read-only-session-policy-comparison.md)).
 - **Runs a fixed program, safely.** A program always stops, cannot read files or the network, and is refused if it invents an operation or mixes up units. The built-in `replay()` runs JavaScript in `node:vm`, which is only safe for trusted code.
 - **Keeps secrets out of the evidence.** Inputs and programs are checked with the proxy's rules before anything runs; a customer e-mail or an API key stops the decision instead of landing in the log.
@@ -63,6 +63,8 @@ For ordinary proxy use, no. Redaction and request logging work without it. A sim
 Quinelings is useful when the exact calculation must travel with its evidence, when policies change and you need to compare versions, or when a model proposes a bounded typed program that must be checked before running. Think of it as a saved recipe with its ingredients and result. It helps reproduce the recipe; it cannot establish that the ingredients were true or that the recipe was a good decision.
 
 The quote example below exercises more of that value than a single threshold: typed units, several calculations, comparison with a model proposal and a review rule. Keep QDL optional until a workflow needs those properties.
+
+OpenAI Decisions answers a different question: it returns a model probability for an observable condition. It can help classify ambiguous evidence, but its answer is a model judgment. In the [labeled quote evaluation](../examples/evaluation/README.md), QDL reproduced the exact price rule on all 12 synthetic cases; the Decisions API made 18 wrong classifications across 36 answers at a fixed threshold. Keep exact arithmetic and final authorization in a rule; evaluate a model classifier separately on representative labeled data before using it as an advisory signal.
 
 ## With ai-audit: the LLM proposes, the policy decides
 ```mermaid

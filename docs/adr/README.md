@@ -50,3 +50,4 @@ Format: Nygard (Status, Context, Decision, Consequences), at most ~40 lines, fil
 - [40. Real workflow page is a client of the ordinary proxy](0040-real-workflow-client.md)
 - [41. Context inspection stays client scoped; public showcase is recorded synthetic evidence](0041-context-inspection-and-public-showcase.md)
 - [42. Offline request investigation from verified metadata](0042-request-investigation-from-metadata.md)
+- [43. Offline labeled evaluation of QDL and model judgments](0043-offline-labeled-decision-evaluation.md)
