@@ -1,5 +1,5 @@
 # 54. A loopback console reads the audit log and records reviews
-Status: Proposed (2026-10-29). Extends [0023](0023-decision-records-cli-and-outcomes.md), [0037](0037-offline-evidence-workbench.md), [0040](0040-real-workflow-client.md) and [0053](0053-use-case-table.md).
+Status: Accepted (2026-10-29). Extends [0023](0023-decision-records-cli-and-outcomes.md), [0037](0037-offline-evidence-workbench.md), [0040](0040-real-workflow-client.md) and [0053](0053-use-case-table.md).
 ## Context
 The operator watches counters in Grafana, reads `report` output, opens a workbench snapshot and records reviews with `approve`. Nothing shows what needs attention now, and a person who must decide sees the decision in one tool and records the verdict in another. ADR 0037 kept log reading offline because a live endpoint adds an access surface; ADR 0039 and 0040 keep the example pages away from the real log. A review queue needs that surface.
 ## Decision
