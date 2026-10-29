@@ -97,9 +97,15 @@ test("job files: only expected names, no traversal, no symlinks, byte and count 
 });
 
 test("the job dir is removed after every run, success or failure", async () => {
-  const before = readdirSync(tmpdir()).filter((x) => x.startsWith("ai-audit-job-")).length;
-  await work({ op: "check" }, undefined, "disabled");
-  await work({ op: "check" }, 1, "disabled");
-  await work({ op: "check", stdoutBytes: WORKER_OUTPUT_LIMIT + 1 }, undefined, "disabled");
-  assert.equal(readdirSync(tmpdir()).filter((x) => x.startsWith("ai-audit-job-")).length, before);
+  const previous = process.env.TMPDIR, root = mkdtempSync(join(tmpdir(), "job-root-"));
+  process.env.TMPDIR = root;
+  try {
+    await work({ op: "check" }, undefined, "disabled");
+    await work({ op: "check" }, 1, "disabled");
+    await work({ op: "check", stdoutBytes: WORKER_OUTPUT_LIMIT + 1 }, undefined, "disabled");
+    assert.deepEqual(readdirSync(root), []);
+  } finally {
+    if (previous === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = previous;
+    rmSync(root, { recursive: true, force: true });
+  }
 });
