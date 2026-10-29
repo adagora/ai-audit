@@ -29,7 +29,6 @@ export function validateActionGate(value: unknown): ActionGate {
     if (!name || !record(t) || Object.keys(t).some((k) => !["mode", "arguments", "allow"].includes(k)) || (t.mode !== "observe" && t.mode !== "enforce")
       || !Array.isArray(t.arguments) || !t.arguments.length || t.arguments.some((p) => typeof p !== "string" || !ARGUMENT_PATH.test(p))
       || (t.allow !== undefined && (!Array.isArray(t.allow) || t.allow.some((e) => typeof e !== "string" || !e.trim() || e.length > 256)))) throw invalid();
-    if (t.mode === "enforce") throw new Error("audit_action_gate_enforce_unavailable");
     tools[name] = Object.freeze({ mode: t.mode, arguments: Object.freeze([...t.arguments as string[]]), allow: Object.freeze(((t.allow ?? []) as string[]).map((e) => e.trim().toLowerCase())) });
   }
   return Object.freeze({ tools: Object.freeze(tools) });
@@ -38,9 +37,10 @@ export function validateActionGate(value: unknown): ActionGate {
 export function validateKeyTools(value: unknown): KeyTools {
   if (!record(value) || Object.keys(value).some((k) => k !== "mode" && k !== "allow") || (value.mode !== "observe" && value.mode !== "enforce")
     || !Array.isArray(value.allow) || !value.allow.length || value.allow.some((e) => typeof e !== "string" || !e.trim() || e.length > 128 || e.trim() === "*")) throw new Error("audit_key_tools_invalid");
-  if (value.mode === "enforce") throw new Error("audit_action_gate_enforce_unavailable");
   return Object.freeze({ mode: value.mode, allow: Object.freeze((value.allow as string[]).map((e) => e.trim())) });
 }
+
+export const enforces = (gate?: ActionGate, tools?: KeyTools) => tools?.mode === "enforce" || Object.values(gate?.tools ?? {}).some((t) => t.mode === "enforce");
 
 const toolAllowed = (tools: KeyTools, name: string) => tools.allow.some((e) => e.endsWith("*") ? name.startsWith(e.slice(0, -1)) : e === name);
 

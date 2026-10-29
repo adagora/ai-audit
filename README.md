@@ -401,7 +401,9 @@ Text checks are too slow or too inaccurate to block on, so blocking belongs at t
 
 For each tool call the model proposes to a listed tool, the proxy takes URL hosts, email addresses, phone numbers and IBANs from those arguments. A destination passes if it is allowed or the user typed it. A destination that came only from a tool result, a tool definition or the system prompt, or from nowhere, is held. A secret in the arguments is always held. No model runs, so the check costs microseconds and does not depend on language or wording.
 
-`observe` delivers the response unchanged and records `actionGate.calls`: per value its argument path, kind, origin (`user`, `system`, `untrusted`, `none`, `unknown`), the source path of an untrusted occurrence, and the result. Values are never stored. `enforce`, which will replace held calls with a text answer, is not available yet; the proxy refuses to start with it. Unlisted tools pass, and tools the provider runs itself are not seen. [ADR 0046](docs/adr/0046-deterministic-action-gate.md).
+`observe` delivers the response unchanged and records `actionGate.calls`: per value its argument path, kind, origin (`user`, `system`, `untrusted`, `none`, `unknown`), the source path of an untrusted occurrence, and the result. Values are never stored. Unlisted tools pass, and tools the provider runs itself are not seen. [ADR 0046](docs/adr/0046-deterministic-action-gate.md).
+
+`enforce` blocks. If one call in a response is held, the client receives none of that response's tool calls. In their place it gets a text answer, `[ai-audit] audit_action_held: held tool call send_email. …`, with a normal stop reason, so the agent can tell the user and continue. This works for Chat Completions, Responses and Messages, streamed or not. A streamed answer is delivered at once up to its first tool-call event; the rest waits for the end of the response. The record has `actionGate.rewritten: true`. Requests without an `enforce` rule take the unchanged pass-through path. In `redact` mode, email addresses, phone numbers and IBANs in tool results are masked before the model sees them, so the gate matters most for URL hosts and in `advisory` mode.
 
 A virtual key can also limit which tools its model may call: `"tools": { "mode": "observe", "allow": ["propose_quote", "mcp__crm__*"] }` in its `keys[]` entry. A call to any other tool is held and recorded with `toolAllowed: false`. Tool definitions in the request are not changed, so clients that send all their tools keep working. `ai-audit report` lists the tools each key called, so you can build the list from real use. A key without `tools` is not limited. [ADR 0048](docs/adr/0048-per-key-tool-allowlist.md).
 
@@ -802,7 +804,7 @@ The proxy's `serve` command does not need this import.
 - The attachment cache is memory only. It dies with the process.
 - Requests refused with 401, 403, 400, 404 or 413 are `refusal` records without content, at most 60 per minute per process; the rest of that minute is one summary record with a count ([ADR 0047](docs/adr/0047-record-refusals-before-inspection.md)). `count_tokens` is scanned and not logged.
 - `scrub` rewrites an export you already have. It does not reach the provider, backups, or data URIs.
-- Prompt-injection rules never block, and they are easy to walk around. The tool-call gate only observes for now.
+- Prompt-injection rules never block, and they are easy to walk around. The tool-call gate blocks only listed tools, keys with a `tools` list and destinations it can parse.
 - `check-quotes` misses a wrong value backed by a real quote of a different sentence. It flags numbers written as words, translated text, and reformatted dates.
 - A rasterized PDF has no text layer. Answers that depend on the original text get worse, and the token count goes up.
 - The AI Act discussion in [DESIGN.md](DESIGN.md) is unverified. It is not legal advice.

@@ -95,11 +95,11 @@ test("Anthropic tool results inside user turns and Responses history kept at the
   assert.equal(check([["send_email", { to: "x@y.example" }]], { previous_response_id: "resp_1", input: "Send it." }, "openai-responses")[0].atoms[0].origin, "unknown");
 });
 
-test("gate configuration is validated, enforce is refused for now, and the configuration enters the inspection profile", () => {
+test("gate configuration is validated and enters the inspection profile", () => {
   for (const bad of [null, {}, { tools: {} }, { tools: { x: { mode: "observe", arguments: [] } } }, { tools: { x: { mode: "block", arguments: ["$"] } } },
     { tools: { x: { mode: "observe", arguments: ["to"] } } }, { tools: { x: { mode: "observe", arguments: ["$"], allow: [""] } } }, { tools: {}, extra: 1 }])
     assert.throws(() => validateActionGate(bad), /^Error: audit_action_gate_invalid$/);
-  assert.throws(() => validateActionGate({ tools: { x: { mode: "enforce", arguments: ["$"] } } }), /audit_action_gate_enforce_unavailable/);
+  assert.equal(validateActionGate({ tools: { x: { mode: "enforce", arguments: ["$"] } } }).tools.x.mode, "enforce");
   const plain = createInspectionProfile({ mode: "redact" }).receipt, gated = createInspectionProfile({ mode: "redact", actionGate: GATE }).receipt;
   assert.notEqual(plain.configDigest, gated.configDigest); assert.equal(plain.rulesDigest, gated.rulesDigest);
   assert.equal(createInspectionProfile({ mode: "redact", actionGate: validateActionGate({ tools: { send_email: { mode: "observe", arguments: ["$.to"] } } }) }).receipt.configDigest,
@@ -155,7 +155,7 @@ test("a key's tool list holds calls to other tools, keeps destination checks, an
     [2, "Bash", "hold", false, []], [3, "send_email", "hold", true, ["hold"]], [4, "http_post", "hold", false, ["pass"]]]);
   for (const bad of [undefined, [], { mode: "observe" }, { mode: "observe", allow: [] }, { mode: "observe", allow: ["*"] }, { mode: "observe", allow: ["x"], extra: 1 }])
     assert.throws(() => validateKeyTools(bad), /^Error: audit_key_tools_invalid$/);
-  assert.throws(() => validateKeyTools({ mode: "enforce", allow: ["x"] }), /audit_action_gate_enforce_unavailable/);
+  assert.equal(validateKeyTools({ mode: "enforce", allow: ["x"] }).mode, "enforce");
 });
 
 test("per-key tool lists apply only to their key, and report lists the tools each key called and the calls the gate held", async () => {

@@ -2,11 +2,12 @@ import http from "node:http";
 import { randomUUID } from "node:crypto";
 import { AuditLog, AuditLogUnavailable, sha256, stats } from "./audit.js";
 import { decide, hasDuplicateKeys, inspect, MAX_JSON_DEPTH, nestedDeeperThan, type Mode } from "./scan.js";
-import { checkActions, requestTexts, validateActionGate, validateKeyTools, type ActionGate, type KeyTools } from "./actionGate.js";
+import { checkActions, enforces, requestTexts, validateActionGate, validateKeyTools, type ActionGate, type CallResult, type KeyTools } from "./actionGate.js";
+import { heldNotice, rewriteResponse, streamGate } from "./enforce.js";
 import { firstSightings, toolResultSignals, toolResultTexts, type Signal } from "./injection.js";
 import { createInjectionJudge, createVerdictMemory, judgeToolTexts, type ProxyJudgeOptions } from "./injectionJudge.js";
 import { quinelingCalls, quinelingResults, type QuinelingEvent } from "./quinelings.js";
-import { extract, type Api } from "./extract.js";
+import { extract, type Api, type Out } from "./extract.js";
 import { conversationItems, loadOrCreateSessionKey, SessionIndex } from "./session.js";
 import { composeContext, contextBlocks, promptTokens, scaleToProvider } from "./context.js";
 import { Counter, Gauge, Histogram, OPENMETRICS_CONTENT_TYPE, exposition } from "./metrics.js";
@@ -290,11 +291,19 @@ export function createProxy(o: ProxyOpts) {
       clearTimeout(timer); forwarded = true;
       metrics.upstreamResponses.inc({ provider: context.provider, class: `${Math.floor(up.status / 100)}xx` });
       const sse = (up.headers.get("content-type") ?? "").includes("text/event-stream");
-      const captured = await pipe(up, res);
-      const out = route === "count" ? undefined : extract(route, captured, sse);
-      const allowedTools = vkey && keyTools.get(vkey);
-      const gated = (actionGate || allowedTools) && out && up.status >= 200 && up.status < 400
-        ? checkActions(actionGate, allowedTools, out.toolCalls, () => requestTexts(route as Api, body), profile.carnet) : [];
+      const allowedTools = vkey && keyTools.get(vkey), succeeded = up.status >= 200 && up.status < 400;
+      let verdict: { out?: Out; gated: CallResult[]; notice?: string } = { gated: [] };
+      const judge = (text: string) => {
+        const out = route === "count" ? undefined : extract(route, text, sse);
+        const gated = (actionGate || allowedTools) && out && succeeded ? checkActions(actionGate, allowedTools, out.toolCalls, () => requestTexts(route as Api, body), profile.carnet) : [];
+        const held = gated.filter((call) => call.result === "hold");
+        verdict = { out, gated, notice: held.some((call) => call.mode === "enforce") ? heldNotice(held.map((call) => call.tool)) : undefined };
+        return verdict.notice;
+      };
+      const enforcing = route !== "count" && succeeded && enforces(actionGate, allowedTools);
+      const captured = enforcing ? await pipeGated(up, res, route as Api, sse, `msg_audit_${rid.replaceAll("-", "")}`, judge) : await pipe(up, res);
+      if (!enforcing) judge(captured);
+      const { out, gated, notice } = verdict;
       gated.forEach((call) => metrics.actionGate.inc({ mode: call.mode, result: call.result }));
       let tokenBudget: Record<string, unknown> | undefined;
       if (reservation) {
@@ -311,7 +320,7 @@ export function createProxy(o: ProxyOpts) {
         if (out.usage?.output == null) metrics.unknownUsage.inc({ provider: context.provider, field: "output" });
       }
       const full = vkey?.logContent === true;
-      write({ ...(tokenBudget && { tokenBudget }), ...(gated.length && { actionGate: { calls: gated } }), ...(composition && { context: scaleToProvider(composition, up.status < 400 ? promptTokens(route as Api, out?.usage) : undefined) }), upstreamStatus: up.status, clientAborted: !res.writableFinished || undefined, responseModel: out?.model, usage: out?.usage, stop: out?.stop,
+      write({ ...(tokenBudget && { tokenBudget }), ...(gated.length && { actionGate: { calls: gated, ...(notice && { rewritten: true }) } }), ...(composition && { context: scaleToProvider(composition, up.status < 400 ? promptTokens(route as Api, out?.usage) : undefined) }), upstreamStatus: up.status, clientAborted: !res.writableFinished || undefined, responseModel: out?.model, usage: out?.usage, stop: out?.stop,
         ...(out && { content: full ? "redacted" : "hash", outputHash: sha256(out.text), ...(full && { output: red(out.text) }),
           toolCalls: out.toolCalls.map((t) => ({ name: t.name, argsHash: sha256(t.args), ...(full && { args: red(t.args) }) })) }),
         ...observe([...traced, ...(out ? quinelingCalls(out.toolCalls) : [])]) });
@@ -330,9 +339,27 @@ export function createProxy(o: ProxyOpts) {
 const str = (v: unknown) => (typeof v === "string" ? v.slice(0, 128) : undefined);
 const contentFreeReason = (e: unknown) => e instanceof AuditLogUnavailable ? e.message : typeof (e as NodeJS.ErrnoException)?.code === "string" ? (e as NodeJS.ErrnoException).code! : e instanceof Error ? e.name : "unknown";
 
-async function pipe(up: Response, res: http.ServerResponse): Promise<string> {
+function responseHeaders(up: Response) {
   const h: Record<string, string> = {}; up.headers.forEach((v, k) => { if (!RESP_DROP.has(k)) h[k === "x-request-id" ? "x-upstream-request-id" : k] = v; });
-  res.writeHead(up.status, h); res.flushHeaders();
+  return h;
+}
+
+async function pipeGated(up: Response, res: http.ServerResponse, api: Api, sse: boolean, messageId: string, decide: (text: string) => string | undefined): Promise<string> {
+  const gate = sse ? streamGate(api, messageId) : undefined, dec = new TextDecoder(); let all = "";
+  const forward = (text: string) => { all += text; const now = gate?.push(text); if (now) res.write(now); };
+  if (gate) { res.writeHead(up.status, responseHeaders(up)); res.flushHeaders(); }
+  try { if (up.body) for await (const c of up.body as any) forward(dec.decode(c, { stream: true })); } catch { }
+  forward(dec.decode());
+  const notice = decide(all);
+  if (gate) { let tail = ""; try { tail = gate.finish(notice); } catch { } res.end(tail); return all; }
+  let body: string;
+  try { body = notice ? rewriteResponse(api, all, notice, messageId) : all; }
+  catch { res.writeHead(502, { "content-type": "application/json" }); res.end(JSON.stringify({ type: "error", error: { type: "audit_proxy_error", code: "audit_action_rewrite_failed", message: "audit_action_rewrite_failed" } })); return all; }
+  res.writeHead(up.status, responseHeaders(up)); res.end(body); return all;
+}
+
+async function pipe(up: Response, res: http.ServerResponse): Promise<string> {
+  res.writeHead(up.status, responseHeaders(up)); res.flushHeaders();
   const dec = new TextDecoder(); let all = "";
   try { if (up.body) for await (const c of up.body as any) { res.write(c); all += dec.decode(c, { stream: true }); } } catch { }
   res.end(); return all + dec.decode();
