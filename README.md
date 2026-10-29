@@ -799,7 +799,7 @@ ai-audit effect --decision "$DECISION_ID" --action send-quote-to-customer --stat
 
 `npm run example:evaluate` checks a QDL machining quote policy on labeled cases. `npm run example:evaluate:openai -- --output /private/tmp/quote-evaluation.json` also evaluates the same facts with OpenAI Decisions, recording misses, false alerts, repeat changes, latency and usage. The evaluator runs offline from proxy traffic; see [the evaluation guide](examples/evaluation/README.md).
 
-`npm run example:wycena -- --console` prices five toolroom parts with a 64-node QDL rule and fixed company rates, then opens the operator console so each quote waits for a review. See [the toolroom quote rule](examples/quineling-wycena/README.md).
+`npm run example:wycena -- --console` prices five toolroom parts with a 64-node QDL rule and fixed company rates, then opens the operator console so each quote waits for a review. See [the toolroom quote rule](examples/quineling-wycena/README.md). [examples/live-mail](examples/live-mail/README.md) runs the same rule on four synthetic customer mails with the real proxy, a real model, the console in a browser and the CLI, each as its own process.
 
 ## Configuration
 

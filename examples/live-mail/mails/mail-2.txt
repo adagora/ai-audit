@@ -1,0 +1,17 @@
+Temat: RFQ – korpus przekładni KP-202, aluminium 7075
+
+Dzień dobry,
+
+w załączniku rysunek KP-202 rev. C oraz model 3D korpusu przekładni.
+Ilość: 8 szt.
+Materiał: EN AW-7075 T651 (na rysunku), blok 230 × 170 × 130 mm.
+Detal wymaga obróbki pięcioosiowej: kieszeń wewnętrzna 180 × 120 × 90 mm, dwa gniazda łożysk Ø62 H7 współosiowe w tolerancji 0,01 mm,
+16 otworów gwintowanych M8 na trzech ścianach pod kątem, płaskość powierzchni montażowej 0,02 mm.
+Anodowanie twarde po naszej stronie, do Państwa tylko obróbka. Kontrola wymiarowa na CMM z protokołem dla każdej sztuki.
+Szacujemy około 6 godzin na DMU 50 na sztukę.
+
+Z poważaniem
+Piotr Próbny
+Kierownik projektu, Testowe Napędy S.A.
+piotr.probny@testowe-napedy.example
+tel. +48 600 333 444
