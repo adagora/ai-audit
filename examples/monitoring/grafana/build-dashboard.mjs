@@ -72,12 +72,16 @@ heading("Session linking and attachment cache", 44, "Session detail stays in the
 stat("Session index rebuild failures", 0, 46, 12, "sum(ai_audit_session_index_rebuild_failures_total)", "short", "Failures since the current proxy process started. A positive value can leave session links incomplete after restart.", badWhenPositive);
 stat("Attachment cache hit share", 12, 46, 12, "sum(ai_audit_attachment_cache_hits) / clamp_min(sum(ai_audit_attachment_cache_hits) + sum(ai_audit_attachment_cache_misses), 1)", "percentunit", "Cache hits divided by hits plus misses since the current proxy process started. No inspections yet displays as zero.");
 
-heading("Investigate, report, share", 50, "Grafana holds bounded aggregate metrics. The hash-chained local log holds session links, context sizes, decision records, and evidence. Keep those records out of metric labels.");
+heading("Tool-call gate and refusals", 50, "Gate results count proposed tool calls by mode and result; in enforce mode a held call never reaches the client. Refusals happen before inspection and are separate content-free audit records.");
+chart("Tool calls by gate result", 0, 52, 12, [target('sum by (mode, result) (increase(ai_audit_action_gate_total{result!=""}[5m]))', "{{mode}} · {{result}}")], "short", "Rolling five-minute count of proposed calls to gated tools or to tools outside a key's list (ADR 0046, 0048).");
+chart("Refusals before inspection", 12, 52, 12, [target('sum by (status) (increase(ai_audit_requests_total{decision="none",status=~"4..",route=~"/v1/.*|other"}[5m]))', "{{status}}"), target("sum(increase(ai_audit_refusals_suppressed_total[5m]))", "over record limit", "B")], "short", "401, 403, 404, 413 and 400 before inspection, and refusals counted only in the per-minute summary record (ADR 0047).");
+
+heading("Investigate, report, share", 60, "Grafana holds bounded aggregate metrics. The hash-chained local log holds session links, context sizes, decision records, and evidence. Keep those records out of metric labels.");
 panels.push({
   id: ++id,
   type: "text",
   title: "From a signal to an evidence package",
-  gridPos: { x: 0, y: 52, w: 24, h: 9 },
+  gridPos: { x: 0, y: 62, w: 24, h: 9 },
   options: {
     mode: "markdown",
     content: [
@@ -100,7 +104,7 @@ writeFileSync(new URL("./dashboards/ai-audit.json", import.meta.url), `${JSON.st
   uid: "ai-audit",
   title: "ai-audit | operations and evidence",
   schemaVersion: 39,
-  version: 5,
+  version: 6,
   refresh: "30s",
   time: { from: "now-15m", to: "now" },
   tags: ["ai-audit", "proxy", "evidence"],

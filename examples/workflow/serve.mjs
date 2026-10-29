@@ -39,6 +39,9 @@ const modes = ["redact", "no-go", "advisory"];
 const logs = Object.fromEntries(modes.map((mode) => [mode, new AuditLog(join(directory, `${mode}.jsonl`))]));
 const upstreamSeen = [];
 const syntheticKey = "AKIAIOSFODNN7EXAMPLQ";
+const WATCH = process.env.WORKFLOW_WATCH_METRICS, WEBHOOK = process.env.WORKFLOW_ALERT_WEBHOOK;
+if (WATCH !== undefined && !/^https?:\/\/[^\s/]+\/metrics$/.test(WATCH)) throw new Error("WORKFLOW_WATCH_METRICS must be an http(s) URL ending in /metrics");
+if (WEBHOOK !== undefined && !/^https?:\/\/\S+$/.test(WEBHOOK)) throw new Error("WORKFLOW_ALERT_WEBHOOK must be an http(s) URL");
 const quotePolicy = JSON.parse(readFileSync(new URL("../quineling-quote/policy.json", import.meta.url), "utf8"));
 const quoteInputs = JSON.parse(readFileSync(new URL("../quineling-quote/inputs.json", import.meta.url), "utf8"));
 const decisions = new Map();
@@ -246,6 +249,11 @@ const scenarios = {
     }
     return { ...last, statuses };
   },
+  alerting: async () => {
+    const gate = await scenarios.gateEnforce();
+    await evaluateAlerts("synthetic");
+    return { mode: "synthetic", status: gate.status, alert: alertView("synthetic").rules.find((rule) => rule.id === "tool-call-held"), recentEvents: alertHistory.slice(0, 5) };
+  },
   checkQuotes: async () => {
     const quotes = checkQuotes("Please send an offer for 10 pieces of product A-200, premium version.", {
       quantity: { value: 1, quote: "10 pieces" }, product: { value: "A-200", quote: "product A-200" }, material: { value: "steel", quote: null } });
@@ -302,6 +310,7 @@ const CHECKS = {
   quineling: ["Quinelings result observed", (r) => r.status === 200 && r.record?.quinelings?.length > 0],
   qdl: ["QDL completed and receipt verifies", (r) => r.qdl?.status === "completed" && r.portableVerification?.reproduced === true],
   signed: ["signature verifies", (r) => r.verification?.reproduced === true && r.verification?.approval === "signed-review-record"],
+  alerting: ["held call fires the tool-call alert", (r) => r.status === 200 && r.alert?.firing === true],
   checkQuotes: ["wrong value and missing quote found", (r) => r.quotes?.ok === false && r.quotes.issues.length === 2],
   scrub: ["key removed from the export copy", (r) => r.keyRemoved === true && r.receipt?.changed > 0],
   telemetry: ["health ok, metrics served", (r) => r.health === "ok" && r.metrics?.length > 0],
@@ -346,10 +355,77 @@ const parseMetrics = (text) => text.split("\n").flatMap((line) => {
   return m ? [{ name: m[1], labels: Object.fromEntries([...(m[2] ?? "").matchAll(/(\w+)="([^"]*)"/g)].map((x) => [x[1], x[2]])), value: Number(m[3]) }] : [];
 });
 const tally = (items) => items.reduce((acc, key) => ({ ...acc, [key]: (acc[key] ?? 0) + 1 }), {});
-const dashboard = async () => {
-  const samples = parseMetrics(exposition(Object.values(metrics)));
+const summarize = (samples) => {
   const sum = (name, where = () => true) => samples.filter((s) => s.name === name && where(s.labels)).reduce((a, s) => a + s.value, 0);
   const by = (name, key) => samples.filter((s) => s.name === name).reduce((acc, s) => ({ ...acc, [s.labels[key]]: (acc[s.labels[key]] ?? 0) + s.value }), {});
+  return {
+    requests: samples.filter((s) => s.name === "ai_audit_requests_total").map((s) => ({ decision: s.labels.decision, status: s.labels.status, route: s.labels.route, value: s.value })),
+    latency: samples.filter((s) => s.name === "ai_audit_request_duration_seconds_bucket").map((s) => ({ le: s.labels.le, value: s.value })),
+    latencyCount: sum("ai_audit_request_duration_seconds_count"), injectionSignals: by("ai_audit_injection_signals_total", "rule"),
+    actionGate: samples.filter((s) => s.name === "ai_audit_action_gate_total").map((s) => ({ ...s.labels, value: s.value })),
+    refusalsSuppressed: sum("ai_audit_refusals_suppressed_total"), logWriteFailures: sum("ai_audit_log_write_failures_total"), logUnavailable: sum("ai_audit_log_unavailable_total"),
+    upstream: by("ai_audit_upstream_responses_total", "class"), upstreamErrors: sum("ai_audit_upstream_errors_total"), unknownUsage: sum("ai_audit_unknown_usage_total"),
+    attachments: sum("ai_audit_attachments_inspected_total"), quinelings: sum("ai_audit_quineling_events_total"), budgetFailures: sum("ai_audit_budget_failures_total"),
+  };
+};
+const readCounters = async (source) => summarize(parseMetrics(source === "real"
+  ? await fetch(WATCH, { signal: AbortSignal.timeout(3000) }).then((r) => { if (!r.ok) throw new Error(`metrics ${r.status}`); return r.text(); })
+  : exposition(Object.values(metrics))));
+const brokenChains = () => modes.filter((mode) => !logs[mode].verifyChain().ok).length;
+const alertInputs = (c) => ({
+  logIntegrity: c.logWriteFailures + c.logUnavailable, held: c.actionGate.filter((g) => g.result === "hold").reduce((a, g) => a + g.value, 0),
+  signals: Object.values(c.injectionSignals).reduce((a, v) => a + v, 0), budgetFailures: c.budgetFailures, unknownUsage: c.unknownUsage,
+  refusals: c.requests.filter((r) => r.decision === "none" && (r.status === "401" || r.status === "403")).reduce((a, r) => a + r.value, 0) + c.refusalsSuppressed,
+  upstreamFailures: (c.upstream["5xx"] ?? 0) + c.upstreamErrors,
+});
+const ALERT_RULES = [
+  { id: "metrics-down", title: "Proxy metrics unavailable", severity: "critical", window: 0, threshold: 0, sources: ["real"], help: "The watched proxy did not answer /metrics." },
+  { id: "chain-broken", title: "Audit chain broken", severity: "critical", window: 0, threshold: 0, sources: ["synthetic"], help: "verify failed on a synthetic log." },
+  { id: "log-integrity", title: "Audit log cannot take records", severity: "critical", window: 300, threshold: 0, input: "logIntegrity", help: "Requests refused with 503, or records lost after delivery. The torn-log check triggers this on purpose." },
+  { id: "tool-call-held", title: "Tool call held by the gate", severity: "warning", window: 300, threshold: 0, input: "held", help: "A proposed tool call had an untrusted destination, a secret, or a tool outside the key list." },
+  { id: "injection-spike", title: "Prompt-injection signal spike", severity: "warning", window: 600, threshold: 5, input: "signals", help: "More than 5 advisory signals in 10 minutes." },
+  { id: "refusal-spike", title: "Refusal spike (401 or 403)", severity: "warning", window: 300, threshold: 10, input: "refusals", help: "More than 10 refused keys or models in 5 minutes." },
+  { id: "upstream-failures", title: "Upstream failures", severity: "warning", window: 300, threshold: 2, input: "upstreamFailures", help: "More than 2 upstream 5xx responses or unreachable calls in 5 minutes." },
+  { id: "budget-failures", title: "Budget accounting failed", severity: "warning", window: 300, threshold: 0, input: "budgetFailures", help: "Budget counting or settlement failed and generation was refused." },
+  { id: "unknown-usage", title: "Calls without token usage", severity: "warning", window: 900, threshold: 0, input: "unknownUsage", help: "Token totals are a lower bound." },
+];
+const sources = ["synthetic", ...(WATCH ? ["real"] : [])];
+const alertState = Object.fromEntries(sources.map((source) => [source, { samples: [], rules: {} }]));
+const alertHistory = [];
+let notifyFailures = 0;
+const increase = (samples, key, window) => {
+  const last = samples.at(-1), first = samples.find((s) => s.t >= last.t - window * 1000) ?? samples[0];
+  return last.values[key] >= first.values[key] ? last.values[key] - first.values[key] : last.values[key];
+};
+const evaluateAlerts = async (source) => {
+  const state = alertState[source], now = Date.now();
+  let reachable = true;
+  try { state.samples.push({ t: now, values: alertInputs(await readCounters(source)) }); } catch { reachable = false; }
+  while (state.samples.length && state.samples[0].t < now - 1_800_000) state.samples.shift();
+  for (const rule of ALERT_RULES) {
+    if (rule.sources && !rule.sources.includes(source)) continue;
+    const value = rule.id === "metrics-down" ? (reachable ? 0 : 1) : rule.id === "chain-broken" ? brokenChains() : state.samples.length ? increase(state.samples, rule.input, rule.window) : 0;
+    const firing = value > rule.threshold, previous = state.rules[rule.id];
+    state.rules[rule.id] = { value, firing, since: previous && previous.firing === firing ? previous.since : new Date(now).toISOString() };
+    if (previous ? previous.firing !== firing : firing) {
+      const event = { at: new Date(now).toISOString(), source, rule: rule.id, title: rule.title, severity: rule.severity, state: firing ? "firing" : "resolved", value, threshold: rule.threshold, window: rule.window };
+      alertHistory.unshift(event); alertHistory.length = Math.min(alertHistory.length, 200);
+      if (WEBHOOK) fetch(WEBHOOK, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(event), signal: AbortSignal.timeout(3000) }).catch(() => { notifyFailures++; });
+    }
+  }
+};
+const alertView = (source) => ({
+  rules: ALERT_RULES.filter((rule) => !rule.sources || rule.sources.includes(source)).map((rule) => ({ id: rule.id, title: rule.title, severity: rule.severity, window: rule.window, threshold: rule.threshold, help: rule.help,
+    ...(alertState[source].rules[rule.id] ?? { value: null, firing: false, since: null }) })),
+  history: alertHistory.filter((event) => event.source === source).slice(0, 30), webhook: !!WEBHOOK, notifyFailures,
+});
+const dashboard = async (source) => {
+  if (source === "real") {
+    let counters = null, error = null;
+    try { counters = await readCounters("real"); } catch (e) { error = e.message; }
+    return { at: new Date().toISOString(), source, sources, watch: WATCH, counters, error, logs: null, recent: [], results, suite, scenarios: Object.keys(scenarios), checks: {}, alerts: alertView(source) };
+  }
+  const samples = parseMetrics(exposition(Object.values(metrics)));
   const records = modes.flatMap((mode) => logs[mode].read().map((record) => ({ mode, record })));
   const calls = records.filter(({ record }) => record.kind === "llm-call").map(({ record }) => record);
   const refusals = records.filter(({ record }) => record.kind === "refusal").map(({ record }) => record);
@@ -361,16 +437,8 @@ const dashboard = async () => {
     gate: r.actionGate ? `${r.actionGate.rewritten ? "rewritten" : r.actionGate.calls.some((c) => c.result === "hold") ? "held" : "pass"} (${r.actionGate.calls[0].mode})` : null,
     latencyMs: r.latencyMs ?? null, turn: r.session?.turn ?? null, detail: { ...r, prevHash: undefined, hash: undefined } }));
   return {
-    at: new Date().toISOString(),
-    counters: {
-      requests: samples.filter((s) => s.name === "ai_audit_requests_total").map((s) => ({ decision: s.labels.decision, status: s.labels.status, route: s.labels.route, value: s.value })),
-      latency: samples.filter((s) => s.name === "ai_audit_request_duration_seconds_bucket").map((s) => ({ le: s.labels.le, value: s.value })),
-      latencyCount: sum("ai_audit_request_duration_seconds_count"), injectionSignals: by("ai_audit_injection_signals_total", "rule"),
-      actionGate: samples.filter((s) => s.name === "ai_audit_action_gate_total").map((s) => ({ ...s.labels, value: s.value })),
-      refusalsSuppressed: sum("ai_audit_refusals_suppressed_total"), logWriteFailures: sum("ai_audit_log_write_failures_total"), logUnavailable: sum("ai_audit_log_unavailable_total"),
-      upstream: by("ai_audit_upstream_responses_total", "class"), upstreamErrors: sum("ai_audit_upstream_errors_total"), unknownUsage: sum("ai_audit_unknown_usage_total"),
-      attachments: sum("ai_audit_attachments_inspected_total"), quinelings: sum("ai_audit_quineling_events_total"), budgetFailures: sum("ai_audit_budget_failures_total"),
-    },
+    at: new Date().toISOString(), source, sources, watch: WATCH ?? null,
+    counters: summarize(samples),
     logs: {
       chains: Object.fromEntries(modes.map((mode) => [mode, logs[mode].verifyChain().ok])),
       kinds: tally(records.map(({ record }) => record.kind)),
@@ -383,7 +451,7 @@ const dashboard = async () => {
       sessions: new Set(calls.map((call) => call.session?.id).filter(Boolean)).size,
       decisions: records.filter(({ record }) => record.kind === "decision" && !record.qdl).length, reviews: records.filter(({ record }) => record.kind === "review").length,
     },
-    recent, results, suite, scenarios: Object.keys(scenarios), checks: Object.fromEntries(Object.entries(CHECKS).map(([name, [expected]]) => [name, expected])),
+    recent, results, suite, scenarios: Object.keys(scenarios), checks: Object.fromEntries(Object.entries(CHECKS).map(([name, [expected]]) => [name, expected])), alerts: alertView(source),
   };
 };
 
@@ -407,7 +475,11 @@ const cockpit = http.createServer(async (req, res) => {
     if (req.method === "GET" && req.url === "/console") { res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }); return res.end(page); }
     if (req.method === "GET" && req.url === "/dashboard.css") { res.writeHead(200, { "content-type": "text/css; charset=utf-8", "cache-control": "no-store" }); return res.end(dashboardStyles); }
     if (req.method === "GET" && req.url === "/dashboard.js") { res.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" }); return res.end(dashboardScript); }
-    if (req.method === "GET" && req.url === "/api/dashboard") return json(res, 200, await dashboard());
+    if (req.method === "GET" && /^\/api\/dashboard(?:\?source=(?:synthetic|real))?$/.test(req.url ?? "")) {
+      const source = req.url.endsWith("=real") ? "real" : "synthetic";
+      if (!sources.includes(source)) return json(res, 404, { error: "set WORKFLOW_WATCH_METRICS to watch a real proxy" });
+      return json(res, 200, await dashboard(source));
+    }
     if (req.method === "POST" && req.url === "/api/run-all") {
       if (activeRun || suite.state === "running") return json(res, 409, { error: "another scenario is running" });
       const names = Object.keys(scenarios);
@@ -481,5 +553,7 @@ const cockpit = http.createServer(async (req, res) => {
 const port = Number(process.env.WORKFLOW_PORT ?? 8790);
 if (!Number.isSafeInteger(port) || port < 0 || port > 65535) throw new Error("invalid WORKFLOW_PORT");
 await listen(cockpit, port);
-process.stdout.write(`Workflow cockpit: ${address(cockpit)}\nSynthetic evidence: ${directory}\n`);
+for (const source of sources) await evaluateAlerts(source);
+setInterval(() => { for (const source of sources) evaluateAlerts(source).catch(() => {}); }, 5000).unref();
+process.stdout.write(`Workflow cockpit: ${address(cockpit)}\nSynthetic evidence: ${directory}\n${WATCH ? `Watching real proxy counters: ${WATCH}\n` : ""}${WEBHOOK ? "Alert webhook: on\n" : ""}`);
 process.on("SIGINT", () => { cockpit.close(); upstream.close(); Object.values(proxies).forEach((proxy) => proxy.close()); });

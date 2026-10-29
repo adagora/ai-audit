@@ -2,7 +2,7 @@
   "uid": "ai-audit",
   "title": "ai-audit | operations and evidence",
   "schemaVersion": 39,
-  "version": 5,
+  "version": 6,
   "refresh": "30s",
   "time": {
     "from": "now-15m",
@@ -849,10 +849,102 @@
     {
       "id": 23,
       "type": "text",
-      "title": "Investigate, report, share",
+      "title": "Tool-call gate and refusals",
       "gridPos": {
         "x": 0,
         "y": 50,
+        "w": 24,
+        "h": 2
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "Gate results count proposed tool calls by mode and result; in enforce mode a held call never reaches the client. Refusals happen before inspection and are separate content-free audit records."
+      }
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "Tool calls by gate result",
+      "description": "Rolling five-minute count of proposed calls to gated tools or to tools outside a key's list (ADR 0046, 0048).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "victoriametrics"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 52,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "victoriametrics"
+          },
+          "expr": "sum by (mode, result) (increase(ai_audit_action_gate_total{result!=\"\"}[5m]))",
+          "legendFormat": "{{mode}} · {{result}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "Refusals before inspection",
+      "description": "401, 403, 404, 413 and 400 before inspection, and refusals counted only in the per-minute summary record (ADR 0047).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "victoriametrics"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 52,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "victoriametrics"
+          },
+          "expr": "sum by (status) (increase(ai_audit_requests_total{decision=\"none\",status=~\"4..\",route=~\"/v1/.*|other\"}[5m]))",
+          "legendFormat": "{{status}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "victoriametrics"
+          },
+          "expr": "sum(increase(ai_audit_refusals_suppressed_total[5m]))",
+          "legendFormat": "over record limit"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 26,
+      "type": "text",
+      "title": "Investigate, report, share",
+      "gridPos": {
+        "x": 0,
+        "y": 60,
         "w": 24,
         "h": 2
       },
@@ -862,12 +954,12 @@
       }
     },
     {
-      "id": 24,
+      "id": 27,
       "type": "text",
       "title": "From a signal to an evidence package",
       "gridPos": {
         "x": 0,
-        "y": 52,
+        "y": 62,
         "w": 24,
         "h": 9
       },

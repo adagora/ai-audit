@@ -14,6 +14,7 @@ const GROUPS = [
   ["Tool-call gate", [["gateObserve", "Observe: untrusted URL"], ["gateEnforce", "Enforce: untrusted email"], ["gatePass", "Address typed by the user"], ["keyTools", "Tool outside the key list"]]],
   ["Budgets", [["budget", "Token budget exhausted"]]],
   ["APIs and sessions", [["responses", "Responses stream"], ["anthropic", "Anthropic stream"], ["session", "Linked session"]]],
+  ["Alerting", [["alerting", "Held call fires an alert"]]],
   ["Evidence and integrity", [["integrity", "Chain and anchor"], ["failClosed", "Torn log fails closed"], ["telemetry", "Health and metrics"], ["scrub", "Scrub an export"], ["checkQuotes", "Check quoted values"]]],
   ["Decisions (QDL)", [["quineling", "Observe Quinelings"], ["qdl", "Run QDL and receipt"], ["signed", "Signed review"]]],
 ];
@@ -24,7 +25,8 @@ const OUTCOMES = [
   ["Blocked or rejected", (d) => ["block", "reject", "budget-reject", "log-unavailable"].includes(d)],
   ["Refused before inspection", (d, s) => d === "none" && Number(s) >= 400],
 ];
-const state = { snapshots: [], data: null, timer: null, built: false, running: new Set(), hover: new Map() };
+const state = { snapshots: [], data: null, timer: null, built: false, running: new Set(), hover: new Map(), source: "synthetic", seenEvents: null };
+const ADR_NOTE = "Not read from the real audit log (ADR 0040)";
 
 function outcomeTotals(counters) {
   const totals = OUTCOMES.map(() => 0);
@@ -212,26 +214,27 @@ function bars(host, entries) {
 }
 
 function renderStats(data) {
-  const { snaps } = windowed(), c = data.counters, o = outcomeTotals(c), logs = data.logs;
+  const { snaps } = windowed(), c = data.counters, o = outcomeTotals(c), logs = data.logs ?? { real: true };
   const spark = (pick) => rates(snaps, (counters) => [pick(counters)]).map(([t, [v]]) => [t, v]);
-  const chains = Object.entries(logs.chains), broken = chains.filter(([, ok]) => !ok).map(([mode]) => mode);
+  const chains = Object.entries(logs.chains ?? {}), broken = chains.filter(([, ok]) => !ok).map(([mode]) => mode);
   const host = $("stats"); host.replaceChildren();
   stat(host, { label: "API requests", value: o.api, sub: "Since the proxies started", spark: spark((k) => outcomeTotals(k).api) });
   stat(host, { label: "Forwarded", value: o.totals[0] + o.totals[1], sub: `${fmt(o.totals[1])} after redaction`, spark: spark((k) => { const t = outcomeTotals(k).totals; return t[0] + t[1]; }) });
   stat(host, { label: "Blocked or rejected", value: o.totals[2], sub: "409, 422, 429 and 503 decisions", spark: spark((k) => outcomeTotals(k).totals[2]) });
   stat(host, { label: "Refused before inspection", value: o.totals[3], sub: `${fmt(c.refusalsSuppressed)} over the per-minute record limit`, spark: spark((k) => outcomeTotals(k).totals[3]) });
   stat(host, { label: "Tool calls held", value: held(c), sub: "Observe and enforce", spark: spark(held) });
-  stat(host, { label: "Responses rewritten", value: logs.rewritten, sub: "Enforce mode, from the log" });
+  stat(host, { label: "Responses rewritten", value: logs.real ? null : logs.rewritten, sub: logs.real ? ADR_NOTE : "Enforce mode, from the log" });
   stat(host, { label: "Injection signals", value: signals(c), sub: "Advisory, first sightings", spark: spark(signals) });
-  stat(host, { label: "Audit chain", sub: chains.map(([mode, ok]) => `${mode} ${ok ? "ok" : "broken"}`).join(" · "),
+  if (logs.real) stat(host, { label: "Audit chain", value: null, sub: "Run ai-audit verify on the real log" });
+  else stat(host, { label: "Audit chain", sub: chains.map(([mode, ok]) => `${mode} ${ok ? "ok" : "broken"}`).join(" · "),
     status: broken.length ? { tone: "critical", text: `Broken: ${broken.join(", ")}` } : { tone: "good", text: "Intact" } });
   const usage = $("stats-usage"); usage.replaceChildren();
-  stat(usage, { label: "Input tokens", value: logs.tokens.input, sub: "Provider-reported" });
-  stat(usage, { label: "Output tokens", value: logs.tokens.output, sub: "Provider-reported" });
+  stat(usage, { label: "Input tokens", value: logs.real ? null : logs.tokens.input, sub: logs.real ? ADR_NOTE : "Provider-reported" });
+  stat(usage, { label: "Output tokens", value: logs.real ? null : logs.tokens.output, sub: logs.real ? ADR_NOTE : "Provider-reported" });
   stat(usage, { label: "Unknown usage", value: c.unknownUsage, sub: "Calls without usage, never counted as zero" });
-  stat(usage, { label: "Linked sessions", value: logs.sessions, sub: "Keyed prefix digests" });
+  stat(usage, { label: "Linked sessions", value: logs.real ? null : logs.sessions, sub: logs.real ? ADR_NOTE : "Keyed prefix digests" });
   stat(usage, { label: "Upstream 5xx", value: c.upstream["5xx"] ?? 0, sub: `${fmt(c.upstream["2xx"] ?? 0)} 2xx · ${fmt(c.upstreamErrors)} unreachable or timed out` });
-  stat(usage, { label: "QDL decisions", value: logs.decisions, sub: `${fmt(logs.reviews)} reviews recorded` });
+  stat(usage, { label: "QDL decisions", value: logs.real ? null : logs.decisions, sub: logs.real ? ADR_NOTE : `${fmt(logs.reviews)} reviews recorded` });
   stat(usage, { label: "Log write failures", sub: `${fmt(c.logUnavailable)} refused because the log was unavailable`,
     status: c.logWriteFailures ? { tone: "warning", text: `${fmt(c.logWriteFailures)} lost` } : { tone: "good", text: "None" } });
   stat(usage, { label: "Attachments inspected", value: c.attachments, sub: `${fmt(c.quinelings)} Quinelings events seen` });
@@ -246,11 +249,52 @@ function renderCharts() {
   $("rate-note").textContent = snaps.length < 2 ? "Collecting samples" : `${snaps.length} samples in range`;
 }
 
+function unavailable(host, text) { host.replaceChildren(el("div", "na", text)); }
+
 function renderBars(data) {
-  bars($("bars-findings"), data.logs.findings);
   bars($("bars-signals"), data.counters.injectionSignals);
-  bars($("bars-gate"), data.logs.gate);
-  bars($("bars-refusals"), data.logs.refusals);
+  if (data.logs) {
+    bars($("bars-findings"), data.logs.findings); bars($("bars-gate"), data.logs.gate); bars($("bars-refusals"), data.logs.refusals);
+    return;
+  }
+  unavailable($("bars-findings"), `Scan findings are in the audit log only. ${ADR_NOTE}.`);
+  bars($("bars-gate"), Object.fromEntries(data.counters.actionGate.map((g) => [`${g.mode} ${g.result}`, g.value])));
+  const refused = {};
+  for (const r of data.counters.requests) if (r.decision === "none" && Number(r.status) >= 400 && API_ROUTE(r.route)) refused[`HTTP ${r.status}`] = (refused[`HTTP ${r.status}`] ?? 0) + r.value;
+  if (data.counters.refusalsSuppressed) refused["over record limit"] = data.counters.refusalsSuppressed;
+  bars($("bars-refusals"), refused);
+}
+
+const ago = (iso) => { if (!iso) return "—"; const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000)); return s < 60 ? `${s}s` : s < 3600 ? `${Math.round(s / 60)} min` : `${Math.round(s / 3600)} h`; };
+const windowText = (seconds) => seconds ? (seconds % 60 ? `${seconds}s` : `${seconds / 60} min`) : "now";
+
+function renderAlerts(alerts) {
+  const rows = $("alert-rows"); rows.replaceChildren();
+  const firing = alerts.rules.filter((rule) => rule.firing), critical = firing.some((rule) => rule.severity === "critical");
+  for (const rule of [...alerts.rules].sort((a, b) => Number(b.firing) - Number(a.firing))) {
+    const row = el("tr"), stateCell = el("td"), ruleCell = el("td", "rule");
+    stateCell.append(el("span", `state ${rule.firing ? rule.severity : "ok"}`, rule.firing ? "Firing" : "OK"));
+    ruleCell.append(el("strong", "", rule.title), el("small", "", rule.help));
+    row.append(stateCell, ruleCell, el("td", "sev", rule.severity), el("td", "", rule.value === null ? "—" : fmt(rule.value)),
+      el("td", "", rule.window ? `> ${rule.threshold} in ${windowText(rule.window)}` : `> ${rule.threshold}`), el("td", "", rule.since ? ago(rule.since) : "—"));
+    rows.append(row);
+  }
+  const badge = $("alert-badge");
+  badge.className = `alert-badge ${critical ? "critical" : firing.length ? "warning" : "ok"}`;
+  badge.textContent = firing.length ? `${firing.length} firing` : "No alerts";
+  $("alert-note").textContent = `Evaluated by the server every 5 s${alerts.webhook ? " · webhook on" : ""}${alerts.notifyFailures ? ` · ${alerts.notifyFailures} webhook failures` : ""}`;
+  const list = $("alert-events"); list.replaceChildren();
+  if (!alerts.history.length) list.append(el("li", "empty", "No alert events yet."));
+  for (const event of alerts.history) {
+    const item = el("li");
+    item.append(el("time", "", clock(event.at)), el("span", `state ${event.state === "firing" ? event.severity : "ok"}`, event.state === "firing" ? "Firing" : "Resolved"), el("span", "", `${event.title} (${fmt(event.value)})`));
+    list.append(item);
+  }
+  const ids = alerts.history.map((event) => `${event.at}|${event.rule}|${event.state}`);
+  if (state.seenEvents && "Notification" in window && Notification.permission === "granted")
+    for (const [i, id] of ids.entries()) if (!state.seenEvents.has(id) && alerts.history[i].state === "firing")
+      new Notification(`ai-audit: ${alerts.history[i].title}`, { body: `${alerts.history[i].severity} · value ${alerts.history[i].value}`, tag: alerts.history[i].rule });
+  state.seenEvents = new Set(ids);
 }
 
 function openDrawer(title, value) {
@@ -341,7 +385,15 @@ function renderLog(data) {
 function render() {
   const data = state.data;
   if (!data) return;
-  renderStats(data); renderCharts(); renderBars(data); renderBench(data); renderLog(data);
+  const real = data.source === "real";
+  document.querySelectorAll(".lab-only").forEach((node) => node.classList.toggle("hidden", real));
+  $("source-control").classList.toggle("hidden", data.sources.length < 2);
+  $("source-note").classList.toggle("hidden", !real);
+  if (real) $("source-note").textContent = `Watching ${data.watch}. Counters only: the dashboard does not read the real audit log (ADR 0040). Use ai-audit verify, report and workbench on the log itself.`;
+  renderAlerts(data.alerts);
+  if (!data.counters) { $("live-text").textContent = `Real proxy unreachable: ${data.error}`; $("live").className = "live off"; return; }
+  renderStats(data); renderCharts(); renderBars(data);
+  if (!real) { renderBench(data); renderLog(data); }
 }
 
 function setLive(ok) {
@@ -351,9 +403,9 @@ function setLive(ok) {
 
 async function poll() {
   try {
-    const data = await fetch("/api/dashboard", { cache: "no-store" }).then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json(); });
+    const data = await fetch(`/api/dashboard?source=${state.source}`, { cache: "no-store" }).then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json(); });
     const t = Date.parse(data.at);
-    state.snapshots.push({ t, counters: data.counters });
+    if (data.counters) state.snapshots.push({ t, counters: data.counters });
     while (state.snapshots.length && state.snapshots[0].t < t - 1_800_000) state.snapshots.shift();
     state.data = data;
     setLive(true);
@@ -385,6 +437,12 @@ function schedule() {
 }
 
 $("refresh").addEventListener("change", schedule);
+$("source").addEventListener("change", () => { state.source = $("source").value; state.snapshots = []; state.seenEvents = null; poll(); });
+$("notify").addEventListener("click", async () => {
+  if (!("Notification" in window)) { $("notify").textContent = "Not supported"; return; }
+  const permission = await Notification.requestPermission();
+  $("notify").textContent = permission === "granted" ? "Notifications on" : "Notifications blocked";
+});
 $("range").addEventListener("change", render);
 $("refresh-now").addEventListener("click", poll);
 $("run-all").addEventListener("click", runAll);

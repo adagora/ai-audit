@@ -135,6 +135,84 @@ groups:
           severity: warning
         annotations:
           summary: "More than 5% of upstream responses are 5xx over 5 minutes."
+      - uid: ai-audit-tool-call-held
+        title: "Tool call held by the gate"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 900, to: 0 }
+            datasourceUid: victoriametrics
+            model:
+              refId: A
+              instant: true
+              expr: "sum(increase(ai_audit_action_gate_total{result=\"hold\"}[5m]))"
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels:
+          severity: warning
+        annotations:
+          summary: "A proposed tool call carried a destination from untrusted content, a secret, or a tool outside the key's list. In enforce mode the client got a notice instead; in observe mode the call was delivered. Inspect actionGate in the audit log."
+      - uid: ai-audit-refusal-spike
+        title: "Refusal spike (401 or 403)"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 900, to: 0 }
+            datasourceUid: victoriametrics
+            model:
+              refId: A
+              instant: true
+              expr: "(sum(increase(ai_audit_requests_total{decision=\"none\",status=~\"401|403\"}[5m])) or vector(0)) + (sum(increase(ai_audit_refusals_suppressed_total[5m])) or vector(0))"
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [10] }
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels:
+          severity: warning
+        annotations:
+          summary: "More than 10 refused keys or models in 5 minutes. A client may be misconfigured, or someone may be guessing keys. The refusal records show route, key name and source address."
+      - uid: ai-audit-budget-failures
+        title: "Budget accounting failed"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 900, to: 0 }
+            datasourceUid: victoriametrics
+            model:
+              refId: A
+              instant: true
+              expr: "sum(increase(ai_audit_budget_failures_total[5m]))"
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Token budget counting or settlement failed and the proxy refused generation for a budgeted key (ADR 0044). Check the budget directory and the provider count endpoint."
       - uid: ai-audit-unknown-usage
         title: "Unknown token usage rising"
         condition: C

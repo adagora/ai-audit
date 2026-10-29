@@ -12,14 +12,24 @@
     <div class="brand"><span class="mark" aria-hidden="true">◇</span><span>ai-audit</span><span class="sep">/</span><span class="crumb">Proxy dashboard</span></div>
     <div class="controls">
       <span class="live" id="live"><i aria-hidden="true"></i><span id="live-text">Connecting</span></span>
+      <a class="alert-badge ok" id="alert-badge" href="#row-alerts">No alerts</a>
+      <label class="control hidden" id="source-control"><span>Source</span><select id="source"><option value="synthetic">Synthetic lab</option><option value="real">Real proxy (counters)</option></select></label>
       <label class="control"><span>Range</span><select id="range"><option value="300" selected>Last 5 min</option><option value="900">Last 15 min</option><option value="1800">Last 30 min</option></select></label>
       <label class="control"><span>Refresh</span><select id="refresh"><option value="0">Off</option><option value="2000" selected>2s</option><option value="5000">5s</option><option value="10000">10s</option></select></label>
       <button class="btn" id="refresh-now" type="button" aria-label="Refresh now">↻</button>
-      <button class="btn primary" id="run-all" type="button">Run all checks</button>
+      <button class="btn primary lab-only" id="run-all" type="button">Run all checks</button>
+      <button class="btn ghost" id="notify" type="button">Notify me</button>
       <a class="btn ghost" href="/console">Request console</a>
     </div>
   </header>
   <main class="grid-page">
+    <p class="source-note hidden" id="source-note"></p>
+    <section class="row" aria-labelledby="row-alerts"><h2 class="row-title" id="row-alerts">Alerts</h2>
+      <div class="panels alerts-grid">
+        <article class="panel"><header><h3>Alert rules</h3><span class="hint" id="alert-note">Evaluated by the server every 5 s</span></header><div class="table-wrap short"><table class="log alerts"><thead><tr><th>State</th><th>Rule</th><th>Severity</th><th>Value</th><th>Condition</th><th>Since</th></tr></thead><tbody id="alert-rows"></tbody></table></div></article>
+        <article class="panel"><header><h3>Alert events</h3><span class="hint">Firing and resolved, newest first</span></header><ol class="events" id="alert-events"><li class="empty">No alert events yet.</li></ol></article>
+      </div>
+    </section>
     <section class="row" aria-labelledby="row-overview"><h2 class="row-title" id="row-overview">Overview</h2><div class="stats" id="stats"></div></section>
     <section class="row" aria-labelledby="row-traffic"><h2 class="row-title" id="row-traffic">Traffic</h2>
       <div class="panels two">
@@ -36,13 +46,13 @@
       </div>
     </section>
     <section class="row" aria-labelledby="row-usage"><h2 class="row-title" id="row-usage">Usage and evidence</h2><div class="stats" id="stats-usage"></div></section>
-    <section class="row" aria-labelledby="row-bench"><h2 class="row-title" id="row-bench">Test bench</h2>
+    <section class="row lab-only" aria-labelledby="row-bench"><h2 class="row-title" id="row-bench">Test bench</h2>
       <article class="panel"><header><h3>Feature checks</h3><span class="hint" id="bench-summary">Each check runs real requests through the proxy against a mock provider.</span></header>
         <div class="progress hidden" id="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100"><i id="progress-fill"></i><span id="progress-text"></span></div>
         <div class="bench" id="bench"></div>
       </article>
     </section>
-    <section class="row" aria-labelledby="row-log"><h2 class="row-title" id="row-log">Live audit log</h2>
+    <section class="row lab-only" aria-labelledby="row-log"><h2 class="row-title" id="row-log">Live audit log</h2>
       <article class="panel"><header><h3>Latest records</h3><span class="hint">All three proxies (redact, no-go, advisory). Select a row for the stored record.</span></header>
         <div class="table-wrap"><table class="log"><thead><tr><th>Time</th><th>Proxy</th><th>Kind</th><th>Route</th><th>Key</th><th>Outcome</th><th>Status</th><th>Findings</th><th>Signals</th><th>Gate</th><th>Latency</th></tr></thead><tbody id="log-rows"><tr><td colspan="11" class="empty">No records yet. Run a check.</td></tr></tbody></table></div>
       </article>
