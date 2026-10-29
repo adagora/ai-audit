@@ -882,7 +882,7 @@ npm run verify:formal
 
 ## About contributions
 
-Issues and pull requests are welcome. There is no separate contributing guide. Run `npm test` before you push. Do not commit secrets, real API keys, or real audit logs. `live/` and `*.jsonl` from real traffic stay out of git. Tests use fake keys.
+Issues and pull requests are welcome. Report a vulnerability privately, as [SECURITY.md](SECURITY.md) describes. There is no separate contributing guide. Run `npm test` before you push. Do not commit secrets, real API keys, or real audit logs. `live/` and `*.jsonl` from real traffic stay out of git. Tests use fake keys.
 
 The license is MIT, copyright Adrian Góra.
 
