@@ -42,7 +42,8 @@ StreamEnd == pc = "stream" /\ pc' = "write" /\ delivered' = TRUE /\ UNCHANGED <<
 Final == pc = "write" /\ DoWrite(IF usageSeen THEN "known" ELSE "unknown", "done") /\ UNCHANGED <<aborted, timerArmed, usageSeen, delivered, forwarded, logOk, diskFull, badFwd, errs>>
 InternalError == pc \in {"inspect", "stream", "write"} /\ errs = 0 /\ errs' = 1 /\ Catch("plain")
                  /\ UNCHANGED <<usage, aborted, timerArmed, usageSeen, delivered, forwarded, logOk, diskFull, badFwd>>
-Next == ClientClose \/ Timeout \/ LogGoesBad \/ DiskFills \/ Start \/ BlockOrReject \/ Forward \/ FetchErr \/ Headers \/ UsageChunk \/ StreamEnd \/ Final \/ InternalError
+Done == pc = "done" /\ UNCHANGED vars
+Next == ClientClose \/ Timeout \/ LogGoesBad \/ DiskFills \/ Start \/ BlockOrReject \/ Forward \/ FetchErr \/ Headers \/ UsageChunk \/ StreamEnd \/ Final \/ InternalError \/ Done
 Spec == Init /\ [][Next]_vars
 AtMostOneLog == logs <= 1
 NeverZeroWhenUnseen == (usage = "known") => usageSeen

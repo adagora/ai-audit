@@ -119,9 +119,10 @@ AnchorWrite == /\ apc = "write" /\ anchors' = Append(anchors, aseen) /\ apc' = "
 ClockStepBack == /\ ClockBack /\ backs = 0 /\ clock > 1 /\ backs' = 1 /\ clock' \in 1..(clock - 1)
                  /\ UNCHANGED <<written, crashes, ppc, pold, gone, anchors, apc, aseen>> /\ UNCHANGED WriterVars /\ UNCHANGED FileVars
 
+Done == (\A w \in Writers : pc[w] = "dead" \/ (pc[w] = "idle" /\ tries[w] = PerWriter)) /\ UNCHANGED vars
 Next == \/ \E w \in Writers : Acquire(w) \/ Rotate(w) \/ Check(w) \/ StartSegment(w) \/ Fill(w) \/ ReadTail(w) \/ Write(w) \/ Crash(w)
         \/ PruneRead \/ PruneRecord \/ PruneUnlink \/ PruneCrash
-        \/ AnchorRead \/ AnchorWrite \/ ClockStepBack
+        \/ AnchorRead \/ AnchorWrite \/ ClockStepBack \/ Done
 Spec == Init /\ [][Next]_vars
 
 Chain(s) == \A i \in 1..Len(s) : s[i].prev = IF i = 1 THEN G ELSE s[i - 1].id

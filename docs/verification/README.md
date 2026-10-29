@@ -2,7 +2,7 @@
 
 Run: `npm run verify:formal`. Procedure, coverage and sync commit: `.agents/skills/verify-audit-log/SKILL.md`.
 Specs `spec/AuditChain.tla`, `spec/RequestLifecycle.tla`; configs `spec/*.cfg`; runner `spec/run.sh` (tla2tools v1.8.0, a pre-release that upstream rebuilds; v1.7.4 lacks `-noGenerateSpecTE`). CI runs `spec/run.sh` on every push to `main` and every pull request (ADR 0030).
-Statecharts: `audit-chain.mmd/.png`, `request-lifecycle.mmd/.png` (code after ADR 0016). They do not show log rotation (ADR 0049) or refusal records (ADR 0047).
+Statecharts of the three models, drawn with `/statechart`: [Charts](#charts).
 
 ## Why TLA+
 The questions were about the order of steps between processes and between a request and its environment (client close, timeout, log breaking). That is a model checker's job. Each model is paired with regression tests that run the real code, so a code change that breaks a property fails `verify:formal`.
@@ -47,7 +47,7 @@ Not modelled: attachment cache vs inspection profile (reviewed: key includes `pr
 | DecisionLoop_residual.cfg | fail | NeverFlagged violated (known window, ADR 0057) |
 | DecisionLoop_unacted.cfg | fail | ApprovalIsActedOn violated (known window, the console warns, ADR 0057) |
 
-Chart: `decision-loop.mmd` (10 states, 14 arrows) of `DecisionLoop.cfg`, labels from `decision-loop.view.mjs`, which `/statechart` (pstack) can use to draw it again from `spec/DecisionLoop.tla`. The two red states are the known windows.
+Chart: [Decision loop](#decision-loop-decisionlooptla-decision-loopcfg-52-model-states), 10 states and 14 arrows. Its two red states are the known windows.
 
 Findings, both resolved by ADR 0057:
 7. An application that followed the protocol could be flagged as acting without approval. A person recorded `taken over` before the app acted on the rule, or `rejected` after the app read `approved` and before it recorded done. After a take-over the action ran, although ADR 0055 says that the application does not run it. Now a decision takes one verdict, and the app checks before an action the rule allows. What stays: a verdict that lands between that check and the effect record (`DecisionLoop_residual.cfg`).
@@ -55,6 +55,176 @@ Findings, both resolved by ADR 0057:
 
 Fixed while building this model: `awaitVerdict` looked for a review only in the two newest files, so after two rotations it returned `timeout` for an approved decision (commit afd1757).
 
+## Charts
+Drawn with `/statechart` (pstack) from the TLA+ models. Each chart uses the config and the view module of the same name in this folder (`<name>.cfg`, `<name>.view.mjs`): the view gives the words on states and arrows, the config gives the bounds and the rules to mark. `/statechart` runs the TLC version that it pins (v1.7.4); with v1.8.0 its SANY reader stops with `Cannot read properties of undefined (reading 'tag')`. A red state breaks a rule; a blue border marks the shortest path to it.
+
+### Request lifecycle (RequestLifecycle.tla, request-lifecycle.cfg: 148 model states)
+```mermaid
+---
+title: "One request through the proxy, with the log, the disk, the client and the provider failing at any step"
+---
+stateDiagram-v2
+  state "Legend" as legend {
+    lg0: decide
+    lg1: provider
+    lg2: end
+    lg3: Breaks NoForwardWithoutLog
+    lg4: Path to the NoForwardWithoutLog bug
+  }
+  class lg0 blue
+  class lg1 yellow
+  class lg2 teal
+  class lg3 breaks
+  class lg4 bugPath
+  s0: Request received
+  s1: Stopped, failure counted
+  s2: Inspected and decided
+  s3: Stopped and recorded
+  s4: Refused, refusal recorded
+  s5: Forwarded to the provider
+  s6: Answer streaming to the client
+  s7: Answer delivered, record not written yet
+  s8: Delivered, record lost and counted
+  s9: Delivered and recorded
+  [*] --> s0
+  s0 --> s1: the log is broken: 503
+  s0 --> s2: the log is writable
+  s2 --> s3: blocked or rejected, recorded
+  s2 --> s4: an internal error
+  s2 --> s5: the log is still writable, the proxy forwards
+  s5 --> s3: no answer from the provider, recorded
+  s5 --> s6: the provider answers
+  s2 --> s1: the log broke during inspection: 503 or blocked or rejected, but the record fails or an internal error
+  s5 --> s1: no answer from the provider, the record fails
+  s6 --> s1: an internal error
+  s6 --> s7: the answer is delivered
+  s7 --> s8: an internal error or the record fails
+  s7 --> s9: the record is written
+  classDef breaks fill:#ffecee,stroke:#e72e3b,stroke-width:2.5px,color:#cd2834
+  class s0 blue
+  class s0 bugPath
+  class s1 teal
+  class s2 blue
+  class s2 bugPath
+  class s3 teal
+  class s4 teal
+  class s5 yellow
+  class s5 bugPath
+  class s6 yellow
+  class s6 bugPath
+  class s7 yellow
+  class s7 bugPath
+  class s8 teal
+  class s8 breaks
+  class s8 bugPath
+  class s9 teal
+```
+
+### Log series (AuditChain.tla, audit-chain.cfg: one writer, five appends, one crash, one prune; 380 model states)
+```mermaid
+---
+title: "The log series: appends, rotation, a crash and a prune"
+---
+stateDiagram-v2
+  state "Legend" as legend {
+    lg0: between
+  }
+  class lg0 yellow
+  s0: No log yet
+  s1: One file
+  s2: File renamed, new file not started
+  s3: Writer died after the rename
+  s4: Closed segments and a current file
+  s5: Prune recorded, segments not deleted yet
+  s6: Current file after a prune
+  s7: Segments after a prune
+  [*] --> s0
+  s0 --> s1: a record is appended
+  s1 --> s2: the file is rotated
+  s2 --> s3: the writer dies
+  s2 --> s4: the new file starts with a link to the closed one
+  s3 --> s5: prune records them in a new file
+  s4 --> s5: prune records them
+  s4 --> s2: the file is rotated
+  s5 --> s6: prune deletes a segment or prune dies
+  s5 --> s4: prune dies
+  s5 --> s2: the file is rotated
+  s2 --> s5: the new file starts with a link to the closed one
+  s6 --> s2: the file is rotated
+  s2 --> s7: the new file starts with a link to the closed one
+  s5 --> s7: prune deletes a segment or prune dies
+  s7 --> s2: the file is rotated
+  class s2 yellow
+  class s3 yellow
+  class s5 yellow
+```
+
+### Decision loop (DecisionLoop.tla, decision-loop.cfg: 52 model states)
+```mermaid
+---
+title: "A decision after the answer: rule, verdict, action"
+---
+stateDiagram-v2
+  state "Legend" as legend {
+    lg0: decide
+    lg1: act
+    lg2: end
+    lg3: Breaks ApprovalIsActedOn or NeverFlagged
+    lg4: Path to the ApprovalIsActedOn or NeverFlagged bug
+  }
+  class lg0 blue
+  class lg1 yellow
+  class lg2 teal
+  class lg3 breaks
+  class lg4 bugPath
+  s0: Decision recorded
+  s1: App about to act
+  s2: Waiting for a person
+  s3: Verdict recorded, app not told yet
+  s4: App about to skip
+  s5: Action done, not recorded yet
+  s6: Done and authorized
+  s7: Skipped
+  s8: Skipped, then approved
+  s9: Done, flagged as without approval
+  [*] --> s0
+  s0 --> s2: the rule asks for a person
+  s0 --> s1: the rule allows the action and no person said no
+  s0 --> s3: the rule asks for a person
+  s0 --> s4: the rule allows the action, but a person said no first
+  s1 --> s5: the app acts
+  s2 --> s3: a person records approved or a person records taken over or a person records rejected
+  s2 --> s4: the wait times out
+  s3 --> s1: the app reads approved
+  s3 --> s4: the app reads rejected or taken over
+  s4 --> s4: a person records approved
+  s4 --> s7: the app records skipped
+  s5 --> s6: the app records done
+  s5 --> s5: a person records taken over
+  s4 --> s8: the app records skipped
+  s5 --> s9: the app records done [a verdict came after its check]
+  s7 --> s8: a person records approved
+  classDef breaks fill:#ffecee,stroke:#e72e3b,stroke-width:2.5px,color:#cd2834
+  class s0 blue
+  class s0 bugPath
+  class s1 yellow
+  class s1 bugPath
+  class s2 blue
+  class s2 bugPath
+  class s3 blue
+  class s4 yellow
+  class s4 bugPath
+  class s5 yellow
+  class s5 bugPath
+  class s6 teal
+  class s7 teal
+  class s8 teal
+  class s8 breaks
+  class s8 bugPath
+  class s9 teal
+  class s9 breaks
+  class s9 bugPath
+```
 ## Proofs in Bend 2 (ADR 0029)
 Run: `npm run verify:bend` (needs Bend 2.0.38 on PATH; `sh bend/install.sh` installs it into `~/.bend` and checks the archive's sha256, ADR 0030). CI runs it on every push to `main` and every pull request. Code `bend/context.bend` (token split, ADR 0017), `bend/arena.bend` (arena ages, first change and runs, ADR 0020), `bend/usage.bend` (turn tokens, the provider-cache-drop signal and report totals, ADR 0012 and ADR 0020) `bend/spans.bend` (the merge of overlapping finding spans before redaction, ADR 0007) `bend/parts.bend` (which spans are removed from the joined text when a message has several text parts, ADR 0007) `bend/mask.bend` (which bytes of each text part the provider gets after redaction, ADR 0007), `bend/decide.bend` (the decision to forward or block a request, ADR 0009) and `bend/policies.bend` (the policy versions of each use case in `report` and `ai-audit policies`, ADR 0027), laws `bend/LAWS.bend`, proofs `bend/PROOF.bend`, runner `bend/run.sh`. The committed `src/bend/*.mjs` must match the code; `bash bend/run.sh --write` regenerates them.
 
