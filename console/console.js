@@ -265,13 +265,14 @@ async function decisionsPage(o) {
   const selected = route.id && route.id !== "all" ? list.find((d) => d.id === route.id) : shown[0];
   const tabs = h("div", { class: "tabs" }, ["waiting", "approved", "overridden", "rejected", "all"].map((f) =>
     h("button", { type: "button", "aria-pressed": String((filter ?? "all") === f), onclick: () => go(`#/decisions/all/${f}`) }, `${f[0].toUpperCase()}${f.slice(1)} ${fmt(f === "all" ? list.length : list.filter((d) => d.state === f).length)}`)));
+  const subject = (d) => Object.values(d.params ?? {}).find((v) => typeof v === "string") ?? d.systemId ?? "—";
   const rows = shown.map((d) => h("tr", { class: "clickable", "aria-selected": String(selected?.id === d.id), onclick: () => go(`#/decisions/${encodeURIComponent(d.id)}/${filter ?? "all"}`) },
-    td(time(d.ts)), td(d.useCase ?? "—"), td(d.systemId ?? "—"), td(d.qdl ? chip(d.qdl.status, d.qdl.status === "completed" ? "ok" : "bad") : chip("no rule")),
-    td(d.actions.filter((a) => a.status === "simulated").map((a) => chip(a.action, "accent"))), td(chip(d.state, STATE_CHIPS[d.state]))));
+    td(time(d.ts)), td(d.useCase ?? "—"), td(subject(d), "mono"),
+    td(d.qdl && d.qdl.status !== "completed" ? chip(`rule ${d.qdl.status}`, "bad") : d.actions.filter((a) => a.status === "simulated").map((a) => chip(a.action, "accent"))), td(chip(d.state, STATE_CHIPS[d.state]))));
   return h("div", { class: "page" },
     card("Decision states", "A recorded decision waits for a person until a review is written. The latest review counts.", h("div", { class: "body" }, decisionMachine(list))),
     h("div", { class: "grid split" },
-      card("Decisions", null, h("div", { class: "body flush" }, table(["Time", "Use case", "System", "Rule", "Proposed action", "State"], rows, "No decision in this state.")), tabs),
+      card("Decisions", null, h("div", { class: "body flush" }, table(["Time", "Use case", "Item", "Proposed action", "State"], rows, "No decision in this state.")), tabs),
       h("div", { class: "sticky" }, selected ? decisionDetail(selected, o) : card("No decision selected", null, h("div", { class: "empty" }, "Select a decision.")))));
 }
 
@@ -307,8 +308,13 @@ function decisionDetail(d, o) {
       ? h("div", {}, simulated.map((a) => h("p", { style: { margin: "2px 0" } }, chip("would do", "accent"), " ", h("b", {}, a.action))), skipped.map((a) => h("p", { class: "muted", style: { margin: "2px 0" } }, chip("would not do"), " ", a.action)),
         h("p", { class: "small muted" }, "Actions are simulated. The rule does not act; your application does, after this review."))
       : h("p", { class: "muted" }, "The rule names no action."),
-    h("div", { class: "section-title" }, "Result"), h("pre", { class: "mono", style: { whiteSpace: "pre-wrap", margin: 0 } }, JSON.stringify(d.output, null, 2) ?? "—"),
+    h("div", { class: "section-title" }, "Result"),
+    d.outputNames ? h("dl", { class: "kv" }, d.outputNames.flatMap((name, i) => {
+      const v = d.output[i];
+      return [h("dt", {}, name), h("dd", { class: "mono" }, v && typeof v === "object" && typeof v.action === "string" ? `${v.status === "simulated" ? "would do" : "would not do"} ${v.action}` : typeof v === "number" ? fmt(Math.round(v * 100) / 100) : value(v))];
+    })) : h("pre", { class: "mono", style: { whiteSpace: "pre-wrap", margin: 0 } }, JSON.stringify(d.output, null, 2) ?? "—"),
     h("div", { class: "section-title" }, "Inputs the rule used"), inputsTable(d.qdl?.inputs),
+    d.params ? [h("div", { class: "section-title" }, "Recorded with the decision"), inputsTable(d.params)] : null,
     h("div", { class: "section-title" }, "Rule"),
     d.qdl ? h("dl", { class: "kv" }, h("dt", {}, "Program"), h("dd", {}, d.qdl.program ?? "unnamed"), h("dt", {}, "Hash"), h("dd", { class: "mono" }, short(d.qdl.sourceHash, 22)), h("dt", {}, "Status"), h("dd", {}, d.qdl.status),
       d.qdl.error ? [h("dt", {}, "Error"), h("dd", { class: "mono" }, value(d.qdl.error))] : null) : h("p", { class: "muted" }, "Recorded without a QDL rule."),

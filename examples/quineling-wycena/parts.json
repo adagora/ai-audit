@@ -1,0 +1,88 @@
+{
+  "note": "Synthetic example parts for the toolroom quote rule. Not real orders. The scripted answers stand in for the LLM when the example runs offline.",
+  "parts": [
+    {
+      "id": "ZO/2026/114",
+      "title": "Płyta mocująca przyrządu, 10 szt.",
+      "machine": "MAS 1016 + Favretto",
+      "request": [
+        "Zapytanie ofertowe ZO/2026/114. Detal: płyta mocująca przyrządu, rysunek PM-114 rev. B. Ilość: 10 szt.",
+        "Wymiary gotowego detalu 400 × 250 × 40 mm. Materiał: nie podano na rysunku.",
+        "4 kieszenie prostokątne 120 × 80 × 15 mm, R6 w narożach; 12 otworów M12 na głębokość 20 mm; 2 otwory pasowane Ø16 H7 w rozstawie 300 ± 0,02 mm.",
+        "Płaskość obu płaszczyzn 0,02 mm, Ra 0,8 na płaszczyźnie bazowej, pozostałe powierzchnie Ra 3,2, krawędzie stępione 0,5 × 45°. Bez obróbki cieplnej i powłok.",
+        "Model 3D (odczyt z CAD klienta): objętość 3,40 dm³, masa 26,7 kg.",
+        "Tabliczka rysunkowa: konstruktor Jan Kowalski, e-mail jan.kowalski@przyklad-firma.pl, tel. +48 601 234 567."
+      ],
+      "scripted": {
+        "analiza": "## Rzeczy pewne\nPłyta 400 × 250 × 40 mm, 10 szt., kieszenie, M12, 2 × Ø16 H7, płaskość 0,02.\n## Założenia\nMATERIAŁ NIE JEST PODANY – PRZYJĄŁEM STAL 18G2A. Półfabrykat 410 × 260 × 45 mm, 37,7 kg.\n## Marszruta\n1. Cięcie. 2. Frezowanie MAS 1016, 2 zamocowania. 3. Szlifowanie obu płaszczyzn, Favretto. 4. Gratowanie. 5. Kontrola.\n## Ryzyka\nOdkształcenie po kieszeniach, płaskość 0,02, rozstaw H7 300 ± 0,02, brak materiału na rysunku, naprężenia po cięciu.",
+        "rekomendacja": "wykonalne bez zmian",
+        "cenaLlm": 6900,
+        "dane": { "quantity": 10, "blankKg": 37.7, "materialStated": false, "cnc5Hours": 0, "cncHours": 12, "conventionalHours": 6, "setupHours": 3, "programmingHours": 3, "manualHours": 3, "inspectionHours": 2.5, "cooperationCost": 0, "confidence": 0.75 }
+      }
+    },
+    {
+      "id": "ZO/2026/121",
+      "title": "Tuleja dystansowa C45, 20 szt.",
+      "machine": "CTX 650",
+      "request": [
+        "Zapytanie ofertowe ZO/2026/121. Detal: tuleja dystansowa, rysunek TD-60. Ilość: 20 szt.",
+        "Wymiary: Ø60 h9 zewnętrzna, Ø40 H8 wewnętrzna, długość 45 ± 0,05 mm. Materiał: stal C45.",
+        "Fazy 1 × 45° po obu stronach. Ra 1,6 na otworze, pozostałe Ra 3,2. Bez obróbki cieplnej."
+      ],
+      "scripted": {
+        "analiza": "## Rzeczy pewne\nTuleja Ø60/Ø40 × 45, C45, 20 szt.\n## Założenia\nPółfabrykat pręt Ø65, odcinek 50 mm, 1,3 kg.\n## Marszruta\n1. Toczenie CTX 650, 2 zamocowania. 2. Gratowanie. 3. Kontrola Ø40 H8.\n## Ryzyka\nOwalizacja cienkiej ścianki, tolerancja H8, długość ± 0,05, wióry przy wytaczaniu, stabilność serii.",
+        "rekomendacja": "wykonalne bez zmian",
+        "cenaLlm": 2300,
+        "dane": { "quantity": 20, "blankKg": 1.3, "materialStated": true, "cnc5Hours": 0, "cncHours": 5, "conventionalHours": 1.5, "setupHours": 1, "programmingHours": 1, "manualHours": 1, "inspectionHours": 1, "cooperationCost": 0, "confidence": 0.85 }
+      }
+    },
+    {
+      "id": "ZO/2026/127",
+      "title": "Wałek z wpustem 42CrMo4, hartowany, 8 szt.",
+      "machine": "CTX 650 + MAS 1016 + szlifowanie, hartowanie w kooperacji",
+      "request": [
+        "Zapytanie ofertowe ZO/2026/127. Detal: wałek napędowy z wpustem, rysunek WN-320. Ilość: 8 szt.",
+        "Wymiary: Ø45 h6 na długości 120 mm, całkowita długość 320 mm, wpust 14 × 5,5 × 80 mm. Materiał: 42CrMo4.",
+        "Hartowanie indukcyjne czopa Ø45 do 50–55 HRC, po hartowaniu szlifowanie Ø45 h6, Ra 0,4. Bicie 0,01 mm."
+      ],
+      "scripted": {
+        "analiza": "## Rzeczy pewne\nWałek Ø45 × 320, 42CrMo4, 8 szt., hartowanie indukcyjne.\n## Założenia\nPółfabrykat Ø50 × 330, 5,1 kg. Hartowanie w kooperacji, 60 PLN za sztukę.\n## Marszruta\n1. Toczenie CTX 650. 2. Frezowanie wpustu MAS 1016. 3. Hartowanie (kooperacja). 4. Szlifowanie Ø45 h6. 5. Kontrola bicia.\n## Ryzyka\nOdkształcenie po hartowaniu, bicie 0,01, szlifowanie wałka na sprzęcie do płaszczyzn, termin kooperacji, pęknięcia przy wpuście.",
+        "rekomendacja": "częściowo do kooperacji",
+        "cenaLlm": 4200,
+        "dane": { "quantity": 8, "blankKg": 5.1, "materialStated": true, "cnc5Hours": 0, "cncHours": 6, "conventionalHours": 4, "setupHours": 2, "programmingHours": 1.5, "manualHours": 1.5, "inspectionHours": 1.5, "cooperationCost": 480, "confidence": 0.8 }
+      }
+    },
+    {
+      "id": "ZO/2026/133",
+      "title": "Korpus czujnika z aluminium 7075, 2 szt.",
+      "machine": "DMU 50 (5 osi)",
+      "request": [
+        "Zapytanie ofertowe ZO/2026/133. Detal: korpus czujnika, model 3D KC-7. Ilość: 2 szt.",
+        "Gabaryt 180 × 120 × 90 mm, kieszenie pod kątem 30°, otwory skośne, cienkie ścianki 2 mm. Materiał: aluminium EN AW-7075 T651.",
+        "Tolerancje ogólne ISO 2768-f, 6 otworów M5, anodowanie nie jest wymagane."
+      ],
+      "scripted": {
+        "analiza": "## Rzeczy pewne\nKorpus 180 × 120 × 90, EN AW-7075, 2 szt., obróbka 5-osiowa.\n## Założenia\nPółfabrykat 190 × 130 × 100, 6,9 kg. Brak rysunku 2D – tolerancje z ISO 2768-f.\n## Marszruta\n1. Frezowanie DMU 50, 3 zamocowania. 2. Gratowanie. 3. Kontrola.\n## Ryzyka\nDrgania cienkich ścianek 2 mm, brak rysunku 2D, kąty 30° wymagają dobrego mocowania, mała seria – wysoki udział programowania, odkształcenie po zdjęciu z mocowania.",
+        "rekomendacja": "wykonalne po zmianach",
+        "cenaLlm": 6100,
+        "dane": { "quantity": 2, "blankKg": 6.9, "materialStated": true, "cnc5Hours": 9, "cncHours": 0, "conventionalHours": 0, "setupHours": 3, "programmingHours": 6, "manualHours": 1.5, "inspectionHours": 2, "cooperationCost": 0, "confidence": 0.65 }
+      }
+    },
+    {
+      "id": "ZO/2026/140",
+      "title": "Wspornik z blachy S235 gr. 10, 30 szt.",
+      "machine": "Plazma AJAN + wiertarka/frezarka konwencjonalna",
+      "request": [
+        "Zapytanie ofertowe ZO/2026/140. Detal: wspornik, rysunek WS-10. Ilość: 30 szt.",
+        "Kształt płaski 200 × 150 mm z blachy S235JR grubości 10 mm, 2 otwory Ø13 i 1 otwór Ø22.",
+        "Tolerancje ogólne ISO 2768-m, krawędzie gratowane. Bez malowania."
+      ],
+      "scripted": {
+        "analiza": "## Rzeczy pewne\nWspornik 200 × 150 × 10, S235JR, 30 szt.\n## Założenia\nArkusz zagnieżdżony, 2,64 kg na sztukę.\n## Marszruta\n1. Cięcie plazmą AJAN. 2. Rozwiercanie Ø22 na frezarce konwencjonalnej. 3. Gratowanie. 4. Kontrola wyrywkowa.\n## Ryzyka\nZukosowanie krawędzi po plazmie, twardość strefy cięcia przy wierceniu, odkształcenie cienkich mostków, tolerancja otworów po plazmie, czas gratowania 30 sztuk.",
+        "rekomendacja": "wykonalne bez zmian",
+        "cenaLlm": 1850,
+        "dane": { "quantity": 30, "blankKg": 2.64, "materialStated": true, "cnc5Hours": 0, "cncHours": 2.5, "conventionalHours": 3, "setupHours": 0.5, "programmingHours": 0.5, "manualHours": 4, "inspectionHours": 1, "cooperationCost": 0, "confidence": 0.9 }
+      }
+    }
+  ]
+}

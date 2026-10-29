@@ -657,6 +657,8 @@ A policy file is either a QDL intent, `"format": "qdl-intent"`, or `{"source": "
 
 `npm run example:evaluate` checks a QDL machining quote policy on labeled cases. `npm run example:evaluate:openai -- --output /private/tmp/quote-evaluation.json` also evaluates the same facts with OpenAI Decisions, recording misses, false alerts, repeat changes, latency and usage. The evaluator runs offline from proxy traffic; see [the evaluation guide](examples/evaluation/README.md).
 
+`npm run example:wycena -- --console` prices five toolroom parts with a 64-node QDL rule and fixed company rates, then opens the operator console so each quote waits for a review. See [the toolroom quote rule](examples/quineling-wycena/README.md).
+
 ## Configuration
 
 `gateway.json` is JSON. Comments in the file make `JSON.parse` fail. This is a working file:

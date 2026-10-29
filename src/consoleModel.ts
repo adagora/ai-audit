@@ -15,7 +15,7 @@ export interface Flow { total: number; offPath: number; stages: FlowStage[]; out
 export type DecisionState = "waiting" | Review["decision"];
 export interface DecisionAction { action: string; status: string }
 export interface DecisionView {
-  id: string; ts: string; systemId?: string; useCase?: string; llmCallId?: string; state: DecisionState; output: unknown; actions: DecisionAction[];
+  id: string; ts: string; systemId?: string; useCase?: string; llmCallId?: string; state: DecisionState; output: unknown; outputNames?: string[]; actions: DecisionAction[]; params?: Record<string, unknown>;
   qdl?: { status: string; sourceHash?: string; program?: string; inputs?: unknown; error?: unknown };
   reviews: { verdict: Review["decision"]; reviewer: string; at: string; note?: string }[];
 }
@@ -113,7 +113,7 @@ export function decisionViews(records: readonly Rec[]): DecisionView[] {
   return records.filter((r) => r.kind === "decision" && !r.qdl).map((d): DecisionView => {
     const q = steps.get(d.id), history = reviews.get(d.id) ?? [];
     return {
-      id: d.id, ts: d.ts, systemId: d.systemId, useCase: d.useCase, llmCallId: d.llmCallId, output: d.output, actions: actionsOf(d.output),
+      id: d.id, ts: d.ts, systemId: d.systemId, useCase: d.useCase, llmCallId: d.llmCallId, output: d.output, actions: actionsOf(d.output), ...(d.params && { params: d.params }),
       state: history.length ? history[history.length - 1].verdict : "waiting", reviews: history,
       ...(q && { qdl: { status: q.status ?? "completed", sourceHash: q.sourceHash, program: q.sourceHash ? programs.get(q.sourceHash) : undefined, inputs: q.inputs, error: q.error } }),
     };

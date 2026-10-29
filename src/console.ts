@@ -129,6 +129,24 @@ export function createConsole(o: ConsoleOptions) {
     return { record: strip(r), path: requestPath(r) ?? null, decisions };
   };
 
+  const outputNames = new Map<string, string[] | null>();
+  const decisions = async () => {
+    const { records } = load(), views = decisionViews(records);
+    let sdk: any;
+    for (const hash of new Set(views.map((v) => v.qdl?.sourceHash).filter((h): h is string => !!h && !outputNames.has(h)))) {
+      const source = records.find((r) => r.kind === "program" && r.id === hash)?.source;
+      try {
+        sdk ??= await import("@quinelings/agent-sdk/v1");
+        const names = new sdk.Session().recover({ source }).payload?.task?.outputs;
+        outputNames.set(hash, Array.isArray(names) && names.every((n: unknown) => typeof n === "string") ? names : null);
+      } catch { outputNames.set(hash, null); }
+    }
+    return views.map((v) => {
+      const names = v.qdl?.sourceHash ? outputNames.get(v.qdl.sourceHash) : null;
+      return names && Array.isArray(v.output) && names.length === v.output.length ? { ...v, outputNames: names } : v;
+    });
+  };
+
   const json = (res: http.ServerResponse, status: number, body: unknown) => {
     res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" });
     res.end(JSON.stringify(body));
@@ -162,7 +180,7 @@ export function createConsole(o: ConsoleOptions) {
       const [, , section, id, action] = url.pathname.split("/").map(decodeURIComponent);
       if (req.method === "GET") {
         if (section === "overview" && !id) return json(res, 200, overview(url));
-        if (section === "decisions" && !id) return json(res, 200, decisionViews(load().records));
+        if (section === "decisions" && !id) return json(res, 200, await decisions());
         if (section === "use-cases" && !id) return json(res, 200, useCases(url));
         if (section === "requests" && !id) return json(res, 200, requests(url));
         if (section === "requests" && id && !action) return json(res, 200, requestDetail(id));

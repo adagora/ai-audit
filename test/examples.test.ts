@@ -1,10 +1,28 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const skip = Number(process.versions.node.split(".")[0]) < 22 ? "Quinelings SDK needs Node >= 22" : false;
+
+test("example: the toolroom quote rule prices five parts with the company rates and routes three to the estimator", { skip }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "wycena-test-")), logPath = join(dir, "audit.jsonl");
+  const r = spawnSync(process.execPath, [fileURLToPath(new URL("../../examples/quineling-wycena/run.mjs", import.meta.url)), "--log", logPath], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const decisions = [...r.stdout.matchAll(/^decision (\S+): (\S+) ([\d.]+) /gm)].map((m) => [m[1], m[2], Number(m[3])]);
+  assert.deepEqual(decisions, [
+    ["ZO/2026/114", "route-to-estimator", 8273.38], ["ZO/2026/121", "send-quote-to-customer", 2094.81], ["ZO/2026/127", "route-to-estimator", 3842.85],
+    ["ZO/2026/133", "route-to-estimator", 5283.85], ["ZO/2026/140", "send-quote-to-customer", 2379.03]]);
+  assert.match(r.stdout, /^chain: ok$/m);
+  assert.equal((r.stdout.match(/replay z logu: ten sam wynik/g) ?? []).length, 5);
+  const raw = readFileSync(logPath, "utf8");
+  for (const value of ["jan.kowalski@przyklad-firma.pl", "601 234 567"]) assert.ok(!raw.includes(value), `${value} reached the log`);
+  const calls = raw.trim().split("\n").map((line) => JSON.parse(line)).filter((x) => x.kind === "llm-call");
+  assert.deepEqual([calls.length, calls.every((c) => c.useCase === "wycena" && c.useCasePolicy?.tier === "assist")], [5, true]);
+});
 
 test("example: a policy lab replays two session governors, then a changed threshold in a fresh process", { skip }, () => {
   const r = spawnSync(process.execPath, [fileURLToPath(new URL("../../examples/policy-lab/run.mjs", import.meta.url))], { encoding: "utf8" });
