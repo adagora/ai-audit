@@ -16,7 +16,10 @@ export function latestReview(records: readonly Rec[], decisionId: string, before
 const verdictOf = (r: Rec): Verdict => ({ state: r.review!.decision, review: r.id, reviewer: r.review!.reviewer, at: r.review!.at, ...(r.review!.note && { note: r.review!.note }) });
 
 export async function awaitVerdict(log: AuditLog, decisionId: string, o: AwaitOptions = {}): Promise<Verdict> {
-  if (!log.read().some((r) => r.kind === "decision" && r.id === decisionId && !r.qdl)) throw new Error("audit_unknown_decision");
+  const all = log.read();
+  if (!all.some((r) => r.kind === "decision" && r.id === decisionId && !r.qdl)) throw new Error("audit_unknown_decision");
+  const earlier = latestReview(all, decisionId);
+  if (earlier) return verdictOf(earlier);
   const deadline = Date.now() + (o.timeoutMs ?? 600_000), pollMs = o.pollMs ?? 1000;
   for (;;) {
     const found = latestReview(log.readRecent(), decisionId);

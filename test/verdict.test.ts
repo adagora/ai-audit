@@ -30,6 +30,14 @@ test("awaitVerdict returns the latest review at once, waits for one that comes l
   assert.equal((await awaitVerdict(log, d.id, { timeoutMs: 10 })).state, "rejected");
 });
 
+test("awaitVerdict finds a verdict recorded before two rotations", async () => {
+  const log = fresh(), d = decide(log);
+  log.approve(d.id, "ada", "approved");
+  for (let i = 0; i < 2; i++) { log.rotate(); log.append({ kind: "refusal", id: `r${i}`, ts: new Date().toISOString() } as any); }
+  assert.equal(log.closedSegments().length, 2);
+  assert.equal((await awaitVerdict(log, d.id, { timeoutMs: 100, pollMs: 20 })).state, "approved");
+});
+
 test("an effect is checked when written and is authorized only by the rule's own action or an earlier approval", () => {
   const log = fresh(), d = decide(log), other = decide(log);
   for (const bad of [{ action: "send quote", status: "done" }, { action: "send", status: "sent" }, { action: "send", status: "done", code: "Bad Code" }, { action: "x".repeat(129), status: "done" }])
