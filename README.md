@@ -284,6 +284,8 @@ After `npm link`, the binary is `ai-audit`. The examples below use that name. `n
 | `verify` | `ai-audit verify --log audit.jsonl` | Recomputes the chain. Exit 0 when it matches, 1 when it does not. |
 | `verify` | `ai-audit verify --log audit.jsonl --anchors anchors.jsonl` | Also catches a swapped or truncated file. |
 | `anchor` | `ai-audit anchor --log audit.jsonl --anchors anchors.jsonl` | Appends an anchor. Run it daily. Keep the anchor file somewhere else. |
+| `rotate` | `ai-audit rotate --log audit.jsonl` | Closes the log into a timestamped segment and starts a new file linked to it. |
+| `prune` | `ai-audit prune --log audit.jsonl --keep-days 184` | Records, then deletes, closed segments whose last record is older than N days. |
 | `report` | `ai-audit report --log audit.jsonl --from 2026-10-01 --to 2026-11-01` | Markdown on stdout for that interval. |
 | `stats` | `ai-audit stats --log audit.jsonl --by key` | Table of tokens, cached tokens, latency and errors. `--by` is `key`, `model` or `hour`. |
 | `context` | `ai-audit context --log audit.jsonl` | Table of sessions. |
@@ -345,8 +347,11 @@ ai-audit serve \
   --config gateway.json \
   --allow-hashes allow.json \
   --upstream-openai https://api.openai.com \
-  --upstream-anthropic https://api.anthropic.com
+  --upstream-anthropic https://api.anthropic.com \
+  --rotate-bytes 268435456
 ```
+
+`--rotate-bytes` closes the log into a segment before an append once the file is larger than that, default 256 MiB, `0` to never rotate. See [Rotation and retention](#rotation-and-retention).
 
 `--mode` is `redact`, `no-go` or `advisory`. The default is `redact`. `--no-page-redaction` and `"pageRedaction": false` both turn PDF rasterizing off. A PDF finding then returns 409 instead of a rebuilt file. [ADR 0013](docs/adr/0013-rasterize-pdfs-by-default.md).
 
@@ -477,6 +482,18 @@ ai-audit workbench --log audit.jsonl --output workbench.html \
 The command verifies one hash-chained snapshot before it writes a new file. The HTML starts with expandable request investigations: a metadata fact sheet and a path through inspection, forwarding, provider result, tool observations and linked QDL decisions. Each stage labels observed, derived or unknown evidence. The rest of the page shows linked sessions, context sizes, usage, scan rule paths, Quinelings operations and reviews. It has local search and links between calls and sessions. Tables and investigations show the latest 500 calls; totals count the full interval. Narrow the interval to inspect older rows. Run the command again with a new output filename after new traffic.
 
 The workbench omits retained output text, QDL source and inputs, reviewer names and notes. It cannot recover prompt text or a detected value because the proxy never stored them. The workbench is a private investigation file, not a shareable proof of origin. For one completed QDL decision, use `receipt --format svg` or `--format json`, inspect its exact contents, then give the recipient the artifact and `verify-receipt`. [ADR 0037](docs/adr/0037-offline-evidence-workbench.md), [ADR 0042](docs/adr/0042-request-investigation-from-metadata.md).
+
+#### Rotation and retention
+
+The log path names a series. `rotate`, or `serve` when the file passes `--rotate-bytes`, renames `audit.jsonl` to `audit.<UTC time>.jsonl` under the append lock and starts a new `audit.jsonl` whose first record, `kind: "segment"`, holds the closed file's name, record count and last hash. `verify`, `report`, `stats`, `context`, `workbench`, `decide`, `replay` and `receipt` read every segment in order. `verify` prints the file of a break, for example `BROKEN at audit.20261029T110359005Z.jsonl line 3: hash mismatch`. A segment that was changed, shortened or deleted breaks the series. Anchors keep working across rotations.
+
+```bash
+ai-audit rotate --log audit.jsonl
+ai-audit verify --log audit.jsonl
+ai-audit prune --log audit.jsonl --keep-days 184
+```
+
+`prune` deletes nothing by default and never touches the current file. It refuses a series that does not verify. Before it deletes the oldest segments whose last record is older than N days, it appends a `prune` record with each segment's name, count, head and time range, so `verify` and `verify --anchors` accept that gap and no other. The AI Act asks for at least six months of logs from deployers of high-risk systems; 184 days covers any six months. Take a portable receipt of any decision that must outlive the window first. Backup tools and log shippers must follow the file name, not the open file. [ADR 0049](docs/adr/0049-log-segments-and-retention.md).
 
 #### Metrics
 
@@ -802,6 +819,7 @@ The proxy's `serve` command does not need this import.
 - Attachment inspection needs Linux, bubblewrap, `prlimit`, Tesseract, poppler and Pillow. Without them, calls that carry a file fail closed.
 - Inspected types are PNG, JPEG, WebP, GIF and PDF. Other files, file ids and remote URLs are refused in `redact` and `no-go`.
 - The attachment cache is memory only. It dies with the process.
+- CLI readers hold every record of the log series in memory. A long series needs that much memory; `prune` bounds it.
 - Requests refused with 401, 403, 400, 404 or 413 are `refusal` records without content, at most 60 per minute per process; the rest of that minute is one summary record with a count ([ADR 0047](docs/adr/0047-record-refusals-before-inspection.md)). `count_tokens` is scanned and not logged.
 - `scrub` rewrites an export you already have. It does not reach the provider, backups, or data URIs.
 - Prompt-injection rules never block, and they are easy to walk around. The tool-call gate blocks only listed tools, keys with a `tools` list and destinations it can parse.

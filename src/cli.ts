@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
+import { basename } from "node:path";
 import { readFileSync, statSync, writeFileSync } from "node:fs";
-import { AuditLog, AuditLogUnavailable, anchor, report, sha256, stats, verifyAnchors, type Review } from "./audit.js";
+import { AuditLog, AuditLogUnavailable, anchor, prune, report, sha256, stats, verifyAnchors, type Review } from "./audit.js";
 import { recordQdl, verifyDecision } from "./qdl.js";
 import { decisionReceipt, renderReceipt } from "./receipt.js";
 import { policyHistories, withChanges } from "./policies.js";
@@ -30,6 +31,7 @@ const { values: a } = parseArgs({ args: rest, options: {
   decision: { type: "string" }, reviewer: { type: "string" }, verdict: { type: "string" }, note: { type: "string" },
   source: { type: "string" }, answer: { type: "string" },
   "baseline-limit": { type: "string", default: "2" }, "candidate-limit": { type: "string", default: "3" },
+  "rotate-bytes": { type: "string", default: String(256 * 1024 * 1024) }, "keep-days": { type: "string" },
 } });
 const NOT_REPRODUCED = new Set(["audit_qdl_source_missing", "audit_qdl_source_invalid", "audit_qdl_source_mismatch", "audit_qdl_intent_mismatch"]);
 const log = new AuditLog(a.log!);
@@ -138,6 +140,8 @@ if (cmd === "attest-keygen") {
   }
 } else if (cmd === "serve") {
   if (!["redact", "no-go", "advisory"].includes(a.mode!)) { console.error("--mode must be redact|no-go|advisory"); process.exit(2); }
+  if (!/^\d{1,15}$/.test(a["rotate-bytes"]!)) { console.error("--rotate-bytes must be a whole number of bytes, 0 to disable"); process.exit(2); }
+  log.rotateBytes = Number(a["rotate-bytes"]);
   const carnet = a["allow-hashes"] ? new Set<string>(JSON.parse(readFileSync(a["allow-hashes"], "utf8"))) : undefined;
   const env = process.env, cfg = a.config ? JSON.parse(readFileSync(a.config, "utf8")) : {};
   const unsafeNoSandbox = a["unsafe-no-sandbox"] === true || env.AI_AUDIT_UNSAFE_NO_SANDBOX === "1";
@@ -155,7 +159,7 @@ if (cmd === "attest-keygen") {
   server.listen(Number(a.port), a.host, () => {
     const addr = server.address();
     const bound = addr && typeof addr === "object" ? addr : { address: a.host, port: Number(a.port) };
-    console.error(JSON.stringify({ event: "listening", url: `http://${bound.address}:${bound.port}`, mode: a.mode, log: a.log, sandbox: sandboxState(SANDBOX_AVAILABLE, unsafeNoSandbox), attachmentTools: TOOLS_OK, virtualKeys: keys.length, contentLoggingKeys: keys.filter((k: any) => k.logContent === true).length, aliases: Object.keys(cfg.aliases ?? {}) }));
+    console.error(JSON.stringify({ event: "listening", url: `http://${bound.address}:${bound.port}`, mode: a.mode, log: a.log, rotateBytes: log.rotateBytes, sandbox: sandboxState(SANDBOX_AVAILABLE, unsafeNoSandbox), attachmentTools: TOOLS_OK, virtualKeys: keys.length, contentLoggingKeys: keys.filter((k: any) => k.logContent === true).length, aliases: Object.keys(cfg.aliases ?? {}) }));
   });
 } else if (cmd === "keygen") {
   const key = "aia-" + randomBytes(24).toString("base64url");
@@ -163,12 +167,24 @@ if (cmd === "attest-keygen") {
 } else if (cmd === "stats") {
   if (!["key", "model", "hour"].includes(a.by!)) { console.error("--by key|model|hour"); process.exit(2); }
   console.table(stats(log, a.by as any, a.from, a.to));
+} else if (cmd === "rotate") {
+  try { console.log(JSON.stringify(log.rotate() ?? { rotated: false })); }
+  catch (cause) { console.error(cause instanceof AuditLogUnavailable ? "audit_log_unavailable" : "audit_command_failed"); process.exitCode = 1; }
+} else if (cmd === "prune") {
+  try {
+    if (!/^\d{1,6}$/.test(a["keep-days"] ?? "")) throw new Error("audit_invalid_keep_days");
+    console.log(JSON.stringify({ pruned: prune(log, Number(a["keep-days"])) }));
+  } catch (cause) {
+    const code = cause instanceof AuditLogUnavailable ? "audit_log_unavailable" : cause instanceof Error && /^audit_[a-z_]+$/.test(cause.message) ? cause.message : "audit_command_failed";
+    console.error(code); process.exitCode = code === "audit_invalid_keep_days" ? 2 : 1;
+  }
 } else if (cmd === "anchor") {
   console.log(JSON.stringify(anchor(log, a.anchors ?? a.log + ".anchors")));
 } else if (cmd === "verify" && a.anchors) {
-  const v = verifyAnchors(log, a.anchors); console.log(v.ok ? `OK: chain intact, consistent with ${v.anchors} anchors` : `FAIL: ${v.reason}`); process.exit(v.ok ? 0 : 1);
+  const v = verifyAnchors(log, a.anchors); console.log(v.ok ? `OK: chain intact, consistent with ${v.anchors} anchors${v.pruned ? `, ${v.pruned} of them before a recorded prune` : ""}` : `FAIL: ${v.reason}`); process.exit(v.ok ? 0 : 1);
 } else if (cmd === "verify") {
-  const v = log.verifyChain(); console.log(v.ok ? `OK: ${log.read().length} records, chain intact` : `BROKEN at line ${v.badLine}: ${v.reason}`); process.exit(v.ok ? 0 : 1);
+  const v = log.verifySeries(), current = v.file === undefined || v.file === basename(log.path);
+  console.log(v.ok ? `OK: ${v.records} records${v.files > 1 ? ` in ${v.files} files` : ""}, chain intact` : `BROKEN at ${current ? "" : `${v.file} `}line ${v.badLine}: ${v.reason}`); process.exit(v.ok ? 0 : 1);
 } else if (cmd === "context") {
   const records = log.read();
   if (!a.session) console.table(listSessions(records));
@@ -250,4 +266,4 @@ if (cmd === "attest-keygen") {
     console.error(cause instanceof Error && /^audit_[a-z_]+$/.test(cause.message) ? cause.message : "audit_command_failed"); process.exitCode = 2;
   }
 } else if (cmd === "report") console.log(report(log, a.from!, a.to!).md);
-else { console.error("usage: ai-audit serve|verify|anchor|report|stats|context|workbench|keygen|profile|scrub|check-quotes|decide|approve|replay|lab|receipt|verify-receipt|attest-keygen|attest|verify-attestation|policies [options]; see README.md for command examples"); process.exit(2); }
+else { console.error("usage: ai-audit serve|verify|anchor|rotate|prune|report|stats|context|workbench|keygen|profile|scrub|check-quotes|decide|approve|replay|lab|receipt|verify-receipt|attest-keygen|attest|verify-attestation|policies [options]; see README.md for command examples"); process.exit(2); }

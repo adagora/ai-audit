@@ -56,3 +56,4 @@ Format: Nygard (Status, Context, Decision, Consequences), at most ~40 lines, fil
 - [46. A deterministic gate checks proposed tool calls before the client receives them](0046-deterministic-action-gate.md)
 - [47. Refusals before inspection are content-free, rate-bounded records](0047-record-refusals-before-inspection.md)
 - [48. Virtual keys can limit which tools the model may call](0048-per-key-tool-allowlist.md)
+- [49. The audit log rotates into linked segments; old segments leave only by a recorded prune](0049-log-segments-and-retention.md)

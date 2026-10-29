@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { accessSync, appendFileSync, closeSync, constants, existsSync, fstatSync, openSync, readFileSync, readSync, statSync, unlinkSync, writeSync } from "node:fs";
-import { dirname } from "node:path";
+import { accessSync, appendFileSync, closeSync, constants, existsSync, fstatSync, openSync, readdirSync, readSync, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
+import { basename, dirname, extname, join } from "node:path";
 import vm from "node:vm";
 import BendUsage from "./bend/usage.mjs";
 import { bendCount, bendListOf } from "./context.js";
@@ -28,7 +28,7 @@ export interface Entry {
   qdlDecision?: boolean;
 }
 export interface Rec {
-  kind: "decision" | "review" | "llm-call" | "program" | "refusal"; id: string; ts: string; refId?: string;
+  kind: "decision" | "review" | "llm-call" | "program" | "refusal" | "segment" | "prune"; id: string; ts: string; refId?: string;
   systemId?: string; useCase?: string; llmCallId?: string; inputHash?: string; redactedInput?: string;
   sources?: { doc: string; page?: number }[]; model?: { name: string; version: string };
   prompt?: { templateId: string; hash: string }; params?: Record<string, unknown>; output?: unknown;
@@ -46,14 +46,71 @@ export function redact(s: string): string {
 export const canon = (o: unknown): string => JSON.stringify(o, (_k, v) =>
   v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort()) : v);
 
+const READ_CHUNK = 1 << 20;
+export function* fileLines(path: string): Generator<string> {
+  const fd = openSync(path, "r"), buf = Buffer.alloc(READ_CHUNK);
+  try {
+    let rest: Buffer[] = [];
+    for (let n = readSync(fd, buf, 0, READ_CHUNK, null); n > 0; n = readSync(fd, buf, 0, READ_CHUNK, null)) {
+      const chunk = buf.subarray(0, n);
+      let from = 0;
+      for (let nl = chunk.indexOf(0x0a, from); nl >= 0; nl = chunk.indexOf(0x0a, from)) {
+        const line = Buffer.concat([...rest, chunk.subarray(from, nl)]).toString("utf8");
+        rest = []; from = nl + 1;
+        if (line) yield line;
+      }
+      if (from < n) rest.push(Buffer.from(chunk.subarray(from)));
+    }
+    const last = Buffer.concat(rest).toString("utf8");
+    if (last) yield last;
+  } finally { closeSync(fd); }
+}
+const recordsOf = (path: string): Rec[] => Array.from(fileLines(path), (l) => JSON.parse(l));
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+export interface SegmentLink { file: string; count: number; head: string }
+export interface SeriesCheck { ok: boolean; badLine?: number; reason?: string; file?: string; files: number; records: number; prunedBefore?: string }
+export function checkSeries(files: Iterable<readonly [string, Iterable<string>]>): SeriesCheck {
+  let previous: SegmentLink | undefined, missing: { file: string; at: string; ts: string } | undefined, records = 0, n = 0;
+  const pruned = new Set<string>();
+  for (const [name, lines] of files) {
+    let prev = GENESIS, count = 0, first: Rec | undefined;
+    n++;
+    for (const line of lines) {
+      count++;
+      let r: Rec;
+      try { r = JSON.parse(line); } catch { return { ok: false, file: name, badLine: count, reason: "invalid JSON", files: n, records }; }
+      if (!r || typeof r !== "object" || Array.isArray(r)) return { ok: false, file: name, badLine: count, reason: "not a record", files: n, records };
+      const { hash, ...body } = r;
+      if (r.prevHash !== prev) return { ok: false, file: name, badLine: count, reason: "prevHash mismatch", files: n, records };
+      if (sha256(canon(body)) !== hash) return { ok: false, file: name, badLine: count, reason: "hash mismatch", files: n, records };
+      if (count === 1) first = r;
+      if (r.kind === "prune" && Array.isArray(r.segments)) for (const s of r.segments as { file?: unknown }[]) if (typeof s?.file === "string") pruned.add(s.file);
+      prev = hash;
+    }
+    const link = first?.kind === "segment" ? first.previous as SegmentLink : undefined;
+    if (previous && (link?.file !== previous.file || link.count !== previous.count || link.head !== previous.head))
+      return { ok: false, file: name, badLine: 1, reason: `segment does not continue ${previous.file}`, files: n, records };
+    if (!previous && link) missing = { file: link.file, at: name, ts: first!.ts };
+    previous = { file: name, count, head: prev }; records += count;
+  }
+  if (missing && !pruned.has(missing.file)) return { ok: false, file: missing.at, badLine: 1, reason: `segment ${missing.file} is missing and no prune record lists it`, files: n, records };
+  return { ok: true, files: n, records, ...(missing && { prunedBefore: missing.ts }) };
+}
+
 export class AuditLog {
   steps = new Map<string, string>();
-  constructor(public path: string, private now = () => new Date().toISOString()) {}
+  constructor(public path: string, private now = () => new Date().toISOString(), public rotateBytes = 0) {}
 
-  read(): Rec[] {
-    if (!existsSync(this.path)) return [];
-    return readFileSync(this.path, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  closedSegments(): string[] {
+    const dir = dirname(this.path), ext = extname(this.path), stem = basename(this.path, ext);
+    const name = new RegExp(`^${escapeRe(stem)}\\.\\d{8}T\\d{9}Z${escapeRe(ext)}$`);
+    try { return readdirSync(dir).filter((f) => name.test(f)).sort().map((f) => join(dir, f)); } catch { return []; }
   }
+  files(): string[] { return [...this.closedSegments(), ...(existsSync(this.path) ? [this.path] : [])]; }
+  read(): Rec[] { return this.files().flatMap(recordsOf); }
+  readCurrent(): Rec[] { return existsSync(this.path) ? recordsOf(this.path) : []; }
+  readRecent(): Rec[] { return this.files().slice(-2).flatMap(recordsOf); }
   private lastHash(): string {
     if (!existsSync(this.path)) return GENESIS;
     const fd = openSync(this.path, "r");
@@ -86,8 +143,29 @@ export class AuditLog {
     catch { throw new AuditLogUnavailable("not writable"); }
     try { this.lastHash(); } catch (e) { throw e instanceof AuditLogUnavailable ? e : new AuditLogUnavailable("unparseable last line"); }
   }
+  rotate(): SegmentLink | undefined { return this.withLock(() => this.rotateLocked()); }
+  private rotateLocked(): SegmentLink | undefined {
+    if (!existsSync(this.path) || statSync(this.path).size === 0) return undefined;
+    try { this.lastHash(); } catch (e) { throw e instanceof AuditLogUnavailable ? e : new AuditLogUnavailable("unparseable last line"); }
+    const ts = this.now(), ext = extname(this.path), target = join(dirname(this.path), `${basename(this.path, ext)}.${ts.replace(/[-:.]/g, "")}${ext}`);
+    if (!/^\d{8}T\d{9}Z$/.test(ts.replace(/[-:.]/g, "")) || existsSync(target)) throw new AuditLogUnavailable("segment name unavailable");
+    try { renameSync(this.path, target); } catch (e: any) { throw new AuditLogUnavailable(`rotate ${e.code ?? "failed"}`); }
+    return this.startSegment(ts);
+  }
+  private startSegment(ts = this.now()): SegmentLink {
+    const closed = this.closedSegments().at(-1)!;
+    let count = 0, last = "";
+    for (const line of fileLines(closed)) { count++; last = line; }
+    const previous = { file: basename(closed), count, head: last ? JSON.parse(last).hash : GENESIS };
+    const body = { kind: "segment", id: randomUUID(), ts, previous, prevHash: GENESIS };
+    try { appendFileSync(this.path, JSON.stringify({ ...body, hash: sha256(canon(body)) }) + "\n", { flag: "wx" }); }
+    catch (e: any) { throw new AuditLogUnavailable(`segment ${e.code ?? "failed"}`); }
+    return previous;
+  }
   append(r: Omit<Rec, "prevHash" | "hash">): Rec {
     return this.withLock(() => {
+      if (this.rotateBytes > 0 && existsSync(this.path) && statSync(this.path).size > this.rotateBytes) this.rotateLocked();
+      if (!existsSync(this.path) && this.closedSegments().length) this.startSegment();
       let prevHash: string;
       try { prevHash = this.lastHash(); } catch (e) { throw e instanceof AuditLogUnavailable ? e : new AuditLogUnavailable("unparseable last line"); }
       const body = { ...r, prevHash };
@@ -118,20 +196,32 @@ export class AuditLog {
     return this.append({ kind: "review", id: randomUUID(), ts: this.now(), refId, review: { reviewer, decision, note, at: this.now() } });
   }
 
-  verifyChain(): { ok: boolean; badLine?: number; reason?: string } {
-    if (!existsSync(this.path)) return { ok: true };
-    const lines = readFileSync(this.path, "utf8").split("\n").filter(Boolean);
-    let prev = GENESIS;
-    for (let i = 0; i < lines.length; i++) {
-      let r: Rec;
-      try { r = JSON.parse(lines[i]); } catch { return { ok: false, badLine: i + 1, reason: "invalid JSON" }; }
-      const { hash, ...body } = r;
-      if (r.prevHash !== prev) return { ok: false, badLine: i + 1, reason: "prevHash mismatch" };
-      if (sha256(canon(body)) !== hash) return { ok: false, badLine: i + 1, reason: "hash mismatch" };
-      prev = hash;
-    }
-    return { ok: true };
+  verifySeries(): SeriesCheck { return checkSeries(this.files().map((f) => [basename(f), fileLines(f)] as const)); }
+  verifyChain(): { ok: boolean; badLine?: number; reason?: string; file?: string } {
+    const v = this.verifySeries();
+    return v.ok ? { ok: true } : { ok: false, badLine: v.badLine, reason: v.reason, ...(v.file !== basename(this.path) && { file: v.file }) };
   }
+}
+
+export function prune(log: AuditLog, keepDays: number, now = new Date()) {
+  if (!Number.isInteger(keepDays) || keepDays < 1) throw new Error("audit_invalid_keep_days");
+  if (!log.verifySeries().ok) throw new Error("audit_chain_broken");
+  const cutoff = new Date(now.getTime() - keepDays * 86_400_000).toISOString(), old: (SegmentLink & { firstTs: string; lastTs: string })[] = [];
+  for (const f of log.closedSegments()) {
+    let count = 0, head = GENESIS, firstTs = "~", lastTs = "";
+    for (const line of fileLines(f)) {
+      const r = JSON.parse(line) as Rec;
+      count++; head = r.hash;
+      if (r.ts < firstTs) firstTs = r.ts;
+      if (r.ts > lastTs) lastTs = r.ts;
+    }
+    if (lastTs >= cutoff) break;
+    old.push({ file: basename(f), count, head, firstTs, lastTs });
+  }
+  if (!old.length) return [];
+  log.append({ kind: "prune", id: randomUUID(), ts: now.toISOString(), keepDays, segments: old });
+  for (const s of old) unlinkSync(join(dirname(log.path), s.file));
+  return old;
 }
 
 export function replay(log: AuditLog, recId: string, opts = { timeoutMs: 200, maxSteps: 10_000 }) {
@@ -274,18 +364,29 @@ function periodPolicies(all: Rec[], inRange: (ts: string) => boolean) {
 }
 
 export function anchor(log: AuditLog, anchorsPath: string, now = new Date().toISOString()) {
-  const recs = log.read(), a = { ts: now, count: recs.length, head: recs.length ? recs[recs.length - 1].hash : GENESIS };
+  let count = 0, last = "";
+  if (existsSync(log.path)) for (const line of fileLines(log.path)) { count++; last = line; }
+  const a = { ts: now, count, head: last ? JSON.parse(last).hash : GENESIS };
   appendFileSync(anchorsPath, JSON.stringify(a) + "\n"); return a;
 }
-export function verifyAnchors(log: AuditLog, anchorsPath: string): { ok: boolean; anchors: number; reason?: string } {
-  const chain = log.verifyChain(); if (!chain.ok) return { ok: false, anchors: 0, reason: `chain broken at line ${chain.badLine}: ${chain.reason}` };
-  const recs = log.read(), as = readFileSync(anchorsPath, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  for (const a of as) {
-    if (recs.length < a.count) return { ok: false, anchors: as.length, reason: `truncated: anchor ${a.ts} saw ${a.count} records, log has ${recs.length}` };
-    const head = a.count ? recs[a.count - 1].hash : GENESIS;
-    if (head !== a.head) return { ok: false, anchors: as.length, reason: `swapped: record ${a.count} hash differs from anchor ${a.ts}` };
+export function verifyAnchors(log: AuditLog, anchorsPath: string): { ok: boolean; anchors: number; pruned?: number; reason?: string } {
+  const chain = log.verifySeries();
+  if (!chain.ok) return { ok: false, anchors: 0, reason: `chain broken at ${chain.file === basename(log.path) ? "" : `${chain.file} `}line ${chain.badLine}: ${chain.reason}` };
+  const as: { ts: string; count: number; head: string }[] = Array.from(fileLines(anchorsPath), (l) => JSON.parse(l));
+  const wanted = new Set(as.map((a) => a.count)), found = new Set<string>();
+  let longest = 0, pruned = 0;
+  for (const f of log.files()) {
+    let count = 0;
+    for (const line of fileLines(f)) if (wanted.has(++count)) found.add(`${count}:${JSON.parse(line).hash}`);
+    longest = Math.max(longest, count);
   }
-  return { ok: true, anchors: as.length };
+  for (const a of as) {
+    if (a.count === 0 ? a.head === GENESIS : found.has(`${a.count}:${a.head}`)) continue;
+    if (chain.prunedBefore && a.ts < chain.prunedBefore) { pruned++; continue; }
+    if (longest < a.count) return { ok: false, anchors: as.length, reason: `truncated: anchor ${a.ts} saw ${a.count} records, log has ${longest}` };
+    return { ok: false, anchors: as.length, reason: `swapped: record ${a.count} hash differs from anchor ${a.ts}` };
+  }
+  return { ok: true, anchors: as.length, ...(pruned && { pruned }) };
 }
 
 export function stats(log: AuditLog, by: "key" | "model" | "hour", from = "", to = "~") {

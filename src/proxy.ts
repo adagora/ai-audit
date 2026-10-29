@@ -93,7 +93,7 @@ export function createProxy(o: ProxyOpts) {
   if (sandbox !== "bwrap") process.stderr.write(JSON.stringify({ ts: new Date().toISOString(), event: sandbox === "disabled" ? "sandbox_disabled_unsafe" : "sandbox_unavailable",
     effect: sandbox === "disabled" ? "attachment workers run WITHOUT a sandbox; development only" : "requests with attachments are refused with 422 audit_sandbox_unavailable" }) + "\n");
   const sessions = new SessionIndex(o.sessionKey ?? loadOrCreateSessionKey(o.log.path + ".session-key"));
-  try { sessions.rebuild(o.log.read()); } catch { metrics.sessionIndexRebuildFailures.inc(); }
+  try { sessions.rebuild(o.log.readRecent()); } catch { metrics.sessionIndexRebuildFailures.inc(); }
   const refusalLimit = o.refusalsPerMinute ?? 60;
   let refusalMinute = 0, refusalsThisMinute = 0, refusalsSuppressed = 0;
   const appendRefusal = (record: object) => {

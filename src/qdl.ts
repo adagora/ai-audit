@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { AuditLog, canon, decisionConsistency, sha256, verifyAnchors, type Entry, type Rec } from "./audit.js";
 import { inspect, type Allowlist } from "./scan.js";
 
@@ -26,14 +26,19 @@ const traceOf = (occurrence: any): QdlTraceStep[] => (Array.isArray(occurrence?.
   .filter((t: any) => t && typeof t.nodeId === "string")
   .map((t: any) => ({ nodeId: t.nodeId, op: String(t.op ?? ""), value: t.value }));
 
-const storedPrograms = new WeakMap<AuditLog, Set<string>>();
+const storedPrograms = new WeakMap<AuditLog, { file: string; ids: Set<string> }>();
+const currentFile = (log: AuditLog) => { try { const s = statSync(log.path); return `${s.dev}:${s.ino}:${s.birthtimeMs}`; } catch { return ""; } };
 function storeProgram(log: AuditLog, artifact: { id: string; source: string; payload?: { name?: unknown } }) {
   let known = storedPrograms.get(log);
-  if (!known) { known = new Set(log.read().filter((r) => r.kind === "program").map((r) => r.id)); storedPrograms.set(log, known); }
-  if (known.has(artifact.id)) return;
+  if (!known || known.file !== currentFile(log)) {
+    known = { file: currentFile(log), ids: new Set(log.readCurrent().filter((r) => r.kind === "program").map((r) => r.id)) };
+    storedPrograms.set(log, known);
+  }
+  if (known.ids.has(artifact.id)) return;
   const name = artifact.payload?.name;
   log.append({ kind: "program", id: artifact.id, ts: new Date().toISOString(), ...(typeof name === "string" && { name }), source: artifact.source });
-  known.add(artifact.id);
+  if (known.file !== currentFile(log)) storedPrograms.delete(log);
+  else known.ids.add(artifact.id);
 }
 
 async function session() {

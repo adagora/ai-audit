@@ -8,7 +8,7 @@
 | Article | Summary | Scope | Feature here |
 |---|---|---|---|
 | Art. 12 | High-risk systems must technically allow automatic recording of events (logs) over their lifetime, for traceability and post-market monitoring. | **high-risk only** | `record()`: timestamp, system, use case, input hash, sources (doc/page), model + version, prompt template hash, parameters, output |
-| Art. 19 (provider), Art. 26(6) (deployer) | Automatically generated logs are kept for at least **6 months**, unless other law (e.g. GDPR) says otherwise. | **high-risk only** | append-only JSONL + hash chain (`verifyChain()`); retention = file storage policy (todo) |
+| Art. 19 (provider), Art. 26(6) (deployer) | Automatically generated logs are kept for at least **6 months**, unless other law (e.g. GDPR) says otherwise. | **high-risk only** | append-only JSONL + hash chain (`verifyChain()`); `rotate` into linked segments and `prune --keep-days N` with a recorded prune ([ADR 0049](docs/adr/0049-log-segments-and-retention.md)); choosing N is the operator's job |
 | Art. 13 | Transparency to the deployer: instructions, capabilities, limits, how to interpret output, logging mechanisms. | **high-risk only** | `report()`: models, sources, stats — input for documentation |
 | Art. 14 | Human oversight: ability to understand, disregard, override or reverse the output. | **high-risk only** | `approve()`: reviewer, decision (approved/overridden/rejected), time; override rate in report |
 | Art. 50 | Users must know they talk to an AI; generated content marked machine-readably; deepfakes/public texts disclosed. | **broad** — any chatbot / generator (from 2 Aug 2026) | outside the log; in middleware: "AI answer" banner + metadata flag |
