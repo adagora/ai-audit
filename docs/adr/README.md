@@ -52,3 +52,4 @@ Format: Nygard (Status, Context, Decision, Consequences), at most ~40 lines, fil
 - [42. Offline request investigation from verified metadata](0042-request-investigation-from-metadata.md)
 - [43. Offline labeled evaluation of QDL and model judgments](0043-offline-labeled-decision-evaluation.md)
 - [44. Durable token budgets for virtual keys](0044-durable-virtual-key-token-budgets.md)
+- [45. Optional local model judgments supplement advisory injection rules](0045-local-advisory-injection-judge.md)

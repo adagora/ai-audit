@@ -384,7 +384,9 @@ A finding that cannot be masked is 409 `audit_unredactable_finding` in `redact` 
 
 A rasterized PDF reaches the model as page images. There is no text layer. The call spends more tokens, and the model is reading OCR.
 
-Prompt injection is a few deterministic rules on tool results and attachment text. The proxy logs the rule and the path, sets `x-audit-signal-count`, and still forwards when the mode would forward. The rules are easy to bypass. [ADR 0010](docs/adr/0010-advisory-prompt-injection-signal.md).
+Prompt injection uses deterministic English and Polish rules on tool results and attachment text, including Polish without diacritics and screening of normalized Unicode. The proxy logs the rule and the path, sets `x-audit-signal-count`, and still forwards when the mode would forward. Clients resend earlier tool results on each turn, so every record lists the match again; `/metrics`, `stats` and `report` count a rule at a path one time per session. Matches are advisory even in `no-go` mode: quoted examples also match, and paraphrases can evade the rules. See [detection limits, model candidates and blocking criteria](docs/prompt-injection.md) and [ADR 0010](docs/adr/0010-advisory-prompt-injection-signal.md).
+
+An optional local Ollama judge adds semantic observations on tool-result text: `--injection-model qwen3.5:4b --injection-task 'Describe the authorized task here'`. It examines the newest tool results first, reuses a verdict for text it has already judged, remains advisory and reports incomplete inspection explicitly. Run `npm run example:injection -- --ollama` to compare it with the regex baseline on synthetic English/Polish/mixed-language cases. See [setup and evaluation](examples/injection-evaluation/README.md) and [ADR 0045](docs/adr/0045-local-advisory-injection-judge.md).
 
 #### What the scanner matches
 

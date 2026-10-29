@@ -2,7 +2,8 @@ import http from "node:http";
 import { randomUUID } from "node:crypto";
 import { AuditLog, AuditLogUnavailable, sha256, stats } from "./audit.js";
 import { decide, hasDuplicateKeys, inspect, MAX_JSON_DEPTH, nestedDeeperThan, type Mode } from "./scan.js";
-import { toolResultSignals, type Signal } from "./injection.js";
+import { firstSightings, toolResultSignals, toolResultTexts, type Signal } from "./injection.js";
+import { createInjectionJudge, createVerdictMemory, judgeToolTexts, type ProxyJudgeOptions } from "./injectionJudge.js";
 import { quinelingCalls, quinelingResults, type QuinelingEvent } from "./quinelings.js";
 import { extract, type Api } from "./extract.js";
 import { conversationItems, loadOrCreateSessionKey, SessionIndex } from "./session.js";
@@ -27,6 +28,7 @@ export interface ProxyOpts {
   unsafeNoSandbox?: boolean;
   sandboxAvailable?: boolean;
   workerOutputLimit?: number;
+  injectionJudge?: ProxyJudgeOptions;
 }
 export interface VKey { name: string; sha256: string; models?: string[]; providers?: ("openai" | "anthropic")[]; logContent?: boolean; tokenBudget?: TokenBudget }
 export interface Alias { model: string; upstream?: string }
@@ -72,6 +74,12 @@ export function createProxy(o: ProxyOpts) {
   const budgets = new BudgetStore(o.budgetDirectory ?? o.log.path + ".budgets");
   const max = o.maxBodyBytes ?? 32 * 1024 * 1024, timeoutMs = o.timeoutMs ?? 180_000;
   const profile = createInspectionProfile(o);
+  const judgeOptions = o.injectionJudge && { ...o.injectionJudge };
+  if (judgeOptions && (typeof judgeOptions.task !== "string" || !judgeOptions.task.trim() || Buffer.byteLength(judgeOptions.task) > 2_000)) throw new Error("audit_injection_task_invalid");
+  const injectionJudge = judgeOptions && createInjectionJudge(judgeOptions);
+  const injectionPolicyDigest = injectionJudge && sha256(JSON.stringify({ profile: injectionJudge.profile, task: judgeOptions!.task }));
+  const injectionVerdicts = injectionJudge && createVerdictMemory();
+  const countedSignals = new Set<string>();
   const sandbox = sandboxState(o.sandboxAvailable ?? SANDBOX_AVAILABLE, o.unsafeNoSandbox === true);
   if (sandbox === "disabled") unsandboxedProxies++;
   if (sandbox !== "bwrap") process.stderr.write(JSON.stringify({ ts: new Date().toISOString(), event: sandbox === "disabled" ? "sandbox_disabled_unsafe" : "sandbox_unavailable",
@@ -184,8 +192,15 @@ export function createProxy(o: ProxyOpts) {
         if (r.sanitized) sanitize.push(() => a.set(r.sanitized!));
         if (r.rasterized) rasterized.push(a.path.join("."));
       }
-      signals.forEach((x) => metrics.injectionSignals.inc({ rule: x.rule }));
       const d = decide(profile.mode, findings); decisionTag = d.action;
+      const judged = injectionJudge && d.action !== "block" && route !== "count"
+        ? await judgeToolTexts(injectionJudge, judgeOptions!.task, toolResultTexts(body), ac.signal, judgeOptions!.timeoutMs, injectionVerdicts) : undefined;
+      if (judged) {
+        for (const result of judged.results) if (result.status === "ok" && result.verdict === "injection")
+          signals.push({ category: "prompt_injection", rule: `pi-ollama-${result.category}`, path: result.path });
+        res.setHeader("x-audit-injection-status", judged.status);
+      }
+      firstSightings(signals, session?.id, countedSignals, 100_000).forEach((x) => metrics.injectionSignals.inc({ rule: x.rule }));
       res.setHeader("x-audit-finding-count", String(findings.length));
       if (signals.length) res.setHeader("x-audit-signal-count", String(signals.length));
       if (d.action === "forward-redacted") sanitize.forEach((f) => f());
@@ -193,6 +208,7 @@ export function createProxy(o: ProxyOpts) {
       let fwd = d.action === "forward-redacted" ? Buffer.from(JSON.stringify(value)) : alias ? Buffer.from(JSON.stringify(body)) : raw;
       const rec = {
         ...context, forwardedPromptDigest: sha256(fwd.toString("latin1")), ...(composition && { context: composition }), ...(session && { session }),
+        ...(judged && { injectionJudge: { ...judged, policyDigest: injectionPolicyDigest } }),
         ...(vkey?.tokenBudget && { tokenBudget: { policy: vkey.tokenBudget } }),
         decision: { mode: profile.mode, action: d.action, findings: d.findings.map((f) => ({ rule: f.rule, path: f.path })), ...(signals.length && { signals }), ...(d.action === "forward-redacted" && rasterized.length && { rasterized }), ...(atts.length && { sandbox }) },
       };

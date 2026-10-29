@@ -1,5 +1,5 @@
 # 10. Prompt injection is an advisory signal on untrusted content only
-Status: Accepted (2026-10-20)
+Status: Superseded by [0045](0045-local-advisory-injection-judge.md) (2026-10-28)
 ## Context
 Agents feed tool results and documents to the model, and those can carry injected instructions. The proxy sees this traffic, so it can leave an audit trail ("the agent received suspicious content, then did X"). But it cannot tell intent: in a user or system prompt, "ignore previous instructions" is usually just the user's own instruction.
 ## Decision

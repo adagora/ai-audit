@@ -20,6 +20,7 @@ import { createAttestation, generateAttestationKeys, parseAttestation, verifyAtt
 const [cmd, ...rest] = process.argv.slice(2);
 const { values: a } = parseArgs({ args: rest, options: {
   "upstream-openai": { type: "string", default: "https://api.openai.com" }, "upstream-anthropic": { type: "string", default: "https://api.anthropic.com" },
+  "injection-model": { type: "string" }, "injection-task": { type: "string" }, "injection-url": { type: "string" }, "injection-timeout-ms": { type: "string" },
   mode: { type: "string", default: "redact" }, log: { type: "string", default: "./audit.jsonl" }, port: { type: "string", default: "8787" },
   host: { type: "string", default: "127.0.0.1" }, anchors: { type: "string" }, config: { type: "string" }, by: { type: "string", default: "model" }, name: { type: "string", default: "client" }, "no-page-redaction": { type: "boolean", default: false }, "unsafe-no-sandbox": { type: "boolean", default: false }, "log-content": { type: "boolean", default: false }, "allow-hashes": { type: "string" }, from: { type: "string", default: "1970-01-01" }, to: { type: "string", default: "9999-12-31" },
   input: { type: "string" }, session: { type: "string" }, output: { type: "string" }, format: { type: "string" }, "max-record-bytes": { type: "string" },
@@ -140,7 +141,13 @@ if (cmd === "attest-keygen") {
   const env = process.env, cfg = a.config ? JSON.parse(readFileSync(a.config, "utf8")) : {};
   const unsafeNoSandbox = a["unsafe-no-sandbox"] === true || env.AI_AUDIT_UNSAFE_NO_SANDBOX === "1";
   const keys = [...(cfg.keys ?? []), ...(env.AI_AUDIT_CLIENT_KEY ? [{ name: "default", sha256: sha256(env.AI_AUDIT_CLIENT_KEY), logContent: env.AI_AUDIT_CLIENT_LOG_CONTENT === "1" }] : [])];
+  const injectionJudge = a["injection-model"] ? { model: a["injection-model"], task: a["injection-task"] ?? "", url: a["injection-url"],
+    ...(a["injection-timeout-ms"] !== undefined && { timeoutMs: Number(a["injection-timeout-ms"]) }) } : cfg.injectionJudge;
+  if (!a["injection-model"] && [a["injection-task"], a["injection-url"], a["injection-timeout-ms"]].some((value) => value !== undefined)) {
+    console.error("audit_injection_model_required"); process.exit(2);
+  }
   const server = createProxy({ upstreamOpenai: a["upstream-openai"]!, upstreamAnthropic: a["upstream-anthropic"]!, mode: a.mode as Mode, log, carnet,
+    injectionJudge,
     pageRedaction: !a["no-page-redaction"] && cfg.pageRedaction !== false, keys, budgetDirectory: cfg.budgetDirectory,
     aliases: cfg.aliases, adminKeySha256: env.AI_AUDIT_ADMIN_KEY ? sha256(env.AI_AUDIT_ADMIN_KEY) : cfg.adminKeySha256,
     upstreamKeys: { openai: env.AI_AUDIT_UPSTREAM_OPENAI_KEY, anthropic: env.AI_AUDIT_UPSTREAM_ANTHROPIC_KEY }, unsafeNoSandbox });

@@ -1,0 +1,18 @@
+# 45. Optional local model judgments supplement advisory injection rules
+Status: Accepted (2026-10-28). Supersedes [0010](0010-advisory-prompt-injection-signal.md); preserves its advisory enforcement and untrusted-source boundary.
+## Context
+English/Polish regexes miss paraphrases and flag quoted training examples. A local Qwen model can classify intent in task context, but neither generated confidence nor hidden-state magnitude is a validated attack probability. Model calls add latency, failure modes and another recipient of request content.
+## Decision
+- Keep the deterministic rules on tool results and extracted attachment text. Their signals remain rule + path, advisory in every mode, and never change forwarded bytes.
+- Add an opt-in Ollama judge with an operator-configured task. The live judge covers only the same textual tool results as the regex traversal; attachment text remains regex-only. User/system/developer/assistant turns are not sent to the judge. Existing secret-based blocks and count-token requests bypass it.
+- Connect only to numeric loopback HTTP (localhost is rewritten to 127.0.0.1), never follow redirects or send provider/client credentials. Check local model metadata before sending content; reject cloud names and remote model metadata. The operator must run a trusted local Ollama service. No automatic model download or cloud fallback.
+- Request constrained JSON with benign/injection/uncertain and a fixed category enum. Validate the envelope and exact JSON fields. Discard reasoning, quotes, probabilities and arbitrary output; they never enter the audit log. Injection verdicts add fixed `pi-ollama-*` advisory signals.
+- Bound input, response size, concurrency, item count and request duration. Send at most four text leaves and at most 8,000 serialized input bytes per leaf. Request no truncation; do not truncate oversized inputs locally. Failures, skipped leaves and uncertainty are explicit, never relabeled benign. Model failures do not block an otherwise forwardable request.
+- Record scope, coverage status, unassessed count, fixed result enums, duration, model digest and versioned configuration identities. The live policy digest includes the operator task; no task/content/snippets or their individual hashes are recorded.
+- Add a separate synthetic EN/PL/mixed-language evaluation, comparing regex, model and their union by language, split and source. Reports exclude raw case text and model output. Uncertain/error outcomes reduce coverage and count as unresolved attacks in recall. Visible challenge fixtures are not an independent holdout or a production benchmark.
+## Consequences
+- Local model inference is optional and has no new runtime package dependency. Its endpoint sees the original in-scope tool text, including values the main proxy may redact later; opt-in authorizes that local processing.
+- A generic task can misclassify legitimate quoted instructions. Deployments should use a task suited to the workflow and evaluate native Polish, diacritic-free Polish, mixed language and hard negatives before relying on results.
+- The semaphore prevents concurrent model calls from one proxy instance; concurrent requests may report busy. Unsupported models, older servers and over-limit documents may produce partial coverage.
+- The recorded digest is model identity reported by the trusted local service, not remote attestation. A local administrator can change models during a call.
+- Blocking, activation probes, calibrated probabilities and semantic attachment scanning require future evidence and decisions. No automatic-block threshold is introduced.

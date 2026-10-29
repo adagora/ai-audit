@@ -5,6 +5,7 @@ import vm from "node:vm";
 import BendUsage from "./bend/usage.mjs";
 import { bendCount, bendListOf } from "./context.js";
 import { tokenCount } from "./extract.js";
+import { firstSightings } from "./injection.js";
 import { policyHistories } from "./policies.js";
 
 export const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -222,6 +223,7 @@ export function report(log: AuditLog, from: string, to: string) {
     redacted: calls.filter((c) => c.decision.action === "forward-redacted").length,
     withFindings: calls.filter((c) => c.decision.findings.length).length, withInjectionSignals: calls.filter((c) => c.decision.signals?.length).length, withQuinelings: calls.filter((c) => c.quinelings?.length).length, contentLogged: calls.filter((c) => c.content === "redacted").length, upstreamErrors: calls.filter((c) => c.upstreamStatus >= 400).length,
     ...tokenTotals(calls) };
+  const sighted = new Set<string>();
   const count = (xs: string[]) => [...xs.reduce((m, x) => m.set(x, (m.get(x) ?? 0) + 1), new Map<string, number>())].map(([k, x]) => `- ${k}: ${x}`);
   const md = [
     `# Raport audytowy AI (${from} – ${to})`, "",
@@ -239,7 +241,7 @@ export function report(log: AuditLog, from: string, to: string) {
     ...(llm.tokensComplete ? [] : [`> Token totals are a lower bound: ${llm.unknownUsage} call(s) without usage from the provider (unknown, not zero).`, ""]),
     "### Według dostawcy / modelu / systemu", ...count(calls.map((c) => `${c.provider} / ${c.model ?? "?"} / ${c.systemId ?? "-"}`)), "",
     "### Wykryte reguły (tylko ID)", ...(calls.length ? count(calls.flatMap((c) => c.decision.findings.map((f: any) => f.rule))) : []), "",
-    "### Sygnały prompt injection (advisory, tylko ID)", ...count(calls.flatMap((c) => (c.decision.signals ?? []).map((f: any) => f.rule))), "",
+    "### Sygnały prompt injection (advisory, tylko ID)", ...count(calls.flatMap((c) => firstSightings(c.decision.signals ?? [], c.session?.id, sighted).map((f: any) => f.rule))), "",
     ...(llm.withQuinelings ? ["### Quinelings w ruchu (tylko hashe, ADR 0024)", ...count(calls.flatMap((c) => (c.quinelings ?? []).map((e: any) => `${e.where} ${e.op}${e.status ? ` ${e.status}` : ""}${e.error ? ` error ${e.error.code}` : ""}`))), ""] : []),
     "_Raport generowany automatycznie z dziennika. Nie stanowi porady prawnej._",
   ].join("\n");
@@ -279,12 +281,13 @@ export function verifyAnchors(log: AuditLog, anchorsPath: string): { ok: boolean
 
 export function stats(log: AuditLog, by: "key" | "model" | "hour", from = "", to = "~") {
   const g = new Map<string, { requests: number; errors: number; blocked: number; calls: any[]; cached: number; cacheWrite: number; injection: number; latencyMs: number[] }>();
+  const sighted = new Set<string>();
   for (const c of log.read() as any[]) {
     if (c.kind !== "llm-call" || c.ts < from || c.ts >= to) continue;
     const k = by === "key" ? c.virtualKey ?? "(provider key)" : by === "model" ? `${c.provider}/${c.model ?? "?"}` : c.ts.slice(0, 13) + ":00Z";
     const r = g.get(k) ?? { requests: 0, errors: 0, blocked: 0, calls: [], cached: 0, cacheWrite: 0, injection: 0, latencyMs: [] }; g.set(k, r);
     r.requests++; if (c.decision?.action === "block") r.blocked++; else if (!(c.upstreamStatus >= 200 && c.upstreamStatus < 400)) r.errors++;
-    r.calls.push(c); r.cached += tokenCount(c.usage?.cached) ?? 0; r.cacheWrite += tokenCount(c.usage?.cacheWrite) ?? 0; r.injection += c.decision?.signals?.length ?? 0; r.latencyMs.push(c.latencyMs ?? 0);
+    r.calls.push(c); r.cached += tokenCount(c.usage?.cached) ?? 0; r.cacheWrite += tokenCount(c.usage?.cacheWrite) ?? 0; r.injection += firstSightings(c.decision?.signals ?? [], c.session?.id, sighted).length; r.latencyMs.push(c.latencyMs ?? 0);
   }
   return [...g].sort(([a], [b]) => a.localeCompare(b)).map(([group, r]) => {
     const l = r.latencyMs.sort((a, b) => a - b);
