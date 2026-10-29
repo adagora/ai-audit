@@ -132,3 +132,28 @@ footer{display:flex;justify-content:space-between;gap:15px;border-top:1px solid 
 @media(max-width:1100px){.primary-grid{grid-template-columns:1fr}.scenario-groups{max-height:260px}.result-panel{min-height:440px}}
 @media(max-width:790px){.context-grid,.evidence-grid{grid-template-columns:1fr}.summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.page-heading{display:block}.quick-nav{margin-top:18px;width:max-content;max-width:100%;overflow:auto}}
 @media(max-width:520px){.topbar{padding:0 14px}.brand{font-size:14px;gap:7px}.topbar-right{font-size:10px}.topbar-right #connection{display:none}.mode-badge{margin-left:0}.page{padding:22px 13px 54px}.summary{padding:12px}.summary strong{font-size:23px}.panel{padding:15px}.scenario-buttons,.form-grid{grid-template-columns:1fr}.scenario-groups{max-height:380px}.quick-nav a{padding:7px 8px;font-size:11px}.result-facts{grid-template-columns:1fr}.result-facts div{border-right:0}.legend{grid-template-columns:1fr}footer{display:block}footer span{display:block;margin-top:4px}}
+body{background:#0b151a;color:#e8f0f2;font-size:14px;line-height:1.5}
+.topbar-link{color:#cfe6e2;font-size:13px;font-weight:600;text-decoration:none;padding:6px 10px;border:1px solid #35535b;border-radius:8px;margin-right:4px}
+.topbar-link:hover{border-color:#91e1d5}
+.eyebrow{display:none}
+h1{font-size:26px;letter-spacing:-.02em;margin:0 0 4px}
+.page-heading{margin-bottom:16px}
+.page-heading p,.section-heading p,.minor,.meta-note,.summary small,.scenario-button span,.legend-row b,.empty,.result-state{color:#b6c9ce}
+.page-heading p,.section-heading p,.minor,.meta-note,.summary small,.empty{font-size:13px}
+.summary{min-height:0;padding:12px 16px}
+.summary strong{font-size:22px}
+.summary span,.field>span,.code-label,.box-title,.result-facts span,.telemetry-card span,.group-title,th,.context-item-head{font-size:11.5px;letter-spacing:.05em;color:#bfd2d6}
+.panel,.summary{background:#101e25;border-color:#2c4650;box-shadow:none}
+.section-heading h2{font-size:17px;letter-spacing:-.01em}
+.scenario-groups{max-height:none;overflow:visible}
+.scenario-button{min-height:0;padding:9px 11px}
+.scenario-button strong{font-size:13.5px}
+.scenario-button span{font-size:12.5px}
+.primary-grid{grid-template-columns:minmax(330px,.8fr) minmax(450px,1.2fr)}
+.result-panel{position:sticky;top:80px}
+table{font-size:13px}
+td{color:#e1ecee}
+pre,td code,.result-facts strong,.command-note{font-size:12.5px}
+.verify-row,footer,.text-button,.coverage-table button,.raw summary,.result-state,.check-row,.scenario-toolbar,.quick-nav a,.legend-row,.artifact-links a,.view-switch button{font-size:13px}
+.status-code{font-size:20px}
+@media(max-width:1100px){.result-panel{position:static}}

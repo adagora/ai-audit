@@ -281,6 +281,7 @@ After `npm link`, the binary is `ai-audit`. The examples below use that name. `n
 | Command | Example | Effect |
 |---|---|---|
 | `serve` | `ai-audit serve --mode redact --log audit.jsonl --port 8787` | Listens. Default host is `127.0.0.1`. |
+| `console` | `ai-audit console --log audit.jsonl --config gateway.json --reviewer ada` | Opens the operator console on `127.0.0.1:8793`. See [Operator console](#operator-console). |
 | `verify` | `ai-audit verify --log audit.jsonl` | Recomputes the chain. Exit 0 when it matches, 1 when it does not. |
 | `verify` | `ai-audit verify --log audit.jsonl --anchors anchors.jsonl` | Also catches a swapped or truncated file. |
 | `anchor` | `ai-audit anchor --log audit.jsonl --anchors anchors.jsonl` | Appends an anchor. Run it daily. Keep the anchor file somewhere else. |
@@ -495,6 +496,33 @@ node examples/context-map/generate.mjs
 ```
 
 `generate.mjs` builds a similar page from fake data and does not call a provider.
+
+#### Operator console
+
+The console is the place to watch the proxy and decide. It reads the log while the proxy writes it:
+
+```bash
+ai-audit console --log audit.jsonl --config gateway.json --reviewer ada \
+  --anchors anchors.jsonl --metrics http://127.0.0.1:8787/metrics
+```
+
+It prints a URL with a token, for example `http://127.0.0.1:8793/#token=…`. Open that URL. The token is the only credential, so do not share it.
+
+| Page | What it shows |
+|---|---|
+| Overview | What needs attention now: decisions waiting for a review, held tool calls, refusals, a broken chain or a blocked budget. Suggestions from fixed rules, each with its evidence and the JSON to paste, for example a use case ready for a higher tier or a tool held again and again. |
+| Decisions | The review queue. For each decision: the action the rule proposes, the result, the inputs, the program and earlier reviews. **Run the rule again** replays it in memory and lists each computed step. **Approve**, **Override** and **Reject** write the same record as `approve`. |
+| Use cases | Each row of the use-case table with its calls, blocks, refusals, held tools, tokens and override rate. |
+| Request flow | The state machine every request goes through: key, use case, route and body, model, inspection, decision, token budget, provider, tool gate, record. Each state shows how many requests reached it and where they stopped. |
+| Requests | One row per request or refusal. A request opens with its path through the state machine and the context sent to the model: each block in prompt order, its kind, size and age, the first changed byte, and what made the context large. |
+| Sessions and context | How the context of a conversation grew, turn by turn, with cache reads, writes and busts. |
+| Keys and budgets | Each virtual key, its limits, its token budget and the tools its model called. |
+| Integrity | Hash chain, segments, anchors and inspection profiles. |
+| Live counters | The running proxy's `/metrics`, when `--metrics` is given. |
+
+The console binds only to a loopback address; reach it from another machine through an SSH tunnel. It refuses requests whose `Host` is not its own address. Without `--reviewer` it is read-only. A review note is at most 500 characters and is refused when it contains a secret or personal data. The console never shows prompt text, because the log does not have it, and never edits `gateway.json`. [ADR 0054](docs/adr/0054-loopback-console.md).
+
+`npm run example:workflow` starts the same console over the synthetic log; open it from the dashboard with **Operator console**.
 
 #### Evidence workbench
 

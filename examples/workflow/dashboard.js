@@ -14,7 +14,7 @@ const GROUPS = [
   ["Tool-call gate", [["gateObserve", "Observe: untrusted URL"], ["gateEnforce", "Enforce: untrusted email"], ["gatePass", "Address typed by the user"], ["keyTools", "Tool outside the key list"]]],
   ["Use cases", [["useCaseShadow", "Shadow row: tool outside its list"], ["useCaseOff", "Row switched off"], ["useCaseMissing", "No use case named"]]],
   ["Budgets", [["budget", "Token budget exhausted"]]],
-  ["APIs and sessions", [["responses", "Responses stream"], ["anthropic", "Anthropic stream"], ["session", "Linked session"]]],
+  ["APIs and sessions", [["responses", "Responses stream"], ["anthropic", "Anthropic stream"], ["session", "Linked session"], ["contextGrowth", "Context grows over 5 turns"]]],
   ["Alerting", [["alerting", "Held call fires an alert"]]],
   ["Evidence and integrity", [["integrity", "Chain and anchor"], ["failClosed", "Torn log fails closed"], ["telemetry", "Health and metrics"], ["scrub", "Scrub an export"], ["checkQuotes", "Check quoted values"]]],
   ["Decisions (QDL)", [["quineling", "Observe Quinelings"], ["qdl", "Run QDL and receipt"], ["signed", "Signed review"]]],

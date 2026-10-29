@@ -14,7 +14,7 @@ const groups = [
   ] },
   { name: "Context and formats", items: [
     ["session", "Linked session", "Two context turns"], ["responses", "Responses SSE", "OpenAI stream"],
-    ["anthropic", "Anthropic SSE", "Messages stream"],
+    ["anthropic", "Anthropic SSE", "Messages stream"], ["contextGrowth", "Growing context", "5 turns, one prefix rewrite"],
   ] },
   { name: "Evidence and QDL", items: [
     ["quineling", "Observe Quineling", "Tool hash and status"], ["qdl", "Run QDL", "Decision and SVG"],
@@ -228,6 +228,7 @@ async function loadState() {
   text("evidence-description", mode === "showcase" ? "Recorded synthetic log metadata, telemetry and portable artifacts." : mode === "real" ? "Current page history and proxy telemetry. Inspect the real audit log offline." : "Live synthetic log metadata, telemetry and offline artifacts.");
   text("request-scope", mode === "real" ? "Choose a model and send a real OpenAI request." : mode === "showcase" ? "Select a recorded scenario to inspect its captured evidence." : "Run a fixed HTTP check or send a custom request to the mock provider.");
   element("scenario-area").classList.toggle("hidden", mode === "real");
+  document.querySelectorAll(".topbar-link").forEach((link) => link.classList.toggle("hidden", mode === "showcase"));
   element("verification-panel").classList.toggle("hidden", mode !== "synthetic");
   element("verification-panel").parentElement.classList.toggle("single", mode !== "synthetic");
   element("custom-form").classList.toggle("hidden", mode === "showcase");

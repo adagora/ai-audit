@@ -17,6 +17,7 @@ import { validateActionGate } from "./actionGate.js";
 import { checkQuotes } from "./quotes.js";
 import { readEvidenceRecords } from "./evidence.js";
 import { renderWorkbench } from "./workbench.js";
+import { createConsole } from "./console.js";
 import { createAttestation, generateAttestationKeys, parseAttestation, verifyAttestation } from "./attestation.js";
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -29,7 +30,7 @@ const { values: a } = parseArgs({ args: rest, options: {
   policy: { type: "string" }, inputs: { type: "string" }, "system-id": { type: "string" }, "use-case": { type: "string" }, "llm-call": { type: "string" },
   "private-key": { type: "string" }, "public-key": { type: "string" }, attestation: { type: "string" },
   decision: { type: "string" }, reviewer: { type: "string" }, verdict: { type: "string" }, note: { type: "string" },
-  source: { type: "string" }, answer: { type: "string" },
+  source: { type: "string" }, answer: { type: "string" }, metrics: { type: "string" },
   "baseline-limit": { type: "string", default: "2" }, "candidate-limit": { type: "string", default: "3" },
   "rotate-bytes": { type: "string", default: String(256 * 1024 * 1024) }, "keep-days": { type: "string" }, "inspect-timeout-ms": { type: "string", default: "5000" },
 } });
@@ -82,6 +83,12 @@ if (cmd === "attest-keygen") {
     console.error(cause instanceof Error && /^audit_[a-z_]+$/.test(cause.message) ? cause.message : "audit_invalid_decision_package");
     process.exitCode = 1;
   }
+} else if (cmd === "console") {
+  try {
+    const app = createConsole({ log, configPath: a.config, anchorsPath: a.anchors, metricsUrl: a.metrics, reviewer: a.reviewer, host: a.host });
+    const port = rest.some((x) => x === "--port" || x.startsWith("--port=")) ? Number(a.port) : 8793;
+    app.server.listen(port, a.host, () => console.error(JSON.stringify({ event: "console", url: app.url(), log: a.log, config: a.config ?? null, reviewer: a.reviewer ?? null, writes: a.reviewer ? "reviews" : "none" })));
+  } catch (e) { console.error((e as Error).message); process.exit(2); }
 } else if (cmd === "workbench") {
   try {
     if (!a.output) throw new Error("audit_missing_argument");
@@ -268,4 +275,4 @@ if (cmd === "attest-keygen") {
     console.error(cause instanceof Error && /^audit_[a-z_]+$/.test(cause.message) ? cause.message : "audit_command_failed"); process.exitCode = 2;
   }
 } else if (cmd === "report") console.log(report(log, a.from!, a.to!).md);
-else { console.error("usage: ai-audit serve|verify|anchor|rotate|prune|report|stats|context|workbench|keygen|profile|scrub|check-quotes|decide|approve|replay|lab|receipt|verify-receipt|attest-keygen|attest|verify-attestation|policies [options]; see README.md for command examples"); process.exit(2); }
+else { console.error("usage: ai-audit serve|console|verify|anchor|rotate|prune|report|stats|context|workbench|keygen|profile|scrub|check-quotes|decide|approve|replay|lab|receipt|verify-receipt|attest-keygen|attest|verify-attestation|policies [options]; see README.md for command examples"); process.exit(2); }

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>ai-audit console</title>
+<link rel="stylesheet" href="/console.css">
+<script src="/console.js" defer></script>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand"><span class="logo" aria-hidden="true"></span><div><strong>ai-audit</strong><small>console</small></div></div>
+    <nav id="nav" aria-label="Sections"></nav>
+    <div class="side-foot" id="side-foot"></div>
+  </aside>
+  <main class="main">
+    <header class="top">
+      <div class="heading"><h1 id="title">Overview</h1><p id="subtitle"></p></div>
+      <div class="controls">
+        <span class="pill" id="chain-pill">Loading</span>
+        <label class="field"><span>Range</span><select id="range"><option value="1">Last hour</option><option value="24" selected>Last 24 hours</option><option value="168">Last 7 days</option><option value="0">Whole log</option></select></label>
+        <label class="check"><input type="checkbox" id="auto" checked><span>Auto refresh</span></label>
+        <button class="btn" id="refresh" type="button">Refresh</button>
+      </div>
+    </header>
+    <div class="banner" id="banner" hidden></div>
+    <section class="page" id="page" aria-live="polite"></section>
+  </main>
+</div>
+<div class="tip" id="tip" role="tooltip" hidden></div>
+</body>
+</html>

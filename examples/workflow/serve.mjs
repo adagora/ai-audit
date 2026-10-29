@@ -16,6 +16,7 @@ import { recordQdl } from "../../dist/src/qdl.js";
 import { createDecisionPackage, renderDecisionSvg, verifyPortableReceipt } from "../../dist/src/decisionPackage.js";
 import { createAttestation, generateAttestationKeys, verifyAttestation } from "../../dist/src/attestation.js";
 import { renderSessionHtml } from "../../dist/src/contextView.js";
+import { createConsole } from "../../dist/src/console.js";
 import { contextPreview } from "./context.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -106,17 +107,22 @@ const upstream = http.createServer(async (req, res) => {
 });
 await listen(upstream);
 
-const proxies = Object.fromEntries(modes.map((mode) => [mode, createProxy({
-  mode, log: logs[mode], upstreamOpenai: address(upstream), upstreamAnthropic: address(upstream),
+const gateway = {
   keys: [{ name: "workflow-demo", sha256: sha256(virtualKey), providers: ["openai", "anthropic"], models: ["*"] },
     { name: "restricted-agent", sha256: sha256(restrictedKey), providers: ["openai"], models: ["mock-model", "mock-tool-get_price", "mock-tool-delete_repo"], tools: { mode: "enforce", allow: ["get_price"] } },
     { name: "budget-agent", sha256: sha256(budgetKey), providers: ["openai"], models: ["mock-budget"], tokenBudget: { period: "day", inputTokens: 60, outputTokens: 100, maxOutputTokens: 16 } }],
   actionGate: { tools: { send_email: { mode: "enforce", arguments: ["$.to"], allow: ["@company.example"] },
     http_post: { mode: "observe", arguments: ["$.url"], allow: ["*.company.example"] } } },
   useCases: { "local-showcase": { tier: "assist" }, "refund-draft": { tier: "shadow", tools: { mode: "observe", allow: ["propose_refund"] } }, "legacy-export": { tier: "off" } },
-  upstreamKeys: { openai: upstreamKey, anthropic: upstreamKey }, adminKeySha256: sha256(adminKey), aliases: { fast: { model: "mock-model" } }, quiet: true,
+  aliases: { fast: { model: "mock-model" } },
+};
+writeFileSync(join(directory, "gateway.json"), JSON.stringify(gateway, null, 2));
+const proxies = Object.fromEntries(modes.map((mode) => [mode, createProxy({
+  mode, log: logs[mode], upstreamOpenai: address(upstream), upstreamAnthropic: address(upstream), ...gateway,
+  upstreamKeys: { openai: upstreamKey, anthropic: upstreamKey }, adminKeySha256: sha256(adminKey), quiet: true,
 })]));
 await Promise.all(Object.values(proxies).map((proxy) => listen(proxy)));
+const operatorConsole = createConsole({ log: logs.redact, configPath: join(directory, "gateway.json"), reviewer: "synthetic-reviewer", metricsUrl: `${address(proxies.redact)}/metrics` });
 
 const chat = (text) => ({ model: "mock-model", messages: [{ role: "system", content: "Synthetic workflow" }, { role: "user", content: text }] });
 const injectedPage = (model, user, stream) => ({ model, stream, messages: [{ role: "user", content: user },
@@ -168,6 +174,27 @@ const scenarios = {
   ] }),
   anthropic: () => request("redact", "/v1/messages", { model: "mock-claude", max_tokens: 64, stream: true, messages: [{ role: "user", content: "Synthetic Anthropic stream" }] }),
   responses: () => request("redact", "/v1/responses", { model: "mock-model", stream: true, input: "Synthetic Responses stream" }),
+  contextGrowth: async () => {
+    const tool = (name, description) => ({ type: "function", function: { name, description, parameters: { type: "object", properties: { query: { type: "string", description: "What to look up" } } } } });
+    const tools = [tool("search_orders", "Find orders by customer, date or status. ".repeat(12)), tool("get_invoice", "Return one invoice with its lines. ".repeat(10)), tool("propose_refund", "Draft a refund for a person to review. ".repeat(10))];
+    const changed = [tool("search_orders", "Find orders by customer, date, status or part number. ".repeat(12)), ...tools.slice(1)];
+    const lines = (n) => `Order line: shaft 40 mm, quantity 4, shipped. `.repeat(n);
+    const call = (id, name) => ({ role: "assistant", content: null, tool_calls: [{ id, type: "function", function: { name, arguments: "{\"query\":\"12\"}" } }] });
+    const nonce = randomBytes(3).toString("hex"), statuses = [];
+    let messages = [{ role: "system", content: "You are a support assistant for a parts supplier. Answer briefly and name the order. ".repeat(10) }, { role: "user", content: `Where is order ${nonce}-12?` }], last;
+    const turns = [
+      [tools, []], [tools, [call("c1", "search_orders"), { role: "tool", tool_call_id: "c1", content: lines(40) }, { role: "user", content: "And the invoice?" }]],
+      [tools, [call("c2", "get_invoice"), { role: "tool", tool_call_id: "c2", content: lines(90) }, { role: "user", content: "Draft a refund for one shaft." }]],
+      [changed, [{ role: "assistant", content: "Drafting the refund." }, { role: "user", content: "Search by part number from now on." }]],
+      [changed, [{ role: "assistant", content: "Done." }, { role: "user", content: "Thanks." }]],
+    ];
+    for (const [toolList, added] of turns) {
+      messages = [...messages, ...added];
+      last = await request("redact", "/v1/chat/completions", { model: "mock-model", tools: toolList, messages });
+      statuses.push(last.status);
+    }
+    return { ...last, statuses };
+  },
   session: async () => {
     await request("redact", "/v1/chat/completions", chat("Session turn one"));
     return request("redact", "/v1/chat/completions", { model: "mock-model", messages: [
@@ -315,6 +342,7 @@ const CHECKS = {
   anthropic: ["200, Anthropic stream recorded", (r) => r.status === 200 && !!r.record],
   responses: ["200, Responses stream recorded", (r) => r.status === 200 && !!r.record],
   session: ["second turn linked to the session", (r) => r.status === 200 && r.record?.session?.turn === 2],
+  contextGrowth: ["five turns in one session as the context grows", (r) => r.statuses?.length === 5 && r.statuses.every((s) => s === 200) && r.record?.session?.turn === 5],
   quineling: ["Quinelings result observed", (r) => r.status === 200 && r.record?.quinelings?.length > 0],
   qdl: ["QDL completed and receipt verifies", (r) => r.qdl?.status === "completed" && r.portableVerification?.reproduced === true],
   signed: ["signature verifies", (r) => r.verification?.reproduced === true && r.verification?.approval === "signed-review-record"],
@@ -480,6 +508,7 @@ const cockpit = http.createServer(async (req, res) => {
     if (req.headers.host !== host) return json(res, 403, { error: "invalid host" });
     if (req.method === "POST" && req.headers.origin && req.headers.origin !== `http://${host}`) return json(res, 403, { error: "invalid origin" });
     if (req.method === "GET" && req.url === "/") { res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }); return res.end(dashboardPage); }
+    if (req.method === "GET" && req.url === "/operator-console") { res.writeHead(302, { location: operatorConsole.url(), "cache-control": "no-store" }); return res.end(); }
     if (req.method === "GET" && req.url === "/console") { res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }); return res.end(page); }
     if (req.method === "GET" && req.url === "/dashboard.css") { res.writeHead(200, { "content-type": "text/css; charset=utf-8", "cache-control": "no-store" }); return res.end(dashboardStyles); }
     if (req.method === "GET" && req.url === "/dashboard.js") { res.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" }); return res.end(dashboardScript); }
@@ -560,8 +589,11 @@ const cockpit = http.createServer(async (req, res) => {
 
 const port = Number(process.env.WORKFLOW_PORT ?? 8790);
 if (!Number.isSafeInteger(port) || port < 0 || port > 65535) throw new Error("invalid WORKFLOW_PORT");
+const consolePort = Number(process.env.WORKFLOW_CONSOLE_PORT ?? 8794);
+if (!Number.isSafeInteger(consolePort) || consolePort < 0 || consolePort > 65535) throw new Error("invalid WORKFLOW_CONSOLE_PORT");
+await listen(operatorConsole.server, consolePort);
 await listen(cockpit, port);
 for (const source of sources) await evaluateAlerts(source);
 setInterval(() => { for (const source of sources) evaluateAlerts(source).catch(() => {}); }, 5000).unref();
-process.stdout.write(`Workflow cockpit: ${address(cockpit)}\nSynthetic evidence: ${directory}\n${WATCH ? `Watching real proxy counters: ${WATCH}\n` : ""}${WEBHOOK ? "Alert webhook: on\n" : ""}`);
-process.on("SIGINT", () => { cockpit.close(); upstream.close(); Object.values(proxies).forEach((proxy) => proxy.close()); });
+process.stdout.write(`Workflow cockpit: ${address(cockpit)}\nOperator console (synthetic redact log): ${operatorConsole.url()}\nSynthetic evidence: ${directory}\n${WATCH ? `Watching real proxy counters: ${WATCH}\n` : ""}${WEBHOOK ? "Alert webhook: on\n" : ""}`);
+process.on("SIGINT", () => { cockpit.close(); operatorConsole.server.close(); upstream.close(); Object.values(proxies).forEach((proxy) => proxy.close()); });

@@ -7,6 +7,7 @@ COPY vendor ./vendor
 RUN npm ci --no-audit --no-fund
 COPY tsconfig.json ./
 COPY src ./src
+COPY console ./console
 COPY test ./test
 COPY examples ./examples
 COPY bench ./bench

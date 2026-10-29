@@ -85,11 +85,18 @@ export class BudgetStore {
     this.transact(reservation.file, (state) => { delete state.pending[reservation.id]; });
   }
   status(hash: string, budget: TokenBudget) {
-    return this.transact(this.file(hash, budget), (state) => {
-      const input = Object.values(state.pending).reduce((n, v) => sum(n, v.input), 0);
-      const output = Object.values(state.pending).reduce((n, v) => sum(n, v.output), 0);
-      return { period: budget.period, blocked: state.blocked === true, limits: { input: budget.inputTokens, output: budget.outputTokens }, spent: state.spent,
-        reserved: { input, output }, remaining: { input: Math.max(0, budget.inputTokens - state.spent.input - input), output: Math.max(0, budget.outputTokens - state.spent.output - output) } };
-    });
+    return this.transact(this.file(hash, budget), (state) => statusOf(state, budget));
   }
+  peek(hash: string, budget: TokenBudget) {
+    const file = this.file(hash, budget);
+    try { return statusOf(existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : { version: 1, spent: { input: 0, output: 0 }, pending: {} }, budget); }
+    catch { throw new BudgetError(503, "audit_budget_unavailable"); }
+  }
+}
+
+function statusOf(state: State, budget: TokenBudget) {
+  const input = Object.values(state.pending).reduce((n, v) => sum(n, v.input), 0);
+  const output = Object.values(state.pending).reduce((n, v) => sum(n, v.output), 0);
+  return { period: budget.period, blocked: state.blocked === true, limits: { input: budget.inputTokens, output: budget.outputTokens }, spent: state.spent,
+    reserved: { input, output }, remaining: { input: Math.max(0, budget.inputTokens - state.spent.input - input), output: Math.max(0, budget.outputTokens - state.spent.output - output) } };
 }
