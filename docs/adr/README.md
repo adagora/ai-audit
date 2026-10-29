@@ -63,3 +63,4 @@ Format: Nygard (Status, Context, Decision, Consequences), at most ~40 lines, fil
 - [53. A use-case table limits what each kind of request may do](0053-use-case-table.md)
 - [54. A loopback console reads the audit log and records reviews](0054-loopback-console.md)
 - [55. An application acts on a decision after its verdict, and the log records the action](0055-act-after-verdict.md)
+- [56. Segment order and pruned anchors do not depend on the wall clock](0056-segment-order-and-anchors-without-the-clock.md)

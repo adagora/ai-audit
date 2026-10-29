@@ -670,7 +670,7 @@ The workbench omits retained output text, QDL source and inputs, reviewer names 
 
 #### Rotation and retention
 
-The log path names a series. `rotate`, or `serve` when the file passes `--rotate-bytes`, renames `audit.jsonl` to `audit.<UTC time>.jsonl` under the append lock and starts a new `audit.jsonl` whose first record, `kind: "segment"`, holds the closed file's name, record count and last hash. `verify`, `report`, `stats`, `context`, `workbench`, `decide`, `replay` and `receipt` read every segment in order. `verify` prints the file of a break, for example `BROKEN at audit.20261029T110359005Z.jsonl line 3: hash mismatch`. A segment that was changed, shortened or deleted breaks the series. Anchors keep working across rotations.
+The log path names a series. `rotate`, or `serve` when the file passes `--rotate-bytes`, renames `audit.jsonl` to `audit.<UTC time>.jsonl` under the append lock and starts a new `audit.jsonl` whose first record, `kind: "segment"`, holds the closed file's name, record count and last hash. A name is never earlier than the segment before it, so a clock that steps back cannot reorder the series. The new file appears with its first record already in it. `verify`, `report`, `stats`, `context`, `workbench`, `decide`, `replay` and `receipt` read every segment in order. `verify` prints the file of a break, for example `BROKEN at audit.20261029T110359005Z.jsonl line 3: hash mismatch`. A segment that was changed, shortened or deleted breaks the series. Anchors keep working across rotations.
 
 ```bash
 ai-audit rotate --log audit.jsonl
@@ -678,7 +678,7 @@ ai-audit verify --log audit.jsonl
 ai-audit prune --log audit.jsonl --keep-days 184
 ```
 
-`prune` deletes nothing by default and never touches the current file. It refuses a series that does not verify. Before it deletes the oldest segments whose last record is older than N days, it appends a `prune` record with each segment's name, count, head and time range, so `verify` and `verify --anchors` accept that gap and no other. The AI Act asks for at least six months of logs from deployers of high-risk systems; 184 days covers any six months. Take a portable receipt of any decision that must outlive the window first. Backup tools and log shippers must follow the file name, not the open file. [ADR 0049](docs/adr/0049-log-segments-and-retention.md).
+`prune` deletes nothing by default and never touches the current file. It refuses a series that does not verify. Before it deletes the oldest segments whose last record is older than N days, it appends a `prune` record with each segment's name, count, head, first record hash and time range, so `verify` and `verify --anchors` accept that gap and no other. An anchor names the file it read by its first record hash, so an anchor of a deleted segment counts as pruned only when a `prune` record lists that segment. The AI Act asks for at least six months of logs from deployers of high-risk systems; 184 days covers any six months. Take a portable receipt of any decision that must outlive the window first. Backup tools and log shippers must follow the file name, not the open file. [ADR 0049](docs/adr/0049-log-segments-and-retention.md), [ADR 0056](docs/adr/0056-segment-order-and-anchors-without-the-clock.md).
 
 #### Metrics
 

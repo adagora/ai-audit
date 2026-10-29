@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -86,14 +86,14 @@ test("a changed, shortened or deleted closed segment breaks the series and names
 
 test("prune deletes closed segments older than the window after recording them; verify and anchors accept the recorded gap", () => {
   const { dir, log } = fresh(clockFrom("2026-01-01T00:00:00.000Z", 86_400_000)), anchors = join(dir, "anchors.jsonl");
-  decision(log, "a"); const b = decision(log, "b");
+  const a = decision(log, "a"), b = decision(log, "b");
   anchor(log, anchors, "2026-01-03T12:00:00.000Z");
   log.rotate(); decision(log, "c"); log.rotate(); decision(log, "d");
   anchor(log, anchors, "2026-01-09T00:00:00.000Z");
   const [first, second] = log.closedSegments();
   assert.throws(() => prune(log, 0), /audit_invalid_keep_days/);
   const pruned = prune(log, 5, new Date("2026-01-09T12:00:00.000Z"));
-  assert.deepEqual(pruned, [{ file: basename(first), count: 2, head: b.hash, firstTs: "2026-01-02T00:00:00.000Z", lastTs: "2026-01-03T00:00:00.000Z" }]);
+  assert.deepEqual(pruned, [{ file: basename(first), count: 2, head: b.hash, first: a.hash, firstTs: "2026-01-02T00:00:00.000Z", lastTs: "2026-01-03T00:00:00.000Z" }]);
   assert.ok(!existsSync(first) && existsSync(second));
   const record = log.readCurrent().at(-1)!;
   assert.equal(record.kind, "prune"); assert.equal(record.keepDays, 5); assert.deepEqual(record.segments, pruned);
@@ -104,6 +104,59 @@ test("prune deletes closed segments older than the window after recording them; 
   const records = lines(second); records[1].output = "changed"; rewrite(second, records);
   assert.throws(() => prune(log, 1, new Date("2027-01-01T00:00:00.000Z")), /audit_chain_broken/);
   assert.ok(existsSync(second));
+});
+
+test("segment names keep their order when the clock steps back, so the series still verifies", () => {
+  let t = Date.parse("2026-10-01T00:00:00.000Z");
+  const { log } = fresh(() => new Date(t).toISOString());
+  decision(log, 1); t += 3000; log.rotate();
+  decision(log, 2); t -= 60_000; log.rotate();
+  decision(log, 3);
+  assert.deepEqual(log.closedSegments().map((f) => basename(f)), ["audit.20261001T000003000Z.jsonl", "audit.20261001T000003001Z.jsonl"]);
+  assert.deepEqual(log.verifyChain(), { ok: true });
+});
+
+test("a segment name comes after the segment the current file links to, also when prune removed every closed segment and the clock stepped back", () => {
+  let t = Date.parse("2026-01-01T00:00:00.000Z");
+  const { log } = fresh(() => new Date(t).toISOString());
+  decision(log, 1); log.rotate(); decision(log, 2);
+  assert.equal(prune(log, 1, new Date("2026-02-01T00:00:00.000Z")).length, 1);
+  t -= 60_000; log.rotate();
+  assert.deepEqual(log.closedSegments().map((f) => basename(f)), ["audit.20260101T000000001Z.jsonl"]);
+  assert.deepEqual(log.verifyChain(), { ok: true });
+});
+
+test("an anchor of a pruned segment counts as pruned by the segment it names, also in the millisecond of the rotation or before a clock step back", () => {
+  for (const back of [0, 60_000]) {
+    let t = Date.parse("2026-01-01T00:00:00.000Z");
+    const { dir, log } = fresh(() => new Date(t).toISOString()), anchors = join(dir, "anchors.jsonl");
+    const a = decision(log, "a"); decision(log, "b");
+    anchor(log, anchors, new Date(t).toISOString());
+    t -= back; log.rotate(); decision(log, "c");
+    assert.equal(prune(log, 1, new Date("2026-02-01T00:00:00.000Z")).length, 1);
+    assert.deepEqual(verifyAnchors(log, anchors), { ok: true, anchors: 1, pruned: 1 }, `clock back ${back} ms`);
+    appendFileSync(anchors, JSON.stringify({ ts: "2025-12-31T00:00:00.000Z", count: 1, head: a.hash }) + "\n");
+    assert.deepEqual(verifyAnchors(log, anchors), { ok: true, anchors: 2, pruned: 2 }, "an anchor without a segment keeps the time rule");
+  }
+});
+
+test("a temporary segment file left by a crash before its rename is replaced, and the series continues", () => {
+  const { log } = fresh();
+  decision(log, 1); log.rotate();
+  renameSync(log.path, log.path + ".segment");
+  decision(log, 2);
+  assert.ok(!existsSync(log.path + ".segment"));
+  assert.equal(lines(log.path)[0].kind, "segment");
+  assert.deepEqual(log.verifyChain(), { ok: true });
+});
+
+test("an empty current file next to closed segments is started again with a segment record", () => {
+  const { log } = fresh();
+  decision(log, 1); log.rotate();
+  writeFileSync(log.path, "");
+  decision(log, 2);
+  assert.deepEqual(lines(log.path).map((r) => r.kind), ["segment", "decision"]);
+  assert.deepEqual(log.verifyChain(), { ok: true });
 });
 
 test("an anchor still catches a replaced or shortened current file after rotations", () => {

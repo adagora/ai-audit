@@ -17,9 +17,9 @@ run AuditChain.tla AuditChain.cfg pass
 run AuditChain.tla AuditChain_nolock.cfg fail ChainIntact
 run AuditChain.tla AuditChain_norestart.cfg fail ChainIntact
 run AuditChain.tla AuditChain_unlinkfirst.cfg fail ChainIntact
-run AuditChain.tla AuditChain_clockback.cfg finding ChainIntact
-run AuditChain.tla AuditChain_clockback_anchors.cfg finding AnchorsConsistent
-run AuditChain.tla AuditChain_emptysegment.cfg finding ChainIntact
+run AuditChain.tla AuditChain_clockback.cfg fail ChainIntact
+run AuditChain.tla AuditChain_clockback_anchors.cfg fail AnchorsConsistent
+run AuditChain.tla AuditChain_emptysegment.cfg fail ChainIntact
 run RequestLifecycle.tla RequestLifecycle.cfg pass
 run RequestLifecycle.tla RequestLifecycle_noguard.cfg fail NoCrash
 run RequestLifecycle.tla RequestLifecycle_noprecheck.cfg fail NoForwardOnBadLog
