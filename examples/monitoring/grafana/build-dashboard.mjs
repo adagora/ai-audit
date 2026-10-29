@@ -76,12 +76,16 @@ heading("Tool-call gate and refusals", 50, "Gate results count proposed tool cal
 chart("Tool calls by gate result", 0, 52, 12, [target('sum by (mode, result) (increase(ai_audit_action_gate_total{result!=""}[5m]))', "{{mode}} · {{result}}")], "short", "Rolling five-minute count of proposed calls to gated tools or to tools outside a key's list (ADR 0046, 0048).");
 chart("Refusals before inspection", 12, 52, 12, [target('sum by (status) (increase(ai_audit_requests_total{decision="none",status=~"4..",route=~"/v1/.*|other"}[5m]))', "{{status}}"), target("sum(increase(ai_audit_refusals_suppressed_total[5m]))", "over record limit", "B")], "short", "401, 403, 404, 413 and 400 before inspection, and refusals counted only in the per-minute summary record (ADR 0047).");
 
-heading("Investigate, report, share", 60, "Grafana holds bounded aggregate metrics. The hash-chained local log holds session links, context sizes, decision records, and evidence. Keep those records out of metric labels.");
+heading("Use cases", 60, "Present only when gateway.json has a useCases table (ADR 0053). Labels are row names from that table, or none for requests that name no row. Tiers, row versions and reviews per use case are in the report and the workbench.");
+chart("Requests by use case and decision", 0, 62, 12, [target('sum by (use_case, decision) (increase(ai_audit_requests_total{use_case!="",route=~"/v1/(chat/completions|responses|messages)"}[5m]))', "{{use_case}} · {{decision}}")], "short", "Rolling five-minute count. decision none with a 4xx status is a refusal, for example a row switched off or a use case the key may not name.");
+chart("Tool calls held, by use case", 12, 62, 12, [target('sum by (use_case, mode) (increase(ai_audit_action_gate_total{use_case!="",result="hold"}[5m]))', "{{use_case}} · {{mode}}")], "short", "Rolling five-minute count of proposed tool calls held by the gate, the key's tool list or the use case's tool list.");
+
+heading("Investigate, report, share", 70,"Grafana holds bounded aggregate metrics. The hash-chained local log holds session links, context sizes, decision records, and evidence. Keep those records out of metric labels.");
 panels.push({
   id: ++id,
   type: "text",
   title: "From a signal to an evidence package",
-  gridPos: { x: 0, y: 62, w: 24, h: 9 },
+  gridPos: { x: 0, y: 72, w: 24, h: 9 },
   options: {
     mode: "markdown",
     content: [
@@ -104,7 +108,7 @@ writeFileSync(new URL("./dashboards/ai-audit.json", import.meta.url), `${JSON.st
   uid: "ai-audit",
   title: "ai-audit | operations and evidence",
   schemaVersion: 39,
-  version: 6,
+  version: 7,
   refresh: "30s",
   time: { from: "now-15m", to: "now" },
   tags: ["ai-audit", "proxy", "evidence"],

@@ -26,7 +26,7 @@ const CHAT = {
   tools: [{ type: "function", function: { name: "send_email", description: "Send mail. Vendor support: help@vendor.example" } }],
 };
 const check = (calls: [string, unknown][], body: unknown = CHAT, api: "openai-chat" | "openai-responses" | "anthropic-messages" = "openai-chat") =>
-  checkActions(GATE, undefined, calls.map(([name, args]) => ({ name, args: typeof args === "string" ? args : JSON.stringify(args) })), () => requestTexts(api, body));
+  checkActions(GATE, {}, calls.map(([name, args]) => ({ name, args: typeof args === "string" ? args : JSON.stringify(args) })), () => requestTexts(api, body));
 const summary = (results: ReturnType<typeof check>) => results.map((c) => [c.tool, c.result, c.atoms.map((a) => `${a.path} ${a.kind} ${a.origin ?? "-"}${a.allowed ? " allowed" : ""} ${a.result}`)]);
 
 test("destinations pass only when allowed or typed by the user; untrusted, system-only and invented ones are held", () => {
@@ -147,7 +147,7 @@ test("observe mode records held calls from streamed and plain responses of all t
 
 test("a key's tool list holds calls to other tools, keeps destination checks, and accepts name prefixes", () => {
   const tools = validateKeyTools({ mode: "observe", allow: ["propose_quote", "mcp__crm__*", " send_email "] });
-  const results = checkActions(GATE, tools, [
+  const results = checkActions(GATE, { key: tools }, [
     { name: "propose_quote", args: "{}" }, { name: "mcp__crm__lookup", args: "{}" }, { name: "Bash", args: '{"command":"ls"}' },
     { name: "send_email", args: JSON.stringify({ to: "thief@evil.example" }) }, { name: "http_post", args: JSON.stringify({ url: "https://intranet.acme.example/x" }) },
   ], () => requestTexts("openai-chat", CHAT));

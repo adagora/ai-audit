@@ -12,6 +12,7 @@ const GROUPS = [
   ["Inspection policy", [["redact", "Redact a secret"], ["block", "No-go block"], ["advisory", "Advisory forward"], ["attachment", "Uninspectable file"]]],
   ["Prompt injection", [["injection", "Signal in a tool result"], ["injectionResent", "Resent result counted once"]]],
   ["Tool-call gate", [["gateObserve", "Observe: untrusted URL"], ["gateEnforce", "Enforce: untrusted email"], ["gatePass", "Address typed by the user"], ["keyTools", "Tool outside the key list"]]],
+  ["Use cases", [["useCaseShadow", "Shadow row: tool outside its list"], ["useCaseOff", "Row switched off"], ["useCaseMissing", "No use case named"]]],
   ["Budgets", [["budget", "Token budget exhausted"]]],
   ["APIs and sessions", [["responses", "Responses stream"], ["anthropic", "Anthropic stream"], ["session", "Linked session"]]],
   ["Alerting", [["alerting", "Held call fires an alert"]]],
@@ -251,8 +252,23 @@ function renderCharts() {
 
 function unavailable(host, text) { host.replaceChildren(el("div", "na", text)); }
 
+function renderUseCases(counters) {
+  const outcomes = {}, held = {};
+  for (const r of counters.requests) if (r.useCase && API_ROUTE(r.route)) {
+    const key = `${r.useCase} · ${r.decision === "none" ? `refused ${r.status}` : r.decision}`;
+    outcomes[key] = (outcomes[key] ?? 0) + r.value;
+  }
+  for (const g of counters.actionGate) if (g.use_case && g.result === "hold") held[g.use_case] = (held[g.use_case] ?? 0) + g.value;
+  if (!Object.keys(outcomes).length) {
+    for (const id of ["bars-use-cases", "bars-use-case-holds"]) unavailable($(id), "This proxy has no use-case table in gateway.json (ADR 0053).");
+    return;
+  }
+  bars($("bars-use-cases"), outcomes); bars($("bars-use-case-holds"), held);
+}
+
 function renderBars(data) {
   bars($("bars-signals"), data.counters.injectionSignals);
+  renderUseCases(data.counters);
   if (data.logs) {
     bars($("bars-findings"), data.logs.findings); bars($("bars-gate"), data.logs.gate); bars($("bars-refusals"), data.logs.refusals);
     return;

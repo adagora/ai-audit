@@ -108,7 +108,7 @@ codex -m gpt-6-sol \
 
 The OpenAI API key remains in the proxy process as `AI_AUDIT_UPSTREAM_OPENAI_KEY`. Codex sends only the `aia-` virtual key. The proxy supports `/v1/responses`; `gpt-6-sol` must be available to your API key. These flags apply to this Codex invocation and do not change your normal Codex configuration. [Codex provider settings](https://learn.chatgpt.com/docs/config-file/config-reference).
 
-Optional request headers `x-audit-system-id` and `x-audit-use-case` are copied onto the log record as labels.
+Optional request headers `x-audit-system-id` and `x-audit-use-case` are copied onto the log record as labels. With a [use-case table](#use-cases), the use case also selects limits.
 
 For a browser-driven integration test with your own OpenAI API key, run `npm run example:workflow:real` and follow the [workflow cockpit guide](examples/workflow/README.md). The same guide shows how to point UniiChat at the running proxy. Use `npm run example:workflow` for deterministic mock-provider scenarios.
 
@@ -414,6 +414,30 @@ For each tool call the model proposes to a listed tool, the proxy takes URL host
 
 A virtual key can also limit which tools its model may call: `"tools": { "mode": "observe", "allow": ["propose_quote", "mcp__crm__*"] }` in its `keys[]` entry. A call to any other tool is held and recorded with `toolAllowed: false`. Tool definitions in the request are not changed, so clients that send all their tools keep working. `ai-audit report` lists the tools each key called, so you can build the list from real use. A key without `tools` is not limited. [ADR 0048](docs/adr/0048-per-key-tool-allowlist.md).
 
+#### Use cases
+
+A use case is one kind of work that an application gives to a model, such as summarizing a ticket or drafting a refund. The application knows which of its features makes the call, so the client names the use case in the `x-audit-use-case` header. The proxy never guesses it from the content. With a `useCases` table in `gateway.json`, each use case gets its own limits:
+
+```json
+"useCases": {
+  "summarize-ticket": { "tier": "assist", "models": ["gpt-4o-mini"] },
+  "refund-draft": { "tier": "shadow", "tools": { "mode": "enforce", "allow": ["crm_lookup"] } },
+  "legacy-export": { "tier": "off" }
+},
+"keys": [{ "name": "support-app", "sha256": "…", "useCases": ["summarize-ticket", "refund-draft"] }]
+```
+
+| Field | Meaning |
+|---|---|
+| `tier` | `off`, `shadow`, `assist`, `contain` or `transact`: how much the application lets the model do without a person. The proxy refuses `off` with 403 `audit_use_case_off`. It records the other tiers but cannot enforce them, because it does not see whether a person reads the answer. |
+| `models` | Model ids allowed for this use case, in addition to the key's own list. |
+| `tools` | `mode` and `allow`, as in a key's `tools`. A call outside this list is held and recorded with `useCaseToolAllowed: false`. |
+| `keys[].useCases` | The use cases a key may name. A key without the list may name every row. If the header is missing and the list has one name, that name applies. |
+
+With a table, a request that names no row gets 400 `audit_use_case_required`, and a row that is not in the table or not in the key's list gets 403 `audit_use_case_not_allowed`. Each `llm-call` record has `useCase` and `useCasePolicy` with the tier and a digest of the row, so a later change to a row is visible. `ai-audit report` and the workbench show calls, refusals, held tool calls, tokens, decisions and reviews per use case. A decision recorded with `decide --use-case NAME` is counted with the same row. Without a table, the header is only a label, as before. [ADR 0053](docs/adr/0053-use-case-table.md).
+
+In Claude Code, send the header with `ANTHROPIC_CUSTOM_HEADERS='x-audit-use-case: coding'`, or give it a key whose list has one row.
+
 #### What the scanner matches
 
 Rules are adapted from Gitleaks, plus the rows below. A match followed by punctuation still counts. A secret split across text parts still counts. OCR text, PDF text and PDF metadata are scanned. JSON inside tool arguments and tool results is walked. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [ADR 0028](docs/adr/0028-named-credentials.md).
@@ -503,7 +527,7 @@ ai-audit prune --log audit.jsonl --keep-days 184
 
 `ai_audit_requests_total{route,decision,status}`, `ai_audit_request_duration_seconds` from 5 ms to 300 s, `ai_audit_log_unavailable_total`, `ai_audit_log_write_failures_total`, `ai_audit_refusals_suppressed_total`, `ai_audit_injection_signals_total{rule}`, `ai_audit_action_gate_total{mode,result}`, `ai_audit_quineling_events_total{where,op}`, `ai_audit_upstream_responses_total{provider,class}`, `ai_audit_upstream_errors_total{provider,reason}`, `ai_audit_unknown_usage_total{provider,field}`, `ai_audit_attachments_inspected_total`, `ai_audit_sandbox_unavailable_total`, `ai_audit_session_index_rebuild_failures_total`, `ai_audit_inspections_offloaded_total{result}`, gauge `ai_audit_sandbox_disabled`, gauge `ai_audit_attachment_cache_hits`, gauge `ai_audit_attachment_cache_misses`.
 
-Unknown paths are `route="other"`. Labels are taken from fixed sets. A ready-made VictoriaMetrics, Grafana and ntfy stack is in [examples/monitoring](examples/monitoring/README.md). [ADR 0019](docs/adr/0019-metrics-openmetrics.md).
+Unknown paths are `route="other"`. With a `useCases` table, `ai_audit_requests_total` and `ai_audit_action_gate_total` also have `use_case`: a row name, or `none` for a request that names no row. Labels are taken from fixed sets. A ready-made VictoriaMetrics, Grafana and ntfy stack is in [examples/monitoring](examples/monitoring/README.md). [ADR 0019](docs/adr/0019-metrics-openmetrics.md).
 
 On a loopback mock, Node 22, three runs, `npm run bench:overhead` measured about 0.6 to 0.7 ms p50 and about 1.1 ms p95 at concurrency 1, redaction included. At concurrency 16 one process levels off near 2000 requests per second. [docs/performance/2026-10-20](docs/performance/2026-10-20/README.md).
 
@@ -636,8 +660,10 @@ A policy file is either a QDL intent, `"format": "qdl-intent"`, or `{"source": "
 | `keys[].providers` | `openai`, `anthropic`, or both. Omit the field to allow both. |
 | `keys[].logContent` | `true` stores redacted output text and redacted tool arguments. Default is hashes only. |
 | `keys[].tools` | Optional `mode` and `allow` list of tool names, or prefixes ending in `*`, that this key's model may call. See [Tool-call gate](#tool-call-gate). |
+| `keys[].useCases` | Optional list of `useCases` rows this key may name. See [Use cases](#use-cases). |
 | `keys[].tokenBudget` | Optional UTC `period: day\|month`, nonnegative `inputTokens` / `outputTokens`, and positive per-request `maxOutputTokens`. |
 | `actionGate` | Optional tool-call gate: per tool name, `mode`, sensitive `arguments` paths and `allow` destinations. See [Tool-call gate](#tool-call-gate). |
+| `useCases` | Optional table from a use-case name to its `tier` and optional `models` and `tools`. See [Use cases](#use-cases). |
 | `budgetDirectory` | Persistent local accounting directory shared by proxy processes. Default is `<log>.budgets`. |
 | `aliases` | Map from the client's model string to `{ "model", "upstream" }`. `upstream` is optional. The API format stays the same. |
 | `pageRedaction` | `false` disables PDF rasterizing. Default is on. `--no-page-redaction` also disables it. |
@@ -747,6 +773,10 @@ Virtual keys are configured, and the bearer token is not one of them. The log ha
 A 401 from the provider, after your proxy returned 200 from `/healthz`, usually means `AI_AUDIT_UPSTREAM_OPENAI_KEY` or `AI_AUDIT_UPSTREAM_ANTHROPIC_KEY` is unset. With virtual keys on, the client credential is removed and nothing is put in its place.
 
 `GET /audit/stats` returns 401 `audit_admin_unauthorized` when `x-admin-key` does not match `AI_AUDIT_ADMIN_KEY`.
+
+### 400 `audit_use_case_required` or 403 `audit_use_case_not_allowed`
+
+`gateway.json` has a `useCases` table. The client must send `x-audit-use-case` with a row name that its key may use, or use a key whose `useCases` list has one row. The name must match exactly, in lower case. 403 `audit_use_case_off` means the row has `tier: "off"`. [Use cases](#use-cases).
 
 ### 503 `audit_log_unavailable`, or `verify` prints `BROKEN`
 

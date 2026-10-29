@@ -60,3 +60,4 @@ Format: Nygard (Status, Context, Decision, Consequences), at most ~40 lines, fil
 - [50. Large request texts are inspected in a worker with a deadline](0050-text-inspection-deadline-off-the-event-loop.md)
 - [51. A record stores each finding once per rule and path, with a count](0051-findings-stored-with-counts.md)
 - [52. Published measurements are generated from committed evidence and checked by the tests](0052-published-numbers-from-committed-evidence.md)
+- [53. A use-case table limits what each kind of request may do](0053-use-case-table.md)

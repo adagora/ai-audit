@@ -8,7 +8,8 @@ export interface KeyTools { readonly mode: GateMode; readonly allow: readonly st
 export type AtomKind = "host" | "email" | "phone" | "iban" | "finding" | "unparsed";
 export type Origin = "user" | "system" | "untrusted" | "none" | "unknown";
 export interface AtomResult { path: string; kind: AtomKind; origin?: Origin; source?: string; allowed: boolean; result: "pass" | "hold" }
-export interface CallResult { tool: string; index: number; mode: GateMode; result: "pass" | "hold"; toolAllowed?: false; atoms: AtomResult[] }
+export interface CallResult { tool: string; index: number; mode: GateMode; result: "pass" | "hold"; toolAllowed?: false; useCaseToolAllowed?: false; atoms: AtomResult[] }
+export interface ToolLimits { readonly key?: KeyTools; readonly useCase?: KeyTools }
 export interface RequestTexts { user: string[]; system: string[]; untrusted: [string, string][]; providerHistory: boolean }
 
 const ARGUMENT_PATH = /^\$(?:\.[A-Za-z0-9_-]+)*$/;
@@ -40,7 +41,7 @@ export function validateKeyTools(value: unknown): KeyTools {
   return Object.freeze({ mode: value.mode, allow: Object.freeze((value.allow as string[]).map((e) => e.trim())) });
 }
 
-export const enforces = (gate?: ActionGate, tools?: KeyTools) => tools?.mode === "enforce" || Object.values(gate?.tools ?? {}).some((t) => t.mode === "enforce");
+export const enforces = (gate: ActionGate | undefined, limits: ToolLimits) => limits.key?.mode === "enforce" || limits.useCase?.mode === "enforce" || Object.values(gate?.tools ?? {}).some((t) => t.mode === "enforce");
 
 const toolAllowed = (tools: KeyTools, name: string) => tools.allow.some((e) => e.endsWith("*") ? name.startsWith(e.slice(0, -1)) : e === name);
 
@@ -130,16 +131,18 @@ function destinationAtoms(tool: GateTool, rawArgs: string, texts: () => RequestT
   return atoms;
 }
 
-export function checkActions(gate: ActionGate | undefined, keyTools: KeyTools | undefined, calls: { name: string; args: string }[], texts: () => RequestTexts, carnet?: Allowlist): CallResult[] {
+export function checkActions(gate: ActionGate | undefined, limits: ToolLimits, calls: { name: string; args: string }[], texts: () => RequestTexts, carnet?: Allowlist): CallResult[] {
   let seen: RequestTexts | undefined;
   const results: CallResult[] = [];
   calls.forEach((call, index) => {
     const tool = gate && Object.hasOwn(gate.tools, call.name) ? gate.tools[call.name] : undefined;
-    const outsideKey = !!keyTools && !toolAllowed(keyTools, call.name);
-    if (!tool && !outsideKey) return;
-    const mode: GateMode = tool?.mode === "enforce" || (outsideKey && keyTools!.mode === "enforce") ? "enforce" : "observe";
+    const outsideKey = !!limits.key && !toolAllowed(limits.key, call.name);
+    const outsideUseCase = !!limits.useCase && !toolAllowed(limits.useCase, call.name);
+    if (!tool && !outsideKey && !outsideUseCase) return;
+    const mode: GateMode = tool?.mode === "enforce" || (outsideKey && limits.key!.mode === "enforce") || (outsideUseCase && limits.useCase!.mode === "enforce") ? "enforce" : "observe";
     const atoms = tool ? destinationAtoms(tool, call.args, () => seen ??= texts(), carnet) : [];
-    results.push({ tool: call.name, index, mode, result: outsideKey || atoms.some((a) => a.result === "hold") ? "hold" : "pass", ...(outsideKey && { toolAllowed: false as const }), atoms });
+    results.push({ tool: call.name, index, mode, result: outsideKey || outsideUseCase || atoms.some((a) => a.result === "hold") ? "hold" : "pass",
+      ...(outsideKey && { toolAllowed: false as const }), ...(outsideUseCase && { useCaseToolAllowed: false as const }), atoms });
   });
   return results;
 }

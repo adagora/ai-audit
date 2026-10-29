@@ -153,7 +153,7 @@ if (cmd === "attest-keygen") {
     console.error("audit_injection_model_required"); process.exit(2);
   }
   const server = createProxy({ upstreamOpenai: a["upstream-openai"]!, upstreamAnthropic: a["upstream-anthropic"]!, mode: a.mode as Mode, log, carnet,
-    injectionJudge, actionGate: cfg.actionGate,
+    injectionJudge, actionGate: cfg.actionGate, useCases: cfg.useCases,
     pageRedaction: !a["no-page-redaction"] && cfg.pageRedaction !== false, keys, budgetDirectory: cfg.budgetDirectory,
     aliases: cfg.aliases, adminKeySha256: env.AI_AUDIT_ADMIN_KEY ? sha256(env.AI_AUDIT_ADMIN_KEY) : cfg.adminKeySha256,
     upstreamKeys: { openai: env.AI_AUDIT_UPSTREAM_OPENAI_KEY, anthropic: env.AI_AUDIT_UPSTREAM_ANTHROPIC_KEY }, unsafeNoSandbox,
@@ -161,7 +161,7 @@ if (cmd === "attest-keygen") {
   server.listen(Number(a.port), a.host, () => {
     const addr = server.address();
     const bound = addr && typeof addr === "object" ? addr : { address: a.host, port: Number(a.port) };
-    console.error(JSON.stringify({ event: "listening", url: `http://${bound.address}:${bound.port}`, mode: a.mode, log: a.log, rotateBytes: log.rotateBytes, sandbox: sandboxState(SANDBOX_AVAILABLE, unsafeNoSandbox), attachmentTools: TOOLS_OK, virtualKeys: keys.length, contentLoggingKeys: keys.filter((k: any) => k.logContent === true).length, aliases: Object.keys(cfg.aliases ?? {}) }));
+    console.error(JSON.stringify({ event: "listening", url: `http://${bound.address}:${bound.port}`, mode: a.mode, log: a.log, rotateBytes: log.rotateBytes, sandbox: sandboxState(SANDBOX_AVAILABLE, unsafeNoSandbox), attachmentTools: TOOLS_OK, virtualKeys: keys.length, contentLoggingKeys: keys.filter((k: any) => k.logContent === true).length, aliases: Object.keys(cfg.aliases ?? {}), useCases: Object.keys(cfg.useCases ?? {}) }));
   });
 } else if (cmd === "keygen") {
   const key = "aia-" + randomBytes(24).toString("base64url");

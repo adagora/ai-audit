@@ -5,6 +5,7 @@ const groups = [
   { name: "Routing and access", items: [
     ["clean", "Clean request", "Baseline forwarding"], ["virtualKey", "Virtual key", "401 before forwarding"],
     ["alias", "Model alias", "Requested vs routed model"], ["outage", "Upstream 503", "Failure record"], ["noUsage", "Missing usage", "Unknown is not zero"],
+    ["useCaseShadow", "Use case: shadow", "Tool outside the row's list"], ["useCaseOff", "Use case: off", "403; refusal record"],
   ] },
   { name: "Inspection policy", items: [
     ["redact", "Redact credential", "Masked before upstream"], ["block", "No-go", "409; no upstream"],
@@ -24,6 +25,7 @@ const groups = [
 const coverage = [
   ["Virtual and provider keys", "virtualKey", "401 before forwarding; upstream key swap", "HTTP / local"],
   ["Aliases and route control", "alias", "Requested model and upstream model", "HTTP / local"],
+  ["Use-case table", "useCaseShadow", "Tier, row digest, row tool list, refusals by row", "HTTP / local"],
   ["Redact / no-go / advisory", "redact", "Decision, rule, path, upstream status", "HTTP / local"],
   ["Injection signals", "injection", "Rule and untrusted-content path", "HTTP / local"],
   ["Attachments and sandbox", "attachment", "422 for uninspectable URL; PDF worker in Linux CI", "Partial on this Mac"],

@@ -291,6 +291,43 @@ export function tokenTotals(calls: any[]) {
     tokensComplete: t.unknownInput === 0 && t.unknownOutput === 0 };
 }
 
+export interface UseCaseRow {
+  useCase: string | null; tiers: string[]; versions: number; calls: number; forwarded: number; redacted: number; blocked: number; rejected: number; refused: number; gateHolds: number;
+  inputTokens: number; outputTokens: number; unknownUsage: number; decisions: number; reviewed: number; overridden: number; overrideRatePct: number | null;
+}
+
+export function useCaseSummary(all: Rec[], inRange: (ts: string) => boolean): UseCaseRow[] {
+  const groups = new Map<string | null, { calls: any[]; refused: number; decisions: Rec[] }>();
+  const group = (name: unknown) => {
+    const key = typeof name === "string" ? name : null;
+    let g = groups.get(key);
+    if (!g) groups.set(key, g = { calls: [], refused: 0, decisions: [] });
+    return g;
+  };
+  for (const r of all) {
+    if (typeof r.ts !== "string" || !inRange(r.ts)) continue;
+    if (r.kind === "llm-call") group(r.useCase).calls.push(r);
+    else if (r.kind === "refusal" && !r.suppressed) group(r.useCase).refused++;
+    else if (r.kind === "decision" && !r.qdl) group(r.useCase).decisions.push(r);
+  }
+  const latest = new Map<string, Review>();
+  for (const r of all) if (r.kind === "review" && r.refId && r.review) latest.set(r.refId, r.review);
+  const rows = [...groups].map(([useCase, g]): UseCaseRow => {
+    const policies = g.calls.map((c) => c.useCasePolicy).filter((p) => p && typeof p.tier === "string" && typeof p.digest === "string");
+    const reviews = g.decisions.flatMap((d) => latest.has(d.id) ? [latest.get(d.id)!] : []);
+    const overridden = reviews.filter((v) => v.decision !== "approved").length;
+    const action = (a: string) => g.calls.filter((c) => c.decision?.action === a).length;
+    const tokens = tokenTotals(g.calls);
+    return { useCase, tiers: [...new Set(policies.map((p) => p.tier as string))], versions: new Set(policies.map((p) => p.digest)).size, calls: g.calls.length,
+      forwarded: action("forward-original"), redacted: action("forward-redacted"), blocked: action("block"), rejected: action("reject"), refused: g.refused,
+      gateHolds: g.calls.reduce((n, c) => n + (c.actionGate?.calls ?? []).filter((x: any) => x.result === "hold").length, 0),
+      inputTokens: tokens.inputTokens, outputTokens: tokens.outputTokens, unknownUsage: tokens.unknownUsage,
+      decisions: g.decisions.length, reviewed: reviews.length, overridden, overrideRatePct: reviews.length ? Math.round((overridden / reviews.length) * 1000) / 10 : null };
+  });
+  if (rows.every((r) => r.useCase === null)) return [];
+  return rows.sort((a, b) => a.useCase === null ? 1 : b.useCase === null ? -1 : a.useCase < b.useCase ? -1 : a.useCase > b.useCase ? 1 : 0);
+}
+
 export function report(log: AuditLog, from: string, to: string) {
   const all = log.read();
   const inRange = (ts: string) => ts >= from && ts < to;
@@ -319,13 +356,18 @@ export function report(log: AuditLog, from: string, to: string) {
   const sighted = new Set<string>();
   const toolUses = calls.flatMap((c) => (c.toolCalls ?? []).map((t: any) => `${c.virtualKey ?? "(klucz dostawcy)"} / ${t.name}`));
   const gateHolds = calls.flatMap((c) => (c.actionGate?.calls ?? []).filter((g: any) => g.result === "hold")
-    .map((g: any) => `${g.mode} ${g.tool}${g.toolAllowed === false ? " (poza listą klucza)" : ""}`));
+    .map((g: any) => `${g.mode} ${g.tool}${g.toolAllowed === false ? " (poza listą klucza)" : ""}${g.useCaseToolAllowed === false ? " (poza listą przypadku użycia)" : ""}`));
   const count = (xs: string[]) => [...xs.reduce((m, x) => m.set(x, (m.get(x) ?? 0) + 1), new Map<string, number>())].map(([k, x]) => `- ${k}: ${x}`);
+  const useCases = useCaseSummary(all, inRange);
   const md = [
     `# Raport audytowy AI (${from} – ${to})`, "",
     `Integralność łańcucha: ${v.ok ? "OK ✅" : `NARUSZONA ❌ (linia ${v.badLine}: ${v.reason})`}`, "",
     "| Metryka | Wartość |", "|---|---|",
     ...Object.entries(stats).map(([k, x]) => `| ${k} | ${x} |`), "",
+    ...(useCases.length ? ["## Przypadki użycia (ADR 0053)", "Odmowy liczą tylko rekordy z nazwą przypadku. Nadpisane to ostatnie recenzje inne niż „approved”.",
+      "| przypadek | poziom | wersje wiersza | wywołania | przekazane | zredagowane | zablokowane | odrzucone | odmowy | wstrzymane narzędzia | tokeny we / wy | decyzje | ocenione | nadpisane |",
+      "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+      ...useCases.map((u) => `| ${u.useCase ?? "(brak)"} | ${u.tiers.join(" → ") || "—"} | ${u.versions} | ${u.calls} | ${u.forwarded} | ${u.redacted} | ${u.blocked} | ${u.rejected} | ${u.refused} | ${u.gateHolds} | ${u.inputTokens} / ${u.outputTokens}${u.unknownUsage ? ` (+${u.unknownUsage} bez danych)` : ""} | ${u.decisions} | ${u.reviewed} | ${u.overridden}${u.overrideRatePct === null ? "" : ` (${u.overrideRatePct} %)`} |`), ""] : []),
     ...(steps.length ? ["## Kroki QDL", "| status | liczba |", "|---|---|", ...Object.entries(qdl).map(([k, x]) => `| ${k} | ${x} |`), ""] : []),
     ...(policies.length ? ["## Wersje polityk QDL", "Wersje są numerowane z całego dziennika. „aktualna” oznacza wersję ostatniej decyzji w całym dzienniku, nie ostatnią w tym oknie.", ...policies.flatMap((p) => [`### ${p.systemId} / ${p.useCase}`,
       ...p.versions.map((v) => `- v${v.version}${v.current ? " (aktualna)" : ""} ${v.sourceHash.slice(0, 15)}…${v.name ? ` „${v.name}”` : ""}: decyzje ${v.decisions}, ${v.firstUsed} – ${v.lastUsed}`)]), ""] : []),
@@ -345,7 +387,7 @@ export function report(log: AuditLog, from: string, to: string) {
     ...(llm.withQuinelings ? ["### Quinelings w ruchu (tylko hashe, ADR 0024)", ...count(calls.flatMap((c) => (c.quinelings ?? []).map((e: any) => `${e.where} ${e.op}${e.status ? ` ${e.status}` : ""}${e.error ? ` error ${e.error.code}` : ""}`))), ""] : []),
     "_Raport generowany automatycznie z dziennika. Nie stanowi porady prawnej._",
   ].join("\n");
-  return { md, stats, llm, refusals, qdl, policies, evidence };
+  return { md, stats, llm, refusals, qdl, policies, evidence, useCases };
 }
 
 const GAP_TEXT = { "companion-missing": "brak zapisu QDL", "program-missing": "brak programu", "not-reconstructible": "wynik zapisany, nie do odtworzenia", "output-mismatch": "wynik decyzji nie zgadza się z zapisem QDL" };

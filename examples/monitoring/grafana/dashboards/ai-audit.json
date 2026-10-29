@@ -2,7 +2,7 @@
   "uid": "ai-audit",
   "title": "ai-audit | operations and evidence",
   "schemaVersion": 39,
-  "version": 6,
+  "version": 7,
   "refresh": "30s",
   "time": {
     "from": "now-15m",
@@ -941,10 +941,93 @@
     {
       "id": 26,
       "type": "text",
-      "title": "Investigate, report, share",
+      "title": "Use cases",
       "gridPos": {
         "x": 0,
         "y": 60,
+        "w": 24,
+        "h": 2
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "Present only when gateway.json has a useCases table (ADR 0053). Labels are row names from that table, or none for requests that name no row. Tiers, row versions and reviews per use case are in the report and the workbench."
+      }
+    },
+    {
+      "id": 27,
+      "type": "timeseries",
+      "title": "Requests by use case and decision",
+      "description": "Rolling five-minute count. decision none with a 4xx status is a refusal, for example a row switched off or a use case the key may not name.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "victoriametrics"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 62,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "victoriametrics"
+          },
+          "expr": "sum by (use_case, decision) (increase(ai_audit_requests_total{use_case!=\"\",route=~\"/v1/(chat/completions|responses|messages)\"}[5m]))",
+          "legendFormat": "{{use_case}} · {{decision}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 28,
+      "type": "timeseries",
+      "title": "Tool calls held, by use case",
+      "description": "Rolling five-minute count of proposed tool calls held by the gate, the key's tool list or the use case's tool list.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "victoriametrics"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 62,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "victoriametrics"
+          },
+          "expr": "sum by (use_case, mode) (increase(ai_audit_action_gate_total{use_case!=\"\",result=\"hold\"}[5m]))",
+          "legendFormat": "{{use_case}} · {{mode}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 29,
+      "type": "text",
+      "title": "Investigate, report, share",
+      "gridPos": {
+        "x": 0,
+        "y": 70,
         "w": 24,
         "h": 2
       },
@@ -954,12 +1037,12 @@
       }
     },
     {
-      "id": 27,
+      "id": 30,
       "type": "text",
       "title": "From a signal to an evidence package",
       "gridPos": {
         "x": 0,
-        "y": 62,
+        "y": 72,
         "w": 24,
         "h": 9
       },

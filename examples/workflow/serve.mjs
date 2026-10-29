@@ -113,6 +113,7 @@ const proxies = Object.fromEntries(modes.map((mode) => [mode, createProxy({
     { name: "budget-agent", sha256: sha256(budgetKey), providers: ["openai"], models: ["mock-budget"], tokenBudget: { period: "day", inputTokens: 60, outputTokens: 100, maxOutputTokens: 16 } }],
   actionGate: { tools: { send_email: { mode: "enforce", arguments: ["$.to"], allow: ["@company.example"] },
     http_post: { mode: "observe", arguments: ["$.url"], allow: ["*.company.example"] } } },
+  useCases: { "local-showcase": { tier: "assist" }, "refund-draft": { tier: "shadow", tools: { mode: "observe", allow: ["propose_refund"] } }, "legacy-export": { tier: "off" } },
   upstreamKeys: { openai: upstreamKey, anthropic: upstreamKey }, adminKeySha256: sha256(adminKey), aliases: { fast: { model: "mock-model" } }, quiet: true,
 })]));
 await Promise.all(Object.values(proxies).map((proxy) => listen(proxy)));
@@ -121,11 +122,11 @@ const chat = (text) => ({ model: "mock-model", messages: [{ role: "system", cont
 const injectedPage = (model, user, stream) => ({ model, stream, messages: [{ role: "user", content: user },
   { role: "assistant", content: null, tool_calls: [{ id: "call_page", type: "function", function: { name: "fetch_page", arguments: "{}" } }] },
   { role: "tool", tool_call_id: "call_page", content: PAGE }] });
-const request = async (mode, path, body, key = virtualKey) => {
+const request = async (mode, path, body, key = virtualKey, useCase = "local-showcase") => {
   const before = upstreamSeen.length;
   const response = await fetch(address(proxies[mode]) + path, { method: "POST", headers: {
     "content-type": "application/json", authorization: `Bearer ${key}`, "x-api-key": key,
-    "x-audit-system-id": "workflow-demo", "x-audit-use-case": "local-showcase",
+    "x-audit-system-id": "workflow-demo", ...(useCase !== null && { "x-audit-use-case": useCase }),
   }, body: JSON.stringify(body) });
   const output = await response.text();
   let record;
@@ -143,7 +144,8 @@ const request = async (mode, path, body, key = virtualKey) => {
     syntheticKeyReachedUpstream: sent.some((item) => JSON.stringify(item.body).includes(syntheticKey)),
     record: record && { id: record.id, kind: record.kind, code: record.code, decision: record.decision, session: record.session, context: record.context,
       usage: record.usage, quinelings: record.quinelings, upstreamStatus: record.upstreamStatus, error: record.error, model: record.model,
-      requestedModel: record.requestedModel, actionGate: record.actionGate, tokenBudget: record.tokenBudget, toolCalls: record.toolCalls?.map((call) => call.name) },
+      requestedModel: record.requestedModel, actionGate: record.actionGate, tokenBudget: record.tokenBudget, toolCalls: record.toolCalls?.map((call) => call.name),
+      useCase: record.useCase, useCasePolicy: record.useCasePolicy },
     contextView: contextPreview(path === "/v1/responses" ? "openai-responses" : path === "/v1/messages" ? "anthropic-messages" : "openai-chat", body, sent[0]?.body ?? null),
     chain: logs[mode].verifyChain(),
   };
@@ -239,6 +241,9 @@ const scenarios = {
   gateEnforce: () => request("advisory", "/v1/chat/completions", injectedPage("mock-tool-send_email", "Summarize the page.", true)),
   gatePass: () => request("advisory", "/v1/chat/completions", injectedPage("mock-tool-send_email_user", "Summarize the page and email it to bob@client.example.", false)),
   keyTools: () => request("redact", "/v1/chat/completions", { model: "mock-tool-delete_repo", messages: [{ role: "user", content: "Clean up old branches." }] }, restrictedKey),
+  useCaseShadow: () => request("redact", "/v1/chat/completions", { model: "mock-tool-get_price", messages: [{ role: "user", content: "Draft a refund for order 12." }] }, virtualKey, "refund-draft"),
+  useCaseOff: () => request("redact", "/v1/chat/completions", chat("Export every customer record"), virtualKey, "legacy-export"),
+  useCaseMissing: () => request("redact", "/v1/chat/completions", chat("A request that names no use case"), virtualKey, null),
   budget: async () => {
     const statuses = [];
     let last;
@@ -303,6 +308,9 @@ const CHECKS = {
   gateEnforce: ["enforce: call held, notice delivered", (r) => r.status === 200 && r.record?.actionGate?.rewritten === true && has(r.response, "audit_action_held") && !has(r.response, "thief@")],
   gatePass: ["address typed by the user passes", (r) => r.status === 200 && gateCall(r)?.result === "pass" && has(r.response, "bob@client.example")],
   keyTools: ["tool outside the key list is held", (r) => r.status === 200 && gateCall(r)?.toolAllowed === false && r.record?.actionGate?.rewritten === true],
+  useCaseShadow: ["shadow row: tool outside its list is recorded", (r) => r.status === 200 && gateCall(r)?.useCaseToolAllowed === false && gateCall(r)?.mode === "observe" && r.record?.useCasePolicy?.tier === "shadow"],
+  useCaseOff: ["row switched off: 403 and a refusal record", (r) => r.status === 403 && r.record?.kind === "refusal" && r.record?.code === "audit_use_case_off" && r.record?.useCase === "legacy-export" && !r.forwarded],
+  useCaseMissing: ["no use case named: 400 before inspection", (r) => r.status === 400 && r.record?.code === "audit_use_case_required" && !r.forwarded],
   budget: ["exhausted budget returns 429", (r) => r.statuses?.at(-1) === 429],
   anthropic: ["200, Anthropic stream recorded", (r) => r.status === 200 && !!r.record],
   responses: ["200, Responses stream recorded", (r) => r.status === 200 && !!r.record],
@@ -359,7 +367,7 @@ const summarize = (samples) => {
   const sum = (name, where = () => true) => samples.filter((s) => s.name === name && where(s.labels)).reduce((a, s) => a + s.value, 0);
   const by = (name, key) => samples.filter((s) => s.name === name).reduce((acc, s) => ({ ...acc, [s.labels[key]]: (acc[s.labels[key]] ?? 0) + s.value }), {});
   return {
-    requests: samples.filter((s) => s.name === "ai_audit_requests_total").map((s) => ({ decision: s.labels.decision, status: s.labels.status, route: s.labels.route, value: s.value })),
+    requests: samples.filter((s) => s.name === "ai_audit_requests_total").map((s) => ({ decision: s.labels.decision, status: s.labels.status, route: s.labels.route, useCase: s.labels.use_case, value: s.value })),
     latency: samples.filter((s) => s.name === "ai_audit_request_duration_seconds_bucket").map((s) => ({ le: s.labels.le, value: s.value })),
     latencyCount: sum("ai_audit_request_duration_seconds_count"), injectionSignals: by("ai_audit_injection_signals_total", "rule"),
     actionGate: samples.filter((s) => s.name === "ai_audit_action_gate_total").map((s) => ({ ...s.labels, value: s.value })),
@@ -445,7 +453,7 @@ const dashboard = async (source) => {
       actions: tally(calls.map((call) => call.decision?.action ?? "none")),
       findings: tally(calls.flatMap((call) => (call.decision?.findings ?? []).map((f) => f.rule))),
       refusals: tally(refusals.filter((r) => !r.suppressed).map((r) => `${r.status} ${r.code}`)),
-      gate: tally(gate.map((c) => `${c.mode} ${c.result}${c.toolAllowed === false ? " (key list)" : ""}`)),
+      gate: tally(gate.map((c) => `${c.mode} ${c.result}${c.toolAllowed === false ? " (key list)" : ""}${c.useCaseToolAllowed === false ? " (use-case list)" : ""}`)),
       rewritten: calls.filter((call) => call.actionGate?.rewritten).length,
       tokens: { input: calls.reduce((a, c) => a + (c.usage?.input ?? 0), 0), output: calls.reduce((a, c) => a + (c.usage?.output ?? 0), 0) },
       sessions: new Set(calls.map((call) => call.session?.id).filter(Boolean)).size,

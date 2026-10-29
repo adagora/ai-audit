@@ -2,7 +2,8 @@ import http from "node:http";
 import { randomUUID } from "node:crypto";
 import { AuditLog, AuditLogUnavailable, sha256, stats } from "./audit.js";
 import { decide, hasDuplicateKeys, inspect, MAX_JSON_DEPTH, nestedDeeperThan, storedFindings, type Mode } from "./scan.js";
-import { checkActions, enforces, requestTexts, validateActionGate, validateKeyTools, type ActionGate, type CallResult, type KeyTools } from "./actionGate.js";
+import { checkActions, enforces, requestTexts, validateActionGate, validateKeyTools, type ActionGate, type CallResult, type KeyTools, type ToolLimits } from "./actionGate.js";
+import { resolveUseCase, validateUseCases, type UseCase } from "./useCases.js";
 import { heldNotice, rewriteResponse, streamGate } from "./enforce.js";
 import { firstSightings, toolResultSignals, toolResultTexts, type Signal } from "./injection.js";
 import { createInjectionJudge, createVerdictMemory, judgeToolTexts, type ProxyJudgeOptions } from "./injectionJudge.js";
@@ -34,12 +35,13 @@ export interface ProxyOpts {
   injectionJudge?: ProxyJudgeOptions;
   refusalsPerMinute?: number;
   actionGate?: ActionGate;
+  useCases?: Record<string, unknown>;
   inspectTimeoutMs?: number;
   inspectWorkers?: number;
   inspectQueue?: number;
   inspectOffloadChars?: number;
 }
-export interface VKey { name: string; sha256: string; models?: string[]; providers?: ("openai" | "anthropic")[]; logContent?: boolean; tokenBudget?: TokenBudget; tools?: KeyTools }
+export interface VKey { name: string; sha256: string; models?: string[]; providers?: ("openai" | "anthropic")[]; logContent?: boolean; tokenBudget?: TokenBudget; tools?: KeyTools; useCases?: string[] }
 export interface Alias { model: string; upstream?: string }
 export const LATENCY_BUCKETS_SECONDS = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300] as const;
 let unsandboxedProxies = 0;
@@ -87,6 +89,7 @@ export function createProxy(o: ProxyOpts) {
   const max = o.maxBodyBytes ?? 32 * 1024 * 1024, timeoutMs = o.timeoutMs ?? 180_000;
   const actionGate = o.actionGate && validateActionGate(o.actionGate);
   const keyTools = new Map((o.keys ?? []).flatMap((key) => key.tools === undefined ? [] : [[key, validateKeyTools(key.tools)] as const]));
+  const useCases = validateUseCases(o.useCases, o.keys ?? []);
   const profile = createInspectionProfile({ ...o, actionGate });
   const inspection = createInspectionPool({ allowHashes: profile.allowHashes, timeoutMs: o.inspectTimeoutMs ?? 5_000, size: o.inspectWorkers, queueLimit: o.inspectQueue });
   const offloadChars = o.inspectOffloadChars ?? OFFLOAD_CHARS;
@@ -126,9 +129,11 @@ export function createProxy(o: ProxyOpts) {
     const rid = randomUUID(), t0 = Date.now(); res.setHeader("x-request-id", rid);
     let decisionTag = "none", routeTag = "", forwarded = false;
     let reservation: Reservation | undefined, budgetSent = false, vkey: VKey | undefined, timer: ReturnType<typeof setTimeout> | undefined;
+    let useCase: { name: string; row: UseCase } | undefined, useCaseName: string | undefined;
+    const useCaseLabel = (): Record<string, string> => useCases ? { use_case: useCaseName ?? "none" } : {};
     res.on("finish", () => {
       const ms = Date.now() - t0;
-      metrics.requests.inc({ route: routeLabel(routeTag), decision: decisionTag, status: String(res.statusCode) });
+      metrics.requests.inc({ route: routeLabel(routeTag), decision: decisionTag, status: String(res.statusCode), ...useCaseLabel() });
       metrics.latency.observe(ms / 1000);
       if (!o.quiet) process.stderr.write(JSON.stringify({ ts: new Date().toISOString(), event: "request", requestId: rid, route: routeTag, status: res.statusCode, decision: decisionTag, latencyMs: ms }) + "\n");
     });
@@ -137,7 +142,7 @@ export function createProxy(o: ProxyOpts) {
       res.end(JSON.stringify({ type: "error", error: { type: "audit_proxy_error", code, message: code, ...(findings && { findings }) } }));
     };
     const refuse = (status: number, code: string, extra: object = {}) => {
-      recordRefusal({ id: rid, status, code, method: req.method, route: routeLabel(routeTag), ...(vkey && { virtualKey: vkey.name }), remoteAddress: req.socket.remoteAddress, ...extra });
+      recordRefusal({ id: rid, status, code, method: req.method, route: routeLabel(routeTag), ...(vkey && { virtualKey: vkey.name }), ...(useCaseName && { useCase: useCaseName }), remoteAddress: req.socket.remoteAddress, ...extra });
       return fail(status, code);
     };
     const event = (name: string, e: unknown) => o.quiet || process.stderr.write(JSON.stringify({ ts: new Date().toISOString(), event: name, requestId: rid, reason: contentFreeReason(e) }) + "\n");
@@ -170,6 +175,12 @@ export function createProxy(o: ProxyOpts) {
         const k = anthropic ? o.upstreamKeys?.anthropic : o.upstreamKeys?.openai;
         if (k) anthropic ? (headers["x-api-key"] = k) : (headers.authorization = `Bearer ${k}`);
       }
+      if (useCases && req.method === "POST" && route) {
+        const resolved = resolveUseCase(useCases, vkey?.useCases, str(req.headers["x-audit-use-case"]));
+        useCaseName = resolved.name;
+        if ("code" in resolved) return refuse(resolved.status, resolved.code, { provider });
+        useCase = resolved;
+      }
       const who = { virtualKey: vkey?.name, client: str(req.headers["user-agent"]) };
       const ac = new AbortController();
       timer = setTimeout(() => ac.abort(), timeoutMs);
@@ -193,7 +204,8 @@ export function createProxy(o: ProxyOpts) {
       const requestedModel = typeof body?.model === "string" ? body.model : undefined;
       const alias = requestedModel && o.aliases && Object.hasOwn(o.aliases, requestedModel) ? o.aliases[requestedModel] : undefined;
       if (alias) { body.model = alias.model; if (alias.upstream) base = alias.upstream; }
-      if (vkey?.models && !vkey.models.includes("*") && !vkey.models.includes(requestedModel ?? "") && !vkey.models.includes(body?.model)) { clearTimeout(timer); return refuse(403, "audit_model_not_allowed", { provider, ...(requestedModel && { model: requestedModel.slice(0, 128) }) }); }
+      const modelAllowed = (models?: readonly string[]) => !models || models.includes("*") || models.includes(requestedModel ?? "") || models.includes(body?.model);
+      if (!modelAllowed(vkey?.models) || !modelAllowed(useCase?.row.models)) { clearTimeout(timer); return refuse(403, "audit_model_not_allowed", { provider, ...(requestedModel && { model: requestedModel.slice(0, 128) }) }); }
       const target = base.replace(/\/$/, "") + url.pathname + url.search;
       let inspected: { value: any; findings: any[] }, inspectionStopped: string | undefined;
       if (!scannedCharsAbove(body, offloadChars)) inspected = inspect(body, profile.carnet) as { value: any; findings: any[] };
@@ -208,7 +220,8 @@ export function createProxy(o: ProxyOpts) {
       const { atts, refs } = inspectionStopped ? { atts: [], refs: [] } as ReturnType<typeof discover> : discover(value);
       const context = {
         provider: anthropic ? "anthropic" : "openai", api: route, endpoint: url.pathname, requestId: rid,
-        systemId: str(req.headers["x-audit-system-id"]), useCase: str(req.headers["x-audit-use-case"]),
+        systemId: str(req.headers["x-audit-system-id"]), useCase: useCase ? useCase.name : str(req.headers["x-audit-use-case"]),
+        ...(useCase && { useCasePolicy: { tier: useCase.row.tier, digest: useCase.row.digest } }),
         ...who, model: typeof body.model === "string" ? body.model : undefined, requestedModel: alias ? requestedModel : undefined, stream: body.stream === true,
         requestHash: sha256(raw.toString("latin1")), inspectionProfile: profile.receipt,
       };
@@ -310,20 +323,20 @@ export function createProxy(o: ProxyOpts) {
       clearTimeout(timer); forwarded = true;
       metrics.upstreamResponses.inc({ provider: context.provider, class: `${Math.floor(up.status / 100)}xx` });
       const sse = (up.headers.get("content-type") ?? "").includes("text/event-stream");
-      const allowedTools = vkey && keyTools.get(vkey), succeeded = up.status >= 200 && up.status < 400;
+      const toolLimits: ToolLimits = { key: vkey && keyTools.get(vkey), useCase: useCase?.row.tools }, succeeded = up.status >= 200 && up.status < 400;
       let verdict: { out?: Out; gated: CallResult[]; notice?: string } = { gated: [] };
       const judge = (text: string) => {
         const out = route === "count" ? undefined : extract(route, text, sse);
-        const gated = (actionGate || allowedTools) && out && succeeded ? checkActions(actionGate, allowedTools, out.toolCalls, () => requestTexts(route as Api, body), profile.carnet) : [];
+        const gated = (actionGate || toolLimits.key || toolLimits.useCase) && out && succeeded ? checkActions(actionGate, toolLimits, out.toolCalls, () => requestTexts(route as Api, body), profile.carnet) : [];
         const held = gated.filter((call) => call.result === "hold");
         verdict = { out, gated, notice: held.some((call) => call.mode === "enforce") ? heldNotice(held.map((call) => call.tool)) : undefined };
         return verdict.notice;
       };
-      const enforcing = route !== "count" && succeeded && enforces(actionGate, allowedTools);
+      const enforcing = route !== "count" && succeeded && enforces(actionGate, toolLimits);
       const captured = enforcing ? await pipeGated(up, res, route as Api, sse, `msg_audit_${rid.replaceAll("-", "")}`, judge) : await pipe(up, res);
       if (!enforcing) judge(captured);
       const { out, gated, notice } = verdict;
-      gated.forEach((call) => metrics.actionGate.inc({ mode: call.mode, result: call.result }));
+      gated.forEach((call) => metrics.actionGate.inc({ mode: call.mode, result: call.result, ...useCaseLabel() }));
       let tokenBudget: Record<string, unknown> | undefined;
       if (reservation) {
         try { tokenBudget = { policy: vkey!.tokenBudget, reserved: reservation.tokens, ...budgets.settle(reservation, out?.usage, !!anthropic) }; }
