@@ -88,4 +88,21 @@ test("a plain error after the response was streamed (disk full) is counted too, 
     assert.ok(!stderr.join("").includes("SHOULD-NOT-APPEAR"));
   } finally { process.stderr.write = write; px.close(); up.close(); }
 });
+
+test("an error after forwarding that is not a log failure is counted as a lost record, never recorded as a refusal", async () => {
+  const p = join(mkdtempSync(join(tmpdir(), "audit-after-")), "log.jsonl");
+  const log = new AuditLog(p), append = log.append.bind(log);
+  log.append = (r) => { if (r.kind === "llm-call") throw new TypeError("record could not be built"); return append(r); };
+  const up = await mockUpstream(), before = metrics.logWriteFailures.total();
+  const px = createProxy({ log, mode: "redact", upstreamOpenai: up.url, upstreamAnthropic: up.url, quiet: true }).listen(0);
+  await new Promise((r) => px.once("listening", r));
+  try {
+    const r = await fetch(`http://127.0.0.1:${(px.address() as AddressInfo).port}/v1/chat/completions`, { method: "POST",
+      headers: { "content-type": "application/json" }, body: JSON.stringify({ model: "m", messages: [{ role: "user", content: "hi" }] }) });
+    assert.equal(r.status, 200); await r.text();
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(metrics.logWriteFailures.total(), before + 1);
+    assert.deepEqual(log.read().filter((x) => x.kind === "refusal"), []);
+  } finally { px.close(); up.close(); }
+});
 }

@@ -2,26 +2,39 @@
 
 Run: `npm run verify:formal`. Procedure, coverage and sync commit: `.agents/skills/verify-audit-log/SKILL.md`.
 Specs `spec/AuditChain.tla`, `spec/RequestLifecycle.tla`; configs `spec/*.cfg`; runner `spec/run.sh` (tla2tools v1.8.0, a pre-release that upstream rebuilds; v1.7.4 lacks `-noGenerateSpecTE`). CI runs `spec/run.sh` on every push to `main` and every pull request (ADR 0030).
-Statecharts: `audit-chain.mmd/.png`, `request-lifecycle.mmd/.png` (code after ADR 0016).
+Statecharts: `audit-chain.mmd/.png`, `request-lifecycle.mmd/.png` (code after ADR 0016). They do not show log rotation (ADR 0049) or refusal records (ADR 0047).
 
 ## Why TLA+
 The questions were about the order of steps between processes and between a request and its environment (client close, timeout, log breaking). That is a model checker's job. Each model is paired with regression tests that run the real code, so a code change that breaks a property fails `verify:formal`.
 
-## Findings (both fixed)
+## Findings (fixed)
 1. Chain fork with two writer processes. Trace: A reads tail, B reads tail, A appends, B appends with the same prevHash. Reproduced: 2 processes x 300 appends, `verifyChain` = prevHash mismatch at line 83. Fixed by a lock file (commit 17ca7c9).
 2. Torn last line: the response was delivered, nothing was logged, and `fail()` after `res.end()` crashed the process. Fixed by fail-closed checks and a write-after-end guard (commit 15b9985, ADR 0016).
 
-## Results at 15b9985
+## Open findings at f6b1865 (not fixed)
+Each one is a config that `spec/run.sh` reports as `open finding`. A fix makes that config pass, and `spec/run.sh` then fails until the line in `spec/run.sh` says `pass`.
+3. Segment order follows the wall clock (`AuditChain_clockback.cfg`). `rotateLocked` names a closed segment after `now()`, and `closedSegments()` sorts by that name. If the clock steps back between two rotations, the newer segment sorts first, and `startSegment` links the next file to the wrong segment. From then on, `ai-audit verify` reports `segment does not continue`, although no record changed. Replayed on the real code with an injected clock: one rotation 60 s earlier is enough.
+4. An anchor of a pruned segment counts as swapped when it is not older than the first remaining segment (`AuditChain_clockback_anchors.cfg`). `verifyAnchors` accepts a missing anchor only if `a.ts < prunedBefore`. If the anchor and the rotation fall in the same millisecond, or the clock steps back, an honest log fails with `swapped: record 2 hash differs`. Replayed on the real code: same millisecond fails, 1 ms later passes.
+5. A new segment file is created before its first record is written (`AuditChain_emptysegment.cfg`). `startSegment` uses `appendFileSync(..., { flag: "wx" })`, which opens the file and then writes it. A process killed between the two steps leaves an empty current file. The next append starts it with `prevHash` genesis and no link, and `ai-audit verify` fails from then on. A `verify` that runs in that window also reports a break. Replayed on the real code by truncating the new file to 0 bytes; no process was killed.
+
+## Results at f6b1865
 | Config | Expected | Result |
 |---|---|---|
-| AuditChain.cfg (3 writers x 2, lock) | pass | pass, 36,969 distinct states |
+| AuditChain.cfg (2 writers x 2, rotation after 2 records, one crash, one prune, 2 anchors) | pass | pass, 94,139 distinct states |
 | AuditChain_nolock.cfg | fail | ChainIntact violated |
-| RequestLifecycle.cfg | pass | pass, 48 distinct states |
+| AuditChain_norestart.cfg (no `startSegment` for a missing current file) | fail | ChainIntact violated |
+| AuditChain_unlinkfirst.cfg (prune deletes before it records) | fail | ChainIntact violated |
+| AuditChain_clockback.cfg | open finding 3 | ChainIntact violated |
+| AuditChain_clockback_anchors.cfg | open finding 4 | AnchorsConsistent violated |
+| AuditChain_emptysegment.cfg | open finding 5 | ChainIntact violated |
+| RequestLifecycle.cfg | pass | pass, 148 distinct states |
 | RequestLifecycle_noguard.cfg | fail | NoCrash violated |
 | RequestLifecycle_noprecheck.cfg | fail | NoForwardOnBadLog violated |
 | RequestLifecycle_residual.cfg | fail | NoForwardWithoutLog violated (known window, ADR 0016) |
+| RequestLifecycle_nocount.cfg (outer catch without `\|\| forwarded`) | fail | NoRefusalAfterForward violated |
+| RequestLifecycle_norefusal.cfg (code before fc88731) | fail | NeverSilent violated |
 
-Real-code mutations caught by `verify:formal`: append without `withLock` (multi-process test fails), outer catch without `res.writableEnded` (late-failure test fails), both `ensureWritable()` checks removed (torn-tail 503 test fails).
+Real-code mutations caught by `verify:formal`: append without `withLock` (multi-process test fails), outer catch without `res.writableEnded` (late-failure test fails), both `ensureWritable()` checks removed (torn-tail 503 test fails). Checked at f6b1865: no `startSegment` for a missing current file (`test/segments.test.ts` fails), no `|| forwarded` in the outer catch (`test/logsafety.test.ts` fails, the test added with this check), no refusal record for an internal error (`test/refusals.test.ts` fails). Prune that deletes before it records passes every test; only `AuditChain_unlinkfirst.cfg` catches it.
 
 Not modelled: attachment cache vs inspection profile (reviewed: key includes `profile.id`, profile frozen per instance; no stale path).
 
