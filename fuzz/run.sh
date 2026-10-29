@@ -14,8 +14,9 @@ wait
 rc=0
 for t in $TARGETS; do
   runs=$(grep -oE "stat::number_of_executed_units: [0-9]+" "logs/$t.log" | tail -1 | grep -oE "[0-9]+$")
-  crash=$(grep -oE "Test unit written to .*" "logs/$t.log" | head -1)
+  crash=$(grep -oE "Test unit written to .*/(crash|timeout|oom|leak)-[0-9a-f]+" "logs/$t.log" | head -1)
+  slow=$(grep -oE "Test unit written to .*/slow-unit-[0-9a-f]+" "logs/$t.log" | head -1)
   if [ -n "$crash" ]; then echo "FAIL $t after ${runs:-?} runs: $(grep -m1 "Uncaught" "logs/$t.log" | cut -c1-400)"; echo "     $crash"; rc=1
-  else echo "ok   $t: ${runs:-?} runs"; fi
+  else echo "ok   $t: ${runs:-?} runs${slow:+, slowest unit $(grep -oE "slowest_unit_time_sec: *[0-9]+" "logs/$t.log" | grep -oE "[0-9]+$" | tail -1) s}"; fi
 done
 exit $rc

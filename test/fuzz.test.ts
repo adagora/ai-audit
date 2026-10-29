@@ -201,7 +201,7 @@ const LEAK = "LEAK marker", HASH = "ql_" + "0123456789abcdef".repeat(4);
 const toolResult = (g: Gen) => g.pick([
   () => JSON.stringify({ result: { result: { format: "qdl-run", sourceHash: g.pick([HASH, LEAK]), status: g.pick(["completed", LEAK]), outputs: [LEAK] } } }),
   () => JSON.stringify({ result: { id: g.pick([HASH, LEAK]), payload: { format: "qdl-program", name: LEAK } } }),
-  () => JSON.stringify({ error: { code: g.pick(["missing-input", LEAK]), path: g.pick(["$.inputs.x", LEAK]), message: LEAK } }),
+  () => JSON.stringify({ error: { code: g.pick(["missing-input", LEAK]), path: g.pick(["$.inputs.x", LEAK, "$.inputs.LEAK", `$.${"PL61109010140000071219812874"}`]), message: LEAK } }),
   () => `MCP error -32602: ${LEAK}`, () => LEAK, () => [{ type: "text", text: LEAK }]])();
 const TOOL_NAMES = ["quineling_v1_run", "mcp__quinelings__quineling_inspect", "quineling_v1_offspring_admit", "quineling_v1_novel", "lookup", `quineling_${LEAK}`, LEAK];
 function quinelingBody(g: Gen, api: Api): object {
@@ -211,13 +211,15 @@ function quinelingBody(g: Gen, api: Api): object {
   return { input: [{ type: "function_call", call_id: "c1", name }, { type: "function_call_output", call_id: g.pick(["c1", "c2"]), output: result }] };
 }
 
-test("fuzz: Quinelings events carry only shapes, hashes and codes, never free text from the traffic (ADR 0024)", () => {
+test("fuzz: Quinelings events carry only shapes, hashes, codes and clean structural error paths, never free text from the traffic (ADR 0032)", () => {
   const g = seeded(7);
   for (let i = 0; i < runs(3000); i++) {
     const api = g.pick(APIS), body = quinelingBody(g, api);
     const calls = [{ name: g.pick(TOOL_NAMES), args: g.pick([JSON.stringify({ intent: { note: LEAK }, artifactId: g.pick([HASH, LEAK]) }), LEAK]) }];
-    const events = [...quinelingResults(api, body), ...quinelingCalls(calls)];
-    assert.ok(!JSON.stringify(events).includes("LEAK"), `${JSON.stringify(events)} from ${JSON.stringify({ body, calls })}`);
+    const events = [...quinelingResults(api, body), ...quinelingCalls(calls)], from = JSON.stringify({ body, calls });
+    for (const e of events) if (e.error?.path !== undefined) assert.ok(/^\$[\w.[\]-]{0,255}$/.test(e.error.path) && !scanText(e.error.path).length, `${e.error.path} from ${from}`);
+    const withoutPaths = events.map((e) => (e.error ? { ...e, error: { code: e.error.code } } : e));
+    assert.ok(!JSON.stringify(withoutPaths).includes("LEAK"), `${JSON.stringify(events)} from ${from}`);
   }
 });
 
