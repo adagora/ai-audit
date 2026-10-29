@@ -3,10 +3,11 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { readFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
-import { checkActions, requestTexts, validateActionGate } from "../src/actionGate.js";
+import { checkActions, requestTexts, validateActionGate, validateKeyTools } from "../src/actionGate.js";
+import { report, sha256 } from "../src/audit.js";
 import { createInspectionProfile } from "../src/profile.js";
 import { metrics } from "../src/proxy.js";
-import { AWS, startProxy } from "./helpers.js";
+import { AWS, mockUpstream, startProxy } from "./helpers.js";
 
 const GATE = validateActionGate({ tools: {
   send_email: { mode: "observe", arguments: ["$.to", "$.cc"], allow: ["@ACME.example"] },
@@ -25,7 +26,7 @@ const CHAT = {
   tools: [{ type: "function", function: { name: "send_email", description: "Send mail. Vendor support: help@vendor.example" } }],
 };
 const check = (calls: [string, unknown][], body: unknown = CHAT, api: "openai-chat" | "openai-responses" | "anthropic-messages" = "openai-chat") =>
-  checkActions(GATE, calls.map(([name, args]) => ({ name, args: typeof args === "string" ? args : JSON.stringify(args) })), () => requestTexts(api, body));
+  checkActions(GATE, undefined, calls.map(([name, args]) => ({ name, args: typeof args === "string" ? args : JSON.stringify(args) })), () => requestTexts(api, body));
 const summary = (results: ReturnType<typeof check>) => results.map((c) => [c.tool, c.result, c.atoms.map((a) => `${a.path} ${a.kind} ${a.origin ?? "-"}${a.allowed ? " allowed" : ""} ${a.result}`)]);
 
 test("destinations pass only when allowed or typed by the user; untrusted, system-only and invented ones are held", () => {
@@ -142,4 +143,38 @@ test("observe mode records held calls from streamed and plain responses of all t
     const raw = readFileSync(proxy.log.path, "utf8"); assert.ok(!raw.includes("thief@") && !raw.includes("evil.example"));
     assert.deepEqual(proxy.log.verifyChain(), { ok: true });
   } finally { proxy.close(); upstream.close(); }
+});
+
+test("a key's tool list holds calls to other tools, keeps destination checks, and accepts name prefixes", () => {
+  const tools = validateKeyTools({ mode: "observe", allow: ["propose_quote", "mcp__crm__*", " send_email "] });
+  const results = checkActions(GATE, tools, [
+    { name: "propose_quote", args: "{}" }, { name: "mcp__crm__lookup", args: "{}" }, { name: "Bash", args: '{"command":"ls"}' },
+    { name: "send_email", args: JSON.stringify({ to: "thief@evil.example" }) }, { name: "http_post", args: JSON.stringify({ url: "https://intranet.acme.example/x" }) },
+  ], () => requestTexts("openai-chat", CHAT));
+  assert.deepEqual(results.map((c) => [c.index, c.tool, c.result, c.toolAllowed ?? true, c.atoms.map((a) => a.result)]), [
+    [2, "Bash", "hold", false, []], [3, "send_email", "hold", true, ["hold"]], [4, "http_post", "hold", false, ["pass"]]]);
+  for (const bad of [undefined, [], { mode: "observe" }, { mode: "observe", allow: [] }, { mode: "observe", allow: ["*"] }, { mode: "observe", allow: ["x"], extra: 1 }])
+    assert.throws(() => validateKeyTools(bad), /^Error: audit_key_tools_invalid$/);
+  assert.throws(() => validateKeyTools({ mode: "enforce", allow: ["x"] }), /audit_action_gate_enforce_unavailable/);
+});
+
+test("per-key tool lists apply only to their key, and report lists the tools each key called and the calls the gate held", async () => {
+  const up = await mockUpstream();
+  try { await assert.rejects(startProxy(up.url, "redact", { keys: [{ name: "bad", sha256: sha256("vk-X"), tools: { mode: "observe", allow: [] } as any }] }), /audit_key_tools_invalid/); }
+  catch (error) { up.close(); throw error; }
+  const proxy = await startProxy(up.url, "redact", { keys: [
+    { name: "quote-agent", sha256: sha256("vk-Q"), tools: { mode: "observe", allow: ["propose_quote"] } }, { name: "open-agent", sha256: sha256("vk-O") }] });
+  try {
+    for (const key of ["vk-Q", "vk-O"]) {
+      const response = await fetch(proxy.url + "/v1/chat/completions", { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+        body: JSON.stringify({ model: "m", messages: [{ role: "user", content: "Price part x." }] }) });
+      assert.equal(response.status, 200); assert.match(await response.text(), /get_price/);
+    }
+    const [quote, open] = proxy.log.read() as any[];
+    assert.deepEqual(quote.actionGate, { calls: [{ tool: "get_price", index: 0, mode: "observe", result: "hold", toolAllowed: false, atoms: [] }] });
+    assert.equal(open.actionGate, undefined);
+    const { md } = report(proxy.log, "1970", "9999");
+    assert.match(md, /- quote-agent \/ get_price: 1/); assert.match(md, /- open-agent \/ get_price: 1/);
+    assert.match(md, /- observe get_price \(poza listą klucza\): 1/);
+  } finally { proxy.close(); up.close(); }
 });

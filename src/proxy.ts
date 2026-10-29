@@ -2,7 +2,7 @@ import http from "node:http";
 import { randomUUID } from "node:crypto";
 import { AuditLog, AuditLogUnavailable, sha256, stats } from "./audit.js";
 import { decide, hasDuplicateKeys, inspect, MAX_JSON_DEPTH, nestedDeeperThan, type Mode } from "./scan.js";
-import { checkActions, requestTexts, validateActionGate, type ActionGate } from "./actionGate.js";
+import { checkActions, requestTexts, validateActionGate, validateKeyTools, type ActionGate, type KeyTools } from "./actionGate.js";
 import { firstSightings, toolResultSignals, toolResultTexts, type Signal } from "./injection.js";
 import { createInjectionJudge, createVerdictMemory, judgeToolTexts, type ProxyJudgeOptions } from "./injectionJudge.js";
 import { quinelingCalls, quinelingResults, type QuinelingEvent } from "./quinelings.js";
@@ -33,7 +33,7 @@ export interface ProxyOpts {
   refusalsPerMinute?: number;
   actionGate?: ActionGate;
 }
-export interface VKey { name: string; sha256: string; models?: string[]; providers?: ("openai" | "anthropic")[]; logContent?: boolean; tokenBudget?: TokenBudget }
+export interface VKey { name: string; sha256: string; models?: string[]; providers?: ("openai" | "anthropic")[]; logContent?: boolean; tokenBudget?: TokenBudget; tools?: KeyTools }
 export interface Alias { model: string; upstream?: string }
 export const LATENCY_BUCKETS_SECONDS = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300] as const;
 let unsandboxedProxies = 0;
@@ -79,6 +79,7 @@ export function createProxy(o: ProxyOpts) {
   const budgets = new BudgetStore(o.budgetDirectory ?? o.log.path + ".budgets");
   const max = o.maxBodyBytes ?? 32 * 1024 * 1024, timeoutMs = o.timeoutMs ?? 180_000;
   const actionGate = o.actionGate && validateActionGate(o.actionGate);
+  const keyTools = new Map((o.keys ?? []).flatMap((key) => key.tools === undefined ? [] : [[key, validateKeyTools(key.tools)] as const]));
   const profile = createInspectionProfile({ ...o, actionGate });
   const judgeOptions = o.injectionJudge && { ...o.injectionJudge };
   if (judgeOptions && (typeof judgeOptions.task !== "string" || !judgeOptions.task.trim() || Buffer.byteLength(judgeOptions.task) > 2_000)) throw new Error("audit_injection_task_invalid");
@@ -291,7 +292,9 @@ export function createProxy(o: ProxyOpts) {
       const sse = (up.headers.get("content-type") ?? "").includes("text/event-stream");
       const captured = await pipe(up, res);
       const out = route === "count" ? undefined : extract(route, captured, sse);
-      const gated = actionGate && out && up.status >= 200 && up.status < 400 ? checkActions(actionGate, out.toolCalls, () => requestTexts(route as Api, body), profile.carnet) : [];
+      const allowedTools = vkey && keyTools.get(vkey);
+      const gated = (actionGate || allowedTools) && out && up.status >= 200 && up.status < 400
+        ? checkActions(actionGate, allowedTools, out.toolCalls, () => requestTexts(route as Api, body), profile.carnet) : [];
       gated.forEach((call) => metrics.actionGate.inc({ mode: call.mode, result: call.result }));
       let tokenBudget: Record<string, unknown> | undefined;
       if (reservation) {

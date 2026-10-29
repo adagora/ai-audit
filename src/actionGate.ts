@@ -4,10 +4,11 @@ import { scanText, type Allowlist } from "./scan.js";
 export type GateMode = "observe" | "enforce";
 export interface GateTool { readonly mode: GateMode; readonly arguments: readonly string[]; readonly allow: readonly string[] }
 export interface ActionGate { readonly tools: Readonly<Record<string, GateTool>> }
+export interface KeyTools { readonly mode: GateMode; readonly allow: readonly string[] }
 export type AtomKind = "host" | "email" | "phone" | "iban" | "finding" | "unparsed";
 export type Origin = "user" | "system" | "untrusted" | "none" | "unknown";
 export interface AtomResult { path: string; kind: AtomKind; origin?: Origin; source?: string; allowed: boolean; result: "pass" | "hold" }
-export interface CallResult { tool: string; index: number; mode: GateMode; result: "pass" | "hold"; atoms: AtomResult[] }
+export interface CallResult { tool: string; index: number; mode: GateMode; result: "pass" | "hold"; toolAllowed?: false; atoms: AtomResult[] }
 export interface RequestTexts { user: string[]; system: string[]; untrusted: [string, string][]; providerHistory: boolean }
 
 const ARGUMENT_PATH = /^\$(?:\.[A-Za-z0-9_-]+)*$/;
@@ -33,6 +34,15 @@ export function validateActionGate(value: unknown): ActionGate {
   }
   return Object.freeze({ tools: Object.freeze(tools) });
 }
+
+export function validateKeyTools(value: unknown): KeyTools {
+  if (!record(value) || Object.keys(value).some((k) => k !== "mode" && k !== "allow") || (value.mode !== "observe" && value.mode !== "enforce")
+    || !Array.isArray(value.allow) || !value.allow.length || value.allow.some((e) => typeof e !== "string" || !e.trim() || e.length > 128 || e.trim() === "*")) throw new Error("audit_key_tools_invalid");
+  if (value.mode === "enforce") throw new Error("audit_action_gate_enforce_unavailable");
+  return Object.freeze({ mode: value.mode, allow: Object.freeze((value.allow as string[]).map((e) => e.trim())) });
+}
+
+const toolAllowed = (tools: KeyTools, name: string) => tools.allow.some((e) => e.endsWith("*") ? name.startsWith(e.slice(0, -1)) : e === name);
 
 function strings(v: unknown, path: string, out: [string, string][], skipPayloads: boolean): [string, string][] {
   if (typeof v === "string") { if (!skipPayloads || !v.startsWith("data:")) out.push([v, path]); }
@@ -105,24 +115,31 @@ function allowed(kind: AtomKind, atom: string, allow: readonly string[]) {
   return false;
 }
 
-export function checkActions(gate: ActionGate, calls: { name: string; args: string }[], texts: () => RequestTexts, carnet?: Allowlist): CallResult[] {
+function destinationAtoms(tool: GateTool, rawArgs: string, texts: () => RequestTexts, carnet?: Allowlist): AtomResult[] {
+  let args: unknown;
+  try { args = rawArgs.trim() ? JSON.parse(rawArgs) : {}; } catch { args = undefined; }
+  if (!record(args)) return [{ path: "$", kind: "unparsed", allowed: false, result: "hold" }];
+  const atoms: AtomResult[] = [];
+  for (const argument of tool.arguments) {
+    const value = argument.split(".").slice(1).reduce<unknown>((v, key) => record(v) && Object.hasOwn(v, key) ? v[key] : undefined, args);
+    for (const [text, path] of strings(value, argument, [], false)) for (const [kind, atom] of atomsIn(text, carnet)) {
+      const isAllowed = allowed(kind, atom, tool.allow), { origin, source } = originOf(kind, atom, texts());
+      atoms.push({ path, kind, origin, ...(source && { source }), allowed: isAllowed, result: kind !== "finding" && (isAllowed || origin === "user") ? "pass" : "hold" });
+    }
+  }
+  return atoms;
+}
+
+export function checkActions(gate: ActionGate | undefined, keyTools: KeyTools | undefined, calls: { name: string; args: string }[], texts: () => RequestTexts, carnet?: Allowlist): CallResult[] {
   let seen: RequestTexts | undefined;
   const results: CallResult[] = [];
   calls.forEach((call, index) => {
-    const tool = Object.hasOwn(gate.tools, call.name) ? gate.tools[call.name] : undefined;
-    if (!tool) return;
-    let args: unknown;
-    try { args = call.args.trim() ? JSON.parse(call.args) : {}; } catch { args = undefined; }
-    const atoms: AtomResult[] = [];
-    if (!record(args)) atoms.push({ path: "$", kind: "unparsed", allowed: false, result: "hold" });
-    else for (const argument of tool.arguments) {
-      const value = argument.split(".").slice(1).reduce<unknown>((v, key) => record(v) && Object.hasOwn(v, key) ? v[key] : undefined, args);
-      for (const [text, path] of strings(value, argument, [], false)) for (const [kind, atom] of atomsIn(text, carnet)) {
-        const isAllowed = allowed(kind, atom, tool.allow), { origin, source } = originOf(kind, atom, seen ??= texts());
-        atoms.push({ path, kind, origin, ...(source && { source }), allowed: isAllowed, result: kind !== "finding" && (isAllowed || origin === "user") ? "pass" : "hold" });
-      }
-    }
-    results.push({ tool: call.name, index, mode: tool.mode, result: atoms.some((a) => a.result === "hold") ? "hold" : "pass", atoms });
+    const tool = gate && Object.hasOwn(gate.tools, call.name) ? gate.tools[call.name] : undefined;
+    const outsideKey = !!keyTools && !toolAllowed(keyTools, call.name);
+    if (!tool && !outsideKey) return;
+    const mode: GateMode = tool?.mode === "enforce" || (outsideKey && keyTools!.mode === "enforce") ? "enforce" : "observe";
+    const atoms = tool ? destinationAtoms(tool, call.args, () => seen ??= texts(), carnet) : [];
+    results.push({ tool: call.name, index, mode, result: outsideKey || atoms.some((a) => a.result === "hold") ? "hold" : "pass", ...(outsideKey && { toolAllowed: false as const }), atoms });
   });
   return results;
 }

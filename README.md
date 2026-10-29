@@ -401,7 +401,9 @@ Text checks are too slow or too inaccurate to block on, so blocking belongs at t
 
 For each tool call the model proposes to a listed tool, the proxy takes URL hosts, email addresses, phone numbers and IBANs from those arguments. A destination passes if it is allowed or the user typed it. A destination that came only from a tool result, a tool definition or the system prompt, or from nowhere, is held. A secret in the arguments is always held. No model runs, so the check costs microseconds and does not depend on language or wording.
 
-`observe` delivers the response unchanged and records `actionGate.calls`: per value its argument path, kind, origin (`user`, `system`, `untrusted`, `none`, `unknown`), the source path of an untrusted occurrence, and the result. Values are never stored. `enforce`, which will replace held calls with a text answer, is not available yet; the proxy refuses to start with it. Unlisted tools and tools the provider runs itself are not checked. [ADR 0046](docs/adr/0046-deterministic-action-gate.md).
+`observe` delivers the response unchanged and records `actionGate.calls`: per value its argument path, kind, origin (`user`, `system`, `untrusted`, `none`, `unknown`), the source path of an untrusted occurrence, and the result. Values are never stored. `enforce`, which will replace held calls with a text answer, is not available yet; the proxy refuses to start with it. Unlisted tools pass, and tools the provider runs itself are not seen. [ADR 0046](docs/adr/0046-deterministic-action-gate.md).
+
+A virtual key can also limit which tools its model may call: `"tools": { "mode": "observe", "allow": ["propose_quote", "mcp__crm__*"] }` in its `keys[]` entry. A call to any other tool is held and recorded with `toolAllowed: false`. Tool definitions in the request are not changed, so clients that send all their tools keep working. `ai-audit report` lists the tools each key called, so you can build the list from real use. A key without `tools` is not limited. [ADR 0048](docs/adr/0048-per-key-tool-allowlist.md).
 
 #### What the scanner matches
 
@@ -612,6 +614,7 @@ A policy file is either a QDL intent, `"format": "qdl-intent"`, or `{"source": "
 | `keys[].models` | Model ids this key may request. `"*"` allows any. The check uses the name the client sent and the name after an alias. |
 | `keys[].providers` | `openai`, `anthropic`, or both. Omit the field to allow both. |
 | `keys[].logContent` | `true` stores redacted output text and redacted tool arguments. Default is hashes only. |
+| `keys[].tools` | Optional `mode` and `allow` list of tool names, or prefixes ending in `*`, that this key's model may call. See [Tool-call gate](#tool-call-gate). |
 | `keys[].tokenBudget` | Optional UTC `period: day\|month`, nonnegative `inputTokens` / `outputTokens`, and positive per-request `maxOutputTokens`. |
 | `actionGate` | Optional tool-call gate: per tool name, `mode`, sensitive `arguments` paths and `allow` destinations. See [Tool-call gate](#tool-call-gate). |
 | `budgetDirectory` | Persistent local accounting directory shared by proxy processes. Default is `<log>.budgets`. |

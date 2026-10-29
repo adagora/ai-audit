@@ -226,6 +226,9 @@ export function report(log: AuditLog, from: string, to: string) {
     withFindings: calls.filter((c) => c.decision.findings.length).length, withInjectionSignals: calls.filter((c) => c.decision.signals?.length).length, withQuinelings: calls.filter((c) => c.quinelings?.length).length, contentLogged: calls.filter((c) => c.content === "redacted").length, upstreamErrors: calls.filter((c) => c.upstreamStatus >= 400).length,
     ...tokenTotals(calls) };
   const sighted = new Set<string>();
+  const toolUses = calls.flatMap((c) => (c.toolCalls ?? []).map((t: any) => `${c.virtualKey ?? "(klucz dostawcy)"} / ${t.name}`));
+  const gateHolds = calls.flatMap((c) => (c.actionGate?.calls ?? []).filter((g: any) => g.result === "hold")
+    .map((g: any) => `${g.mode} ${g.tool}${g.toolAllowed === false ? " (poza listą klucza)" : ""}`));
   const count = (xs: string[]) => [...xs.reduce((m, x) => m.set(x, (m.get(x) ?? 0) + 1), new Map<string, number>())].map(([k, x]) => `- ${k}: ${x}`);
   const md = [
     `# Raport audytowy AI (${from} – ${to})`, "",
@@ -244,6 +247,8 @@ export function report(log: AuditLog, from: string, to: string) {
     "### Według dostawcy / modelu / systemu", ...count(calls.map((c) => `${c.provider} / ${c.model ?? "?"} / ${c.systemId ?? "-"}`)), "",
     "### Wykryte reguły (tylko ID)", ...(calls.length ? count(calls.flatMap((c) => c.decision.findings.map((f: any) => f.rule))) : []), "",
     "### Sygnały prompt injection (advisory, tylko ID)", ...count(calls.flatMap((c) => firstSightings(c.decision.signals ?? [], c.session?.id, sighted).map((f: any) => f.rule))), "",
+    ...(toolUses.length ? ["### Narzędzia wywołane przez model (klucz / narzędzie)", ...count(toolUses), ""] : []),
+    ...(gateHolds.length ? ["### Wstrzymane wywołania narzędzi (ADR 0046, 0048)", ...count(gateHolds), ""] : []),
     ...(refusalRecords.length ? ["## Odmowy przed inspekcją (bez treści, ADR 0047)", ...count(refusalRecords.filter((r) => !r.suppressed).map((r) => `${r.status} ${r.code}`)),
       ...(refusals.suppressed ? [`- bez szczegółów (limit na minutę): ${refusals.suppressed}`] : []), ""] : []),
     ...(llm.withQuinelings ? ["### Quinelings w ruchu (tylko hashe, ADR 0024)", ...count(calls.flatMap((c) => (c.quinelings ?? []).map((e: any) => `${e.where} ${e.op}${e.status ? ` ${e.status}` : ""}${e.error ? ` error ${e.error.code}` : ""}`))), ""] : []),
