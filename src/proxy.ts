@@ -29,6 +29,7 @@ export interface ProxyOpts {
   sandboxAvailable?: boolean;
   workerOutputLimit?: number;
   injectionJudge?: ProxyJudgeOptions;
+  refusalsPerMinute?: number;
 }
 export interface VKey { name: string; sha256: string; models?: string[]; providers?: ("openai" | "anthropic")[]; logContent?: boolean; tokenBudget?: TokenBudget }
 export interface Alias { model: string; upstream?: string }
@@ -42,6 +43,7 @@ export const metrics = {
   attachments: new Counter("ai_audit_attachments_inspected", "Attachments sent to inspection."),
   logUnavailable: new Counter("ai_audit_log_unavailable", "Requests refused with 503 because the audit log could not take a record."),
   logWriteFailures: new Counter("ai_audit_log_write_failures", "Records lost after the response was delivered (ADR 0016)."),
+  refusalsSuppressed: new Counter("ai_audit_refusals_suppressed", "Refusals counted in a per-minute summary record instead of one record each (ADR 0047)."),
   budgetFailures: new Counter("ai_audit_budget_failures", "Budget state operations that failed closed or retained an outstanding reservation."),
   injectionSignals: new Counter("ai_audit_injection_signals", "Advisory prompt-injection signals by rule id (ADR 0010)."),
   quinelingEvents: new Counter("ai_audit_quineling_events", "Quinelings tool calls and results seen in LLM traffic, by where and op (ADR 0024)."),
@@ -86,10 +88,30 @@ export function createProxy(o: ProxyOpts) {
     effect: sandbox === "disabled" ? "attachment workers run WITHOUT a sandbox; development only" : "requests with attachments are refused with 422 audit_sandbox_unavailable" }) + "\n");
   const sessions = new SessionIndex(o.sessionKey ?? loadOrCreateSessionKey(o.log.path + ".session-key"));
   try { sessions.rebuild(o.log.read()); } catch { metrics.sessionIndexRebuildFailures.inc(); }
-  return http.createServer(async (req, res) => {
+  const refusalLimit = o.refusalsPerMinute ?? 60;
+  let refusalMinute = 0, refusalsThisMinute = 0, refusalsSuppressed = 0;
+  const appendRefusal = (record: object) => {
+    try { o.log.append({ kind: "refusal", ts: new Date().toISOString(), ...record } as any); }
+    catch (e) { metrics.logWriteFailures.inc(); if (!o.quiet) process.stderr.write(JSON.stringify({ ts: new Date().toISOString(), event: "audit_log_write_failed", reason: contentFreeReason(e) }) + "\n"); }
+  };
+  const flushSuppressed = () => {
+    if (!refusalsSuppressed) return;
+    const end = Math.min(Date.now(), (refusalMinute + 1) * 60_000);
+    appendRefusal({ id: randomUUID(), suppressed: refusalsSuppressed, from: new Date(refusalMinute * 60_000).toISOString(), to: new Date(end).toISOString() });
+    refusalsSuppressed = 0;
+  };
+  const recordRefusal = (record: object) => {
+    const minute = Math.floor(Date.now() / 60_000);
+    if (minute !== refusalMinute) { flushSuppressed(); refusalMinute = minute; refusalsThisMinute = 0; }
+    if (refusalsThisMinute++ < refusalLimit) return appendRefusal(record);
+    refusalsSuppressed++; metrics.refusalsSuppressed.inc();
+  };
+  const refusalFlush = setInterval(() => { if (Math.floor(Date.now() / 60_000) !== refusalMinute) flushSuppressed(); }, 60_000);
+  refusalFlush.unref();
+  const server = http.createServer(async (req, res) => {
     const rid = randomUUID(), t0 = Date.now(); res.setHeader("x-request-id", rid);
     let decisionTag = "none", routeTag = "", forwarded = false;
-    let reservation: Reservation | undefined, budgetSent = false;
+    let reservation: Reservation | undefined, budgetSent = false, vkey: VKey | undefined;
     res.on("finish", () => {
       const ms = Date.now() - t0;
       metrics.requests.inc({ route: routeLabel(routeTag), decision: decisionTag, status: String(res.statusCode) });
@@ -99,6 +121,10 @@ export function createProxy(o: ProxyOpts) {
     const fail = (status: number, code: string, findings?: string[]) => {
       if (!res.headersSent) res.writeHead(status, { "content-type": "application/json" });
       res.end(JSON.stringify({ type: "error", error: { type: "audit_proxy_error", code, message: code, ...(findings && { findings }) } }));
+    };
+    const refuse = (status: number, code: string, extra: object = {}) => {
+      recordRefusal({ id: rid, status, code, method: req.method, route: routeLabel(routeTag), ...(vkey && { virtualKey: vkey.name }), remoteAddress: req.socket.remoteAddress, ...extra });
+      return fail(status, code);
     };
     const event = (name: string, e: unknown) => o.quiet || process.stderr.write(JSON.stringify({ ts: new Date().toISOString(), event: name, requestId: rid, reason: contentFreeReason(e) }) + "\n");
     const logUnavailable = (e: unknown) => { metrics.logUnavailable.inc(); event("audit_log_unavailable", e); return fail(503, "audit_log_unavailable"); };
@@ -110,22 +136,22 @@ export function createProxy(o: ProxyOpts) {
       if (req.method === "GET" && url.pathname === "/metrics") { res.setHeader("content-type", OPENMETRICS_CONTENT_TYPE); return void res.end(exposition(Object.values(metrics))); }
       if (req.method === "GET" && (url.pathname === "/audit/stats" || url.pathname === "/audit/budgets")) {
         const k = str(req.headers["x-admin-key"]) ?? "";
-        if (!o.adminKeySha256 || !same(sha256(k), o.adminKeySha256)) return fail(401, "audit_admin_unauthorized");
+        if (!o.adminKeySha256 || !same(sha256(k), o.adminKeySha256)) return refuse(401, "audit_admin_unauthorized");
         if (url.pathname === "/audit/budgets") return void res.end(JSON.stringify((o.keys ?? []).filter((k) => k.tokenBudget).map((k) => ({ name: k.name, ...budgets.status(k.sha256, k.tokenBudget!) }))));
         const by = url.searchParams.get("by") ?? "model";
-        if (!["key", "model", "hour"].includes(by)) return fail(400, "audit_bad_group");
+        if (!["key", "model", "hour"].includes(by)) return refuse(400, "audit_bad_group");
         return void res.end(JSON.stringify(stats(o.log, by as any, url.searchParams.get("from") ?? "", url.searchParams.get("to") ?? "~")));
       }
       const anthropic = route === "anthropic-messages" || route === "count" || (url.pathname === "/v1/models" && (req.headers["anthropic-version"] || req.headers["x-api-key"]));
+      const provider = anthropic ? "anthropic" as const : "openai" as const;
       let base = anthropic ? o.upstreamAnthropic : o.upstreamOpenai;
       const headers: Record<string, string> = {};
       for (const [k, v] of Object.entries(req.headers)) if (!HOP.has(k) && v != null) headers[k] = Array.isArray(v) ? v.join(", ") : v;
-      let vkey: VKey | undefined;
       if (o.keys?.length) {
         const got = headers["x-api-key"] ?? headers.authorization?.replace(/^Bearer /i, "") ?? "", h = sha256(got);
         vkey = o.keys.find((k) => same(h, k.sha256));
-        if (!vkey) return fail(401, "audit_client_unauthorized");
-        if (vkey.providers && !vkey.providers.includes(anthropic ? "anthropic" : "openai")) return fail(403, "audit_provider_not_allowed");
+        if (!vkey) return refuse(401, "audit_client_unauthorized", { provider });
+        if (vkey.providers && !vkey.providers.includes(provider)) return refuse(403, "audit_provider_not_allowed", { provider });
         delete headers["x-api-key"]; delete headers.authorization;
         const k = anthropic ? o.upstreamKeys?.anthropic : o.upstreamKeys?.openai;
         if (k) anthropic ? (headers["x-api-key"] = k) : (headers.authorization = `Bearer ${k}`);
@@ -138,21 +164,21 @@ export function createProxy(o: ProxyOpts) {
         const up = await fetch(base.replace(/\/$/, "") + url.pathname + url.search, { headers, signal: ac.signal }); clearTimeout(timer);
         return void pipe(up, res);
       }
-      if (req.method !== "POST" || !route) { clearTimeout(timer); return fail(404, "audit_unsupported_route"); }
+      if (req.method !== "POST" || !route) { clearTimeout(timer); return refuse(404, "audit_unsupported_route"); }
 
       const chunks: Buffer[] = []; let n = 0;
-      for await (const c of req) { n += c.length; if (n > max) { clearTimeout(timer); return fail(413, "audit_body_too_large"); } chunks.push(c); }
+      for await (const c of req) { n += c.length; if (n > max) { clearTimeout(timer); return refuse(413, "audit_body_too_large", { provider }); } chunks.push(c); }
       const raw = Buffer.concat(chunks), text = raw.toString("utf8"); let body: any;
-      try { body = JSON.parse(text); } catch { clearTimeout(timer); return fail(400, "audit_malformed_json"); }
-      if (hasDuplicateKeys(text)) { clearTimeout(timer); return fail(400, "audit_duplicate_keys"); }
-      if (nestedDeeperThan(text, MAX_JSON_DEPTH)) { clearTimeout(timer); return fail(400, "audit_json_too_deep"); }
+      try { body = JSON.parse(text); } catch { clearTimeout(timer); return refuse(400, "audit_malformed_json", { provider }); }
+      if (hasDuplicateKeys(text)) { clearTimeout(timer); return refuse(400, "audit_duplicate_keys", { provider }); }
+      if (nestedDeeperThan(text, MAX_JSON_DEPTH)) { clearTimeout(timer); return refuse(400, "audit_json_too_deep", { provider }); }
 
       if (route !== "count") try { o.log.ensureWritable(); } catch (e) { clearTimeout(timer); decisionTag = "log-unavailable"; return logUnavailable(e); }
 
       const requestedModel = typeof body?.model === "string" ? body.model : undefined;
       const alias = requestedModel && o.aliases && Object.hasOwn(o.aliases, requestedModel) ? o.aliases[requestedModel] : undefined;
       if (alias) { body.model = alias.model; if (alias.upstream) base = alias.upstream; }
-      if (vkey?.models && !vkey.models.includes("*") && !vkey.models.includes(requestedModel ?? "") && !vkey.models.includes(body?.model)) { clearTimeout(timer); return fail(403, "audit_model_not_allowed"); }
+      if (vkey?.models && !vkey.models.includes("*") && !vkey.models.includes(requestedModel ?? "") && !vkey.models.includes(body?.model)) { clearTimeout(timer); return refuse(403, "audit_model_not_allowed", { provider, ...(requestedModel && { model: requestedModel.slice(0, 128) }) }); }
       const target = base.replace(/\/$/, "") + url.pathname + url.search;
       const { value, findings } = inspect(body, profile.carnet) as { value: any; findings: any[] };
       const { atts, refs } = discover(value);
@@ -289,6 +315,8 @@ export function createProxy(o: ProxyOpts) {
       catch (e) { metrics.budgetFailures.inc(); event("audit_budget_settlement_failed", e); }
     }
   });
+  server.on("close", () => { clearInterval(refusalFlush); flushSuppressed(); });
+  return server;
 }
 const str = (v: unknown) => (typeof v === "string" ? v.slice(0, 128) : undefined);
 const contentFreeReason = (e: unknown) => e instanceof AuditLogUnavailable ? e.message : typeof (e as NodeJS.ErrnoException)?.code === "string" ? (e as NodeJS.ErrnoException).code! : e instanceof Error ? e.name : "unknown";

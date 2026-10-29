@@ -463,7 +463,7 @@ The workbench omits retained output text, QDL source and inputs, reviewer names 
 
 `GET /metrics` is OpenMetrics. Prometheus and VictoriaMetrics can scrape it. The bind address is `127.0.0.1` unless you change `--host`. The path has no authentication. If you expose the port, block `/metrics` in front of the proxy.
 
-`ai_audit_requests_total{route,decision,status}`, `ai_audit_request_duration_seconds` from 5 ms to 300 s, `ai_audit_log_unavailable_total`, `ai_audit_log_write_failures_total`, `ai_audit_injection_signals_total{rule}`, `ai_audit_quineling_events_total{where,op}`, `ai_audit_upstream_responses_total{provider,class}`, `ai_audit_upstream_errors_total{provider,reason}`, `ai_audit_unknown_usage_total{provider,field}`, `ai_audit_attachments_inspected_total`, `ai_audit_sandbox_unavailable_total`, `ai_audit_session_index_rebuild_failures_total`, gauge `ai_audit_sandbox_disabled`, gauge `ai_audit_attachment_cache_hits`, gauge `ai_audit_attachment_cache_misses`.
+`ai_audit_requests_total{route,decision,status}`, `ai_audit_request_duration_seconds` from 5 ms to 300 s, `ai_audit_log_unavailable_total`, `ai_audit_log_write_failures_total`, `ai_audit_refusals_suppressed_total`, `ai_audit_injection_signals_total{rule}`, `ai_audit_quineling_events_total{where,op}`, `ai_audit_upstream_responses_total{provider,class}`, `ai_audit_upstream_errors_total{provider,reason}`, `ai_audit_unknown_usage_total{provider,field}`, `ai_audit_attachments_inspected_total`, `ai_audit_sandbox_unavailable_total`, `ai_audit_session_index_rebuild_failures_total`, gauge `ai_audit_sandbox_disabled`, gauge `ai_audit_attachment_cache_hits`, gauge `ai_audit_attachment_cache_misses`.
 
 Unknown paths are `route="other"`. Labels are taken from fixed sets. A ready-made VictoriaMetrics, Grafana and ntfy stack is in [examples/monitoring](examples/monitoring/README.md). [ADR 0019](docs/adr/0019-metrics-openmetrics.md).
 
@@ -688,7 +688,7 @@ stateDiagram-v2
   Lost --> [*]
 ```
 
-`Recorded` appends exactly one hash-chained `llm-call`. `Refused` writes nothing and forwards nothing. `Lost` is the window described in [ADR 0016](docs/adr/0016-fail-closed-when-log-unavailable.md). The client already has the body, so the failure is counted in `ai_audit_log_write_failures_total` and printed on stderr as `audit_log_write_failed`. The reason is an error code such as `ENOSPC`, or a class such as `TypeError`, never the message. The append lock and the anchor check are drawn in [docs/verification](docs/verification/README.md). TLA+ models live in `spec/`.
+`Recorded` appends exactly one hash-chained `llm-call`. `Refused` forwards nothing and appends one content-free `refusal` record, except the 503 for an unavailable log. `Lost` is the window described in [ADR 0016](docs/adr/0016-fail-closed-when-log-unavailable.md). The client already has the body, so the failure is counted in `ai_audit_log_write_failures_total` and printed on stderr as `audit_log_write_failed`. The reason is an error code such as `ENOSPC`, or a class such as `TypeError`, never the message. The append lock and the anchor check are drawn in [docs/verification](docs/verification/README.md). TLA+ models live in `spec/`.
 
 Attachment workers run under bubblewrap with no network, no capabilities, and an empty environment. Read-only mounts are `/usr`, the Node install, and the worker script. A worker cannot read the log, the session key, the config, or your home directory. Limits, from the preflight: worker `RLIMIT_DATA` 4 GiB, CPU 90 s, files 64 MiB, 128 open files. Each native tool also gets `RLIMIT_AS` 1.5 GiB. Wall clock is 120 s. Output caps are 16 MiB for the worker and for each tool. Crossing one of those is 422.
 
@@ -702,7 +702,7 @@ That name on the npm registry is a different tool. Clone this repository and run
 
 ### 401 `audit_client_unauthorized`
 
-Virtual keys are configured, and the bearer token is not one of them. Use the `aia-` string `keygen` printed. The config must contain the `sha256` from that same printout, not the key itself.
+Virtual keys are configured, and the bearer token is not one of them. The log has a `refusal` record with the time, route and source address, never the token; `ai-audit report` counts refusals by code. Use the `aia-` string `keygen` printed. The config must contain the `sha256` from that same printout, not the key itself.
 
 A 401 from the provider, after your proxy returned 200 from `/healthz`, usually means `AI_AUDIT_UPSTREAM_OPENAI_KEY` or `AI_AUDIT_UPSTREAM_ANTHROPIC_KEY` is unset. With virtual keys on, the client credential is removed and nothing is put in its place.
 
@@ -781,7 +781,7 @@ The proxy's `serve` command does not need this import.
 - Attachment inspection needs Linux, bubblewrap, `prlimit`, Tesseract, poppler and Pillow. Without them, calls that carry a file fail closed.
 - Inspected types are PNG, JPEG, WebP, GIF and PDF. Other files, file ids and remote URLs are refused in `redact` and `no-go`.
 - The attachment cache is memory only. It dies with the process.
-- Requests refused with 401, 403, 400, 404 or 413 are not audit records. `count_tokens` is scanned and not logged.
+- Requests refused with 401, 403, 400, 404 or 413 are `refusal` records without content, at most 60 per minute per process; the rest of that minute is one summary record with a count ([ADR 0047](docs/adr/0047-record-refusals-before-inspection.md)). `count_tokens` is scanned and not logged.
 - `scrub` rewrites an export you already have. It does not reach the provider, backups, or data URIs.
 - Prompt-injection rules never block, and they are easy to walk around.
 - `check-quotes` misses a wrong value backed by a real quote of a different sentence. It flags numbers written as words, translated text, and reformatted dates.

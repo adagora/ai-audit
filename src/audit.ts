@@ -28,7 +28,7 @@ export interface Entry {
   qdlDecision?: boolean;
 }
 export interface Rec {
-  kind: "decision" | "review" | "llm-call" | "program"; id: string; ts: string; refId?: string;
+  kind: "decision" | "review" | "llm-call" | "program" | "refusal"; id: string; ts: string; refId?: string;
   systemId?: string; useCase?: string; llmCallId?: string; inputHash?: string; redactedInput?: string;
   sources?: { doc: string; page?: number }[]; model?: { name: string; version: string };
   prompt?: { templateId: string; hash: string }; params?: Record<string, unknown>; output?: unknown;
@@ -219,6 +219,8 @@ export function report(log: AuditLog, from: string, to: string) {
   const stats = { decisions: dec.length, reviewed: last.size, unreviewed: dec.length - last.size, overridden,
     overrideRatePct: last.size ? Math.round((overridden / last.size) * 1000) / 10 : 0, withReplayableStep: dec.filter((d) => replayableQdl(all, d.id)).length };
   const calls = all.filter((r) => r.kind === "llm-call" && inRange(r.ts)) as any[];
+  const refusalRecords = all.filter((r) => r.kind === "refusal" && inRange(r.ts)) as any[];
+  const refusals = { recorded: refusalRecords.filter((r) => !r.suppressed).length, suppressed: refusalRecords.reduce((a, r) => a + (r.suppressed ?? 0), 0) };
   const llm = { calls: calls.length, blocked: calls.filter((c) => c.decision.action === "block").length,
     redacted: calls.filter((c) => c.decision.action === "forward-redacted").length,
     withFindings: calls.filter((c) => c.decision.findings.length).length, withInjectionSignals: calls.filter((c) => c.decision.signals?.length).length, withQuinelings: calls.filter((c) => c.quinelings?.length).length, contentLogged: calls.filter((c) => c.content === "redacted").length, upstreamErrors: calls.filter((c) => c.upstreamStatus >= 400).length,
@@ -242,10 +244,12 @@ export function report(log: AuditLog, from: string, to: string) {
     "### Według dostawcy / modelu / systemu", ...count(calls.map((c) => `${c.provider} / ${c.model ?? "?"} / ${c.systemId ?? "-"}`)), "",
     "### Wykryte reguły (tylko ID)", ...(calls.length ? count(calls.flatMap((c) => c.decision.findings.map((f: any) => f.rule))) : []), "",
     "### Sygnały prompt injection (advisory, tylko ID)", ...count(calls.flatMap((c) => firstSightings(c.decision.signals ?? [], c.session?.id, sighted).map((f: any) => f.rule))), "",
+    ...(refusalRecords.length ? ["## Odmowy przed inspekcją (bez treści, ADR 0047)", ...count(refusalRecords.filter((r) => !r.suppressed).map((r) => `${r.status} ${r.code}`)),
+      ...(refusals.suppressed ? [`- bez szczegółów (limit na minutę): ${refusals.suppressed}`] : []), ""] : []),
     ...(llm.withQuinelings ? ["### Quinelings w ruchu (tylko hashe, ADR 0024)", ...count(calls.flatMap((c) => (c.quinelings ?? []).map((e: any) => `${e.where} ${e.op}${e.status ? ` ${e.status}` : ""}${e.error ? ` error ${e.error.code}` : ""}`))), ""] : []),
     "_Raport generowany automatycznie z dziennika. Nie stanowi porady prawnej._",
   ].join("\n");
-  return { md, stats, llm, qdl, policies, evidence };
+  return { md, stats, llm, refusals, qdl, policies, evidence };
 }
 
 const GAP_TEXT = { "companion-missing": "brak zapisu QDL", "program-missing": "brak programu", "not-reconstructible": "wynik zapisany, nie do odtworzenia", "output-mismatch": "wynik decyzji nie zgadza się z zapisem QDL" };

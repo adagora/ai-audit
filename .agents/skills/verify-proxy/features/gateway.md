@@ -6,4 +6,4 @@ Set env keys on the proxy, point the client at the proxy with the virtual key, a
 ## Driving it with drive.mjs
 `node drive.mjs keys aliases stats metrics`. Checks 401 for a wrong key, the upstream auth header, the upstream model, admin-only stats and metrics text ending in `# EOF`.
 ## Gotchas
-Requests rejected with 401 are not logged, so do not wait for a record after a wrong key.
+A request rejected with 401 or 403 writes a `refusal` record, not an `llm-call`. Look for `kind: "refusal"` with the response's `x-request-id`; at most 60 are written per minute, then one summary.

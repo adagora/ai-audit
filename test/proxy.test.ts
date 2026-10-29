@@ -101,15 +101,17 @@ test("x-request-id names the llm-call record even when the provider sends its ow
 
 test("a request nested deeper than MAX_JSON_DEPTH is refused with 400 before inspection, where it used to overflow the stack into a 500", async () => {
   const nested = (depth: number) => `{"model":"gpt-x","messages":[{"role":"user","content":"${"[{".repeat(5000)}"}],"metadata":${"[".repeat(depth - 1)}${"]".repeat(depth - 1)}}`;
-  const sent = up.seen.length, logged = proxies.redact.log.read().length;
+  const calls = () => proxies.redact.log.read().filter((r) => r.kind === "llm-call").length;
+  const sent = up.seen.length, logged = calls(), records = proxies.redact.log.read().length;
   for (const depth of [MAX_JSON_DEPTH + 1, 3000, 100_000]) {
     const r = await post(proxies.redact.url, "/v1/chat/completions", nested(depth));
     assert.equal(r.status, 400); assert.equal((await r.json()).error.code, "audit_json_too_deep");
   }
-  assert.equal(up.seen.length, sent); assert.equal(proxies.redact.log.read().length, logged);
+  assert.equal(up.seen.length, sent); assert.equal(calls(), logged);
+  assert.deepEqual(proxies.redact.log.read().slice(records).map((r: any) => [r.kind, r.status, r.code]), Array(3).fill(["refusal", 400, "audit_json_too_deep"]));
   const atLimit = await post(proxies.redact.url, "/v1/chat/completions", nested(MAX_JSON_DEPTH));
   assert.equal(atLimit.status, 200); await atLimit.text();
-  assert.equal(up.seen.length, sent + 1); assert.equal(proxies.redact.log.read().length, logged + 1);
+  assert.equal(up.seen.length, sent + 1); assert.equal(calls(), logged + 1);
 });
 
 test("JSON inside a string counts toward MAX_JSON_DEPTH across every hop; deeper JSON is an unmaskable deep-json finding, never an overflow", () => {
