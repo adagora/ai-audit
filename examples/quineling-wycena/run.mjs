@@ -132,17 +132,25 @@ if (wait) {
     return file;
   };
   const priced = rows.filter((r) => !r.refused);
-  for (const r of priced.filter((x) => x.route === "send-quote-to-customer")) console.log(`  ${r.part.id}: oferta wysłana bez recenzji (reguła na to pozwala): ${send(r)}`);
+  const stop = (r, verdict) => {
+    log.effect(r.decision.id, { action: "send-quote-to-customer", status: "skipped", review: verdict.review, code: verdict.state === "rejected" ? "rejected" : "handed_to_estimator" });
+    console.log(`  ${r.part.id}: ${verdict.state === "rejected" ? "odrzucone" : "przejęte przez kierownika"} (${verdict.reviewer}); oferta nie wyszła automatycznie`);
+  };
+  for (const r of priced.filter((x) => x.route === "send-quote-to-customer")) {
+    const verdict = await awaitVerdict(log, r.decision.id, { timeoutMs: 0 });
+    if (verdict.state === "rejected" || verdict.state === "overridden") stop(r, verdict);
+    else console.log(`  ${r.part.id}: oferta wysłana bez recenzji (reguła na to pozwala): ${send(r, verdict.state === "approved" ? verdict.review : undefined)}`);
+  }
   const waiting = priced.filter((r) => r.route === "route-to-estimator");
   if (waiting.length) console.log(`\nCzekam na werdykt dla ${waiting.length} wycen (do ${waitMinutes} min). ${openConsole ? "Zatwierdź albo odrzuć je w konsoli." : `Inny terminal: node dist/src/cli.js approve --log ${logPath} --decision ID --reviewer ${reviewer} --verdict approved`}`);
   await Promise.all(waiting.map(async (r) => {
     const verdict = await awaitVerdict(log, r.decision.id, { timeoutMs: waitMinutes * 60_000 });
     if (verdict.state === "approved") console.log(`  ${r.part.id}: zatwierdzone przez ${verdict.reviewer}, oferta wysłana: ${send(r, verdict.review)}`);
-    else if (verdict.state === "timeout") console.log(`  ${r.part.id}: brak werdyktu po ${waitMinutes} min; oferta nie wyszła`);
-    else {
-      log.effect(r.decision.id, { action: "send-quote-to-customer", status: "skipped", review: verdict.review, code: verdict.state === "rejected" ? "rejected" : "handed_to_estimator" });
-      console.log(`  ${r.part.id}: ${verdict.state === "rejected" ? "odrzucone" : "przejęte przez kierownika"} (${verdict.reviewer}); oferta nie wyszła automatycznie`);
+    else if (verdict.state === "timeout") {
+      log.effect(r.decision.id, { action: "send-quote-to-customer", status: "skipped", code: "timeout" });
+      console.log(`  ${r.part.id}: brak werdyktu po ${waitMinutes} min; oferta nie wyszła`);
     }
+    else stop(r, verdict);
   }));
   console.log(`\nchain after actions: ${log.verifyChain().ok ? "ok" : "BROKEN"}`);
   if (!openConsole) process.exit(0);

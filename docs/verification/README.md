@@ -36,14 +36,22 @@ Real-code mutations caught by `verify:formal`: append without `withLock` (multi-
 
 Not modelled: attachment cache vs inspection profile (reviewed: key includes `profile.id`, profile frozen per instance; no stale path).
 
-## The decision loop (ADR 0055)
-`spec/DecisionLoop.tla` models one decision after the answer. The rule either allows its action or asks for a person. A person records up to two verdicts at any time, in the console or with `approve`, and the latest one counts. An application that follows the protocol acts at once on an action the rule allows; otherwise it runs `ai-audit await`, acts on `approved`, skips on `rejected` or `overridden`, or gives up when the wait times out. It records what it did with `ai-audit effect`. A done effect counts as authorized as `effectAuthorized` decides: the latest review before it is `approved`, or there is none and the rule allowed the action. 159 distinct states.
+## The decision loop (ADR 0055, ADR 0057)
+`spec/DecisionLoop.tla` models one decision after the answer. The rule either allows its action or asks for a person. A person records a verdict at any time, in the console or with `approve`, and a decision takes one verdict. An application that follows the protocol checks for a verdict before an action the rule allows; otherwise it runs `ai-audit await`, acts on `approved`, skips on `rejected` or `overridden`, and records `skipped` when the wait times out. It records what it did with `ai-audit effect`. A done effect counts as authorized as `effectAuthorized` decides: the latest review before it is `approved`, or there is none and the rule allowed the action. 52 distinct states.
 
-Chart: `decision-loop.mmd` (12 states, 15 arrows), labels from `decision-loop.view.mjs`, which `/statechart` (pstack) can use to draw it again from `spec/DecisionLoop.tla`. Red states break a rule.
+| Config | Expected | Result |
+|---|---|---|
+| DecisionLoop.cfg (one verdict, check first) | pass | WaitingAppNeverFlagged and NoActAgainstEarlierVerdict hold |
+| DecisionLoop_latestwins.cfg (any number of verdicts, the latest counts) | fail | WaitingAppNeverFlagged violated |
+| DecisionLoop_nocheck.cfg (the app acts on the rule without a check) | fail | NoActAgainstEarlierVerdict violated |
+| DecisionLoop_residual.cfg | fail | NeverFlagged violated (known window, ADR 0057) |
+| DecisionLoop_unacted.cfg | fail | ApprovalIsActedOn violated (known window, the console warns, ADR 0057) |
 
-Open findings. Both are questions about what the loop should promise, not code that differs from ADR 0055.
-7. An application that follows the protocol can be flagged as acting without approval (`DecisionLoop_flagged.cfg`). Shortest path: the rule allows the action; a person records taken over; the app acts on the rule and records done. A second path: the app reads `approved`, acts, and a person records `rejected` before the app records done. The console then reports "ran without approval", and after a take-over the action ran although ADR 0055 says the application does not run it.
-8. An approval can end with nothing done and nothing on the console's attention list (`DecisionLoop_unacted.cfg`). Shortest path: the app waits, the wait times out, the app gives up, and a person then records `approved`. The same happens when a person records `approved` after the app read `rejected` and recorded skipped. The console shows the decision as approved; no action follows.
+Chart: `decision-loop.mmd` (10 states, 14 arrows) of `DecisionLoop.cfg`, labels from `decision-loop.view.mjs`, which `/statechart` (pstack) can use to draw it again from `spec/DecisionLoop.tla`. The two red states are the known windows.
+
+Findings, both resolved by ADR 0057:
+7. An application that followed the protocol could be flagged as acting without approval. A person recorded `taken over` before the app acted on the rule, or `rejected` after the app read `approved` and before it recorded done. After a take-over the action ran, although ADR 0055 says that the application does not run it. Now a decision takes one verdict, and the app checks before an action the rule allows. What stays: a verdict that lands between that check and the effect record (`DecisionLoop_residual.cfg`).
+8. An approval could end with nothing done and nothing on the console's attention list: the wait timed out, and a person approved later. Now the app records `skipped` with code `timeout`, and the console lists each approved decision without a done action after `--overdue-minutes` (`DecisionLoop_unacted.cfg` keeps the path).
 
 Fixed while building this model: `awaitVerdict` looked for a review only in the two newest files, so after two rotations it returned `timeout` for an approved decision (commit afd1757).
 

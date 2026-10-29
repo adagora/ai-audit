@@ -333,7 +333,9 @@ function decisionDetail(d, o) {
       : h("p", { class: "muted" }, d.state === "waiting" ? "Nothing yet. The application waits for a verdict." : "No action recorded."),
     h("div", { class: "section-title" }, "Reviews"),
     d.reviews.length ? h("ul", { class: "list" }, d.reviews.map((r) => h("li", {}, h("span", { class: "sev" }), h("div", {}, h("strong", {}, `${r.verdict} by ${r.reviewer}`), h("p", { class: "small muted" }, time(r.at)), r.note ? h("p", {}, r.note) : null)))) : h("p", { class: "muted" }, "No review yet."),
-    o.reviewer
+    d.reviews.length
+      ? h("p", { class: "small muted" }, "A decision takes one verdict. To change it, record a new decision.")
+      : o.reviewer
       ? h("div", {}, h("div", { class: "section-title" }, `Your verdict (as ${o.reviewer})`), note,
         h("div", { class: "actions-row" }, h("button", { class: "btn good", type: "button", onclick: () => send("approved") }, "Approve"), h("button", { class: "btn warn", type: "button", onclick: () => send("overridden") }, "Override"),
           h("button", { class: "btn bad", type: "button", onclick: () => send("rejected") }, "Reject")), status)

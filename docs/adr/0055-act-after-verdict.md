@@ -1,5 +1,5 @@
 # 55. An application acts on a decision after its verdict, and the log records the action
-Status: Accepted (2026-10-29). Extends [0023](0023-decision-records-cli-and-outcomes.md) and [0054](0054-loopback-console.md).
+Status: Accepted (2026-10-29); one verdict per decision and late approvals changed by [0057](0057-one-verdict-per-decision.md) (Proposed). Extends [0023](0023-decision-records-cli-and-outcomes.md) and [0054](0054-loopback-console.md).
 ## Context
 A QDL rule proposes actions such as `send-quote-to-customer` or `route-to-estimator`, but only simulates them. A person records a verdict in the console or with `approve`. Nothing waits for that verdict, nobody is told that a decision waits, and the log ends at the review: it cannot show that a quote went out only after a person approved it, or that it went out at all.
 ## Decision

@@ -24,7 +24,8 @@ test("example: the toolroom quote rule prices five parts with the company rates 
   assert.deepEqual([calls.length, calls.every((c) => c.useCase === "wycena" && c.useCasePolicy?.tier === "assist")], [5, true]);
   assert.deepEqual([...r.stdout.matchAll(/^effect (\S+): (.+)$/gm)].map((m) => [m[1], m[2]]), [["ZO/2026/121", "done authorized"], ["ZO/2026/140", "done authorized"]]);
   assert.equal((r.stdout.match(/brak werdyktu po 0 min; oferta nie wyszła/g) ?? []).length, 3);
-  assert.deepEqual(records.filter((x) => x.kind === "effect").map((x) => x.effect), [{ action: "send-quote-to-customer", status: "done" }, { action: "send-quote-to-customer", status: "done" }]);
+  const timeout = { action: "send-quote-to-customer", status: "skipped", code: "timeout" };
+  assert.deepEqual(records.filter((x) => x.kind === "effect").map((x) => x.effect), [{ action: "send-quote-to-customer", status: "done" }, { action: "send-quote-to-customer", status: "done" }, timeout, timeout, timeout]);
   assert.match(r.stdout, /^chain after actions: ok$/m);
 });
 

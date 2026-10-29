@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,7 +16,7 @@ const proposal = [394, { status: "skipped", action: "send-quote-to-customer", pa
 const fresh = () => new AuditLog(join(mkdtempSync(join(tmpdir(), "verdict-")), "audit.jsonl"));
 const decide = (log: AuditLog, output: unknown = proposal) => log.record({ systemId: "shop", useCase: "quote", input: "order 12", output });
 
-test("awaitVerdict returns the latest review at once, waits for one that comes later, and times out without one", async () => {
+test("awaitVerdict returns the verdict at once, waits for one that comes later, and times out without one", async () => {
   const log = fresh(), d = decide(log);
   await assert.rejects(awaitVerdict(log, "nope", { timeoutMs: 10 }), /audit_unknown_decision/);
   const started = Date.now();
@@ -26,8 +26,19 @@ test("awaitVerdict returns the latest review at once, waits for one that comes l
   const later = await awaitVerdict(log, d.id, { timeoutMs: 5000, pollMs: 20 });
   assert.equal(later.state, "approved");
   assert.deepEqual(later.state === "approved" && [later.reviewer, later.note], ["ada", "price checked"]);
-  log.approve(d.id, "bo", "rejected");
-  assert.equal((await awaitVerdict(log, d.id, { timeoutMs: 10 })).state, "rejected");
+  assert.equal((await awaitVerdict(log, d.id, { timeoutMs: 10 })).state, "approved");
+});
+
+test("a decision takes one verdict: a second one is refused, also when two reviewers record at the same moment", async () => {
+  const log = fresh(), d = decide(log), raced = decide(log);
+  log.approve(d.id, "ada", "approved");
+  assert.throws(() => log.approve(d.id, "bo", "rejected"), /^Error: audit_already_reviewed$/);
+  const approve = (reviewer: string, verdict: string) => new Promise<number>((resolve) =>
+    spawn(process.execPath, [cliPath, "approve", "--log", log.path, "--decision", raced.id, "--reviewer", reviewer, "--verdict", verdict], { stdio: "ignore" }).on("exit", (code) => resolve(code ?? -1)));
+  const codes = await Promise.all([approve("ada", "approved"), approve("bo", "rejected"), approve("cy", "overridden")]);
+  assert.deepEqual(codes.sort(), [0, 2, 2]);
+  assert.equal(log.read().filter((r) => r.kind === "review" && r.refId === raced.id).length, 1);
+  assert.deepEqual(log.verifyChain(), { ok: true });
 });
 
 test("awaitVerdict finds a verdict recorded before two rotations", async () => {
@@ -50,8 +61,9 @@ test("an effect is checked when written and is authorized only by the rule's own
   const skipped = log.effect(d.id, { action: "send-quote-to-customer", status: "skipped", code: "waiting" });
   const review = log.approve(d.id, "ada", "approved");
   const sent = log.effect(d.id, { action: "send-quote-to-customer", status: "done", review: review.id });
-  log.approve(d.id, "bo", "overridden");
-  const afterOverride = log.effect(d.id, { action: "route-to-estimator", status: "done" });
+  const takenOver = decide(log);
+  log.approve(takenOver.id, "bo", "overridden");
+  const afterOverride = log.effect(takenOver.id, { action: "route-to-estimator", status: "done" });
   const records = log.read();
   assert.deepEqual([routed, early, skipped, sent, afterOverride].map((e) => effectAuthorized(records, e.id)), [true, false, true, true, false]);
   const stored = records.find((r) => r.id === sent.id)!;
@@ -73,8 +85,11 @@ test("the await and effect commands give any language the same loop, with exit c
   assert.equal(effect.status, 0, effect.stderr);
   assert.deepEqual([JSON.parse(effect.stdout).authorized, JSON.parse(effect.stdout).status], [true, "done"]);
   assert.equal(cli("effect", "--decision", d.id, "--action", "send", "--status", "maybe").status, 2);
-  log.approve(d.id, "bo", "rejected");
-  assert.equal(cli("await", "--decision", d.id).status, 1);
+  const again = cli("approve", "--decision", d.id, "--reviewer", "bo", "--verdict", "rejected");
+  assert.deepEqual([again.status, again.stderr.trim()], [2, "audit_already_reviewed"]);
+  const rejected = decide(log);
+  log.approve(rejected.id, "bo", "rejected");
+  assert.equal(cli("await", "--decision", rejected.id).status, 1);
 });
 
 test("the console announces each new waiting decision and each overdue one once, without inputs or outputs, and flags actions without approval", async () => {
@@ -107,7 +122,13 @@ test("the console announces each new waiting decision and each overdue one once,
     assert.equal(events.length, 1);
     const old = createConsole({ log, notifyUrl: hook, notifyEveryMs: 3_600_000, overdueMinutes: 0.000001 });
     await new Promise<void>((r) => old.server.listen(0, "127.0.0.1", r));
-    try { await old.notifyTick(); await old.notifyTick(); } finally { old.server.close(); }
+    const idle = decide(log);
+    log.approve(idle.id, "ada", "approved");
+    try {
+      await old.notifyTick(); await old.notifyTick();
+      const late = await (await fetch(old.url().replace(/#.*/, "") + "api/overview?hours=0", { headers: { authorization: `Bearer ${old.token}` } })).json() as any;
+      assert.ok(late.attention.some((a: any) => a.severity === "warn" && a.title === "1 approved decision has no action recorded"), JSON.stringify(late.attention.map((a: any) => a.title)));
+    } finally { old.server.close(); }
     assert.deepEqual(events.slice(1).map((e) => e.event).sort(), ["decision_overdue", "decision_overdue"]);
   } finally { app.server.close(); receiver.close(); }
   assert.ok(readFileSync(log.path, "utf8").includes('"kind":"effect"'));

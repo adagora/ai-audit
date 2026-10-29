@@ -177,18 +177,17 @@ export class AuditLog {
     catch (e: any) { throw new AuditLogUnavailable(`segment ${e.code ?? "failed"}`); }
     return previous;
   }
-  append(r: Omit<Rec, "prevHash" | "hash">): Rec {
-    return this.withLock(() => {
-      const size = existsSync(this.path) ? statSync(this.path).size : -1;
-      if (this.rotateBytes > 0 && size > this.rotateBytes) this.rotateLocked();
-      else if (size <= 0 && this.closedSegments().length) { if (size === 0) unlinkSync(this.path); this.startSegment(); }
-      let prevHash: string;
-      try { prevHash = this.lastHash(); } catch (e) { throw e instanceof AuditLogUnavailable ? e : new AuditLogUnavailable("unparseable last line"); }
-      const body = { ...r, prevHash };
-      const rec = { ...body, hash: sha256(canon(body)) } as Rec;
-      appendFileSync(this.path, JSON.stringify(rec) + "\n");
-      return rec;
-    });
+  append(r: Omit<Rec, "prevHash" | "hash">): Rec { return this.withLock(() => this.appendLocked(r)); }
+  private appendLocked(r: Omit<Rec, "prevHash" | "hash">): Rec {
+    const size = existsSync(this.path) ? statSync(this.path).size : -1;
+    if (this.rotateBytes > 0 && size > this.rotateBytes) this.rotateLocked();
+    else if (size <= 0 && this.closedSegments().length) { if (size === 0) unlinkSync(this.path); this.startSegment(); }
+    let prevHash: string;
+    try { prevHash = this.lastHash(); } catch (e) { throw e instanceof AuditLogUnavailable ? e : new AuditLogUnavailable("unparseable last line"); }
+    const body = { ...r, prevHash };
+    const rec = { ...body, hash: sha256(canon(body)) } as Rec;
+    appendFileSync(this.path, JSON.stringify(rec) + "\n");
+    return rec;
   }
 
   record(e: Entry): Rec {
@@ -208,8 +207,12 @@ export class AuditLog {
   }
 
   approve(refId: string, reviewer: string, decision: Review["decision"], note?: string): Rec {
-    if (!this.read().some((r) => r.kind === "decision" && r.id === refId && !r.qdl)) throw new Error("audit_unknown_decision");
-    return this.append({ kind: "review", id: randomUUID(), ts: this.now(), refId, review: { reviewer, decision, note, at: this.now() } });
+    return this.withLock(() => {
+      const records = this.read();
+      if (!records.some((r) => r.kind === "decision" && r.id === refId && !r.qdl)) throw new Error("audit_unknown_decision");
+      if (records.some((r) => r.kind === "review" && r.refId === refId)) throw new Error("audit_already_reviewed");
+      return this.appendLocked({ kind: "review", id: randomUUID(), ts: this.now(), refId, review: { reviewer, decision, note, at: this.now() } });
+    });
   }
 
   effect(refId: string, effect: Effect): Rec {

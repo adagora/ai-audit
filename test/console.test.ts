@@ -98,6 +98,8 @@ test("the console needs its token and its own host, serves no data without them,
     assert.equal((await fetch(`${writer.base}/api/decisions/nope/review`, { method: "POST", headers: { authorization: `Bearer ${writer.token}`, "content-type": "application/json" }, body: JSON.stringify({ verdict: "approved" }) })).status, 404);
     const saved = await review(writer, { verdict: "overridden", note: "price too low" });
     assert.equal(saved.status, 201);
+    const second = await review(writer, { verdict: "approved" });
+    assert.deepEqual([second.status, await second.json()], [409, { error: "audit_already_reviewed" }]);
     const [view] = await (await fetch(writer.base + "/api/decisions", { headers: { authorization: `Bearer ${writer.token}` } })).json() as any[];
     assert.deepEqual([view.state, view.reviews[0].reviewer, view.reviews[0].note], ["overridden", "ada", "price too low"]);
     assert.deepEqual(log.verifyChain(), { ok: true });

@@ -1,34 +1,40 @@
 ---- MODULE DecisionLoop ----
 EXTENDS Naturals, Sequences
-CONSTANTS MaxReviews
-VARIABLES allowed, reviews, app, acted, effect, effectAt
-vars == <<allowed, reviews, app, acted, effect, effectAt>>
+CONSTANTS MaxReviews, FinalVerdict, CheckFirst
+VARIABLES allowed, reviews, app, acted, before, effect, effectAt
+vars == <<allowed, reviews, app, acted, before, effect, effectAt>>
 Verdicts == {"approved", "overridden", "rejected"}
 Latest == IF reviews = <<>> THEN "none" ELSE reviews[Len(reviews)]
-AppVars == <<app, acted, effect, effectAt>>
+AppVars == <<app, acted, before, effect, effectAt>>
 
 Init == /\ allowed \in BOOLEAN /\ reviews = <<>> /\ app = "start"
-        /\ acted = FALSE /\ effect = "none" /\ effectAt = 0
+        /\ acted = FALSE /\ before = "none" /\ effect = "none" /\ effectAt = 0
 
-PersonReviews == /\ Len(reviews) < MaxReviews /\ \E v \in Verdicts : reviews' = Append(reviews, v)
+PersonReviews == /\ Len(reviews) < MaxReviews /\ (FinalVerdict => reviews = <<>>)
+                 /\ \E v \in Verdicts : reviews' = Append(reviews, v)
                  /\ UNCHANGED <<allowed>> /\ UNCHANGED AppVars
-RuleAllows == app = "start" /\ allowed /\ app' = "acting" /\ UNCHANGED <<allowed, reviews, acted, effect, effectAt>>
-AppAwaits == app = "start" /\ ~allowed /\ app' = "waiting" /\ UNCHANGED <<allowed, reviews, acted, effect, effectAt>>
-VerdictArrives == /\ app = "waiting" /\ reviews # <<>>
+RuleAllows == /\ app = "start" /\ allowed
+              /\ before' = Latest
+              /\ app' = (IF ~CheckFirst \/ Latest \in {"none", "approved"} THEN "acting" ELSE "skipping")
+              /\ UNCHANGED <<allowed, reviews, acted, effect, effectAt>>
+AppAwaits == app = "start" /\ ~allowed /\ app' = "waiting" /\ UNCHANGED <<allowed, reviews, acted, before, effect, effectAt>>
+VerdictArrives == /\ app = "waiting" /\ reviews # <<>> /\ before' = Latest
                   /\ app' = (IF Latest = "approved" THEN "acting" ELSE "skipping")
                   /\ UNCHANGED <<allowed, reviews, acted, effect, effectAt>>
-AwaitTimesOut == app = "waiting" /\ reviews = <<>> /\ app' = "gave up" /\ UNCHANGED <<allowed, reviews, acted, effect, effectAt>>
-AppActs == app = "acting" /\ acted' = TRUE /\ app' = "recording" /\ UNCHANGED <<allowed, reviews, effect, effectAt>>
+AwaitTimesOut == app = "waiting" /\ reviews = <<>> /\ app' = "skipping" /\ UNCHANGED <<allowed, reviews, acted, before, effect, effectAt>>
+AppActs == app = "acting" /\ acted' = TRUE /\ app' = "recording" /\ UNCHANGED <<allowed, reviews, before, effect, effectAt>>
 AppRecordsDone == /\ app = "recording" /\ effect' = "done" /\ effectAt' = Len(reviews) /\ app' = "finished"
-                  /\ UNCHANGED <<allowed, reviews, acted>>
+                  /\ UNCHANGED <<allowed, reviews, acted, before>>
 AppRecordsSkip == /\ app = "skipping" /\ effect' = "skipped" /\ effectAt' = Len(reviews) /\ app' = "finished"
-                  /\ UNCHANGED <<allowed, reviews, acted>>
-Idle == app \in {"finished", "gave up"} /\ UNCHANGED vars
+                  /\ UNCHANGED <<allowed, reviews, acted, before>>
+Idle == app = "finished" /\ UNCHANGED vars
 
 Next == PersonReviews \/ RuleAllows \/ AppAwaits \/ VerdictArrives \/ AwaitTimesOut \/ AppActs \/ AppRecordsDone \/ AppRecordsSkip \/ Idle
 Spec == Init /\ [][Next]_vars
 
 Authorized == IF effectAt > 0 THEN reviews[effectAt] = "approved" ELSE allowed
-WaitingAppNeverFlagged == effect = "done" => Authorized
-ApprovalIsActedOn == (app \in {"finished", "gave up"} /\ Latest = "approved") => effect = "done"
+WaitingAppNeverFlagged == (effect = "done" /\ ~allowed) => Authorized
+NoActAgainstEarlierVerdict == acted => before \in {"none", "approved"}
+NeverFlagged == effect = "done" => Authorized
+ApprovalIsActedOn == (app = "finished" /\ Latest = "approved") => effect = "done"
 ====

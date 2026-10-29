@@ -416,9 +416,9 @@ After `npm link`, the binary is `ai-audit`. The examples below use that name. `n
 | `scrub` | `ai-audit scrub --input history.jsonl --output history.redacted.jsonl` | A separate sanitized copy, plus a receipt on stdout. |
 | `check-quotes` | `ai-audit check-quotes --source email.txt --answer answer.json` | Checks values the model claims to have read. |
 | `decide` | `ai-audit decide --policy policy.json --inputs inputs.json --system-id shop --use-case quote` | Records a policy decision. |
-| `approve` | `ai-audit approve --decision ID --reviewer ada --verdict approved` | Appends a review. Verdicts are `approved`, `overridden`, `rejected`. |
+| `approve` | `ai-audit approve --decision ID --reviewer ada --verdict approved` | Appends a review. Verdicts are `approved`, `overridden`, `rejected`. A decision takes one verdict; a second one is refused with `audit_already_reviewed` ([ADR 0057](docs/adr/0057-one-verdict-per-decision.md)). |
 | `replay` | `ai-audit replay --decision ID --anchors anchors.jsonl` | Recomputes that decision from the log. |
-| `await` | `ai-audit await --decision ID --timeout-s 600` | Waits for a review of that decision. Exit 0 approved, 1 rejected or overridden, 3 timeout. |
+| `await` | `ai-audit await --decision ID --timeout-s 600` | Waits for a review of that decision. Exit 0 approved, 1 rejected or overridden, 3 timeout. With `--timeout-s 0` it only checks; run it before an action the rule allows, and record `skipped` with code `timeout` when you stop waiting. |
 | `effect` | `ai-audit effect --decision ID --action send-quote-to-customer --status done --review REVIEW_ID` | Records that the application ran, skipped or failed an action of that decision. |
 | `lab` | `ai-audit lab --log audit.jsonl --session ID --baseline-limit 2 --candidate-limit 3 --output comparison.html` | Compares failure thresholds on recorded observations; never stops an agent. |
 | `receipt` | `ai-audit receipt --decision ID --output receipt.html` | HTML page with downloads for a completed QDL decision. `--format svg` or `--format json` exports a portable receipt. |
@@ -632,7 +632,7 @@ It prints a URL with a token, for example `http://127.0.0.1:8793/#token=…`. Op
 | Page | What it shows |
 |---|---|
 | Overview | What needs attention now: decisions waiting for a review, held tool calls, refusals, a broken chain or a blocked budget. Suggestions from fixed rules, each with its evidence and the JSON to paste, for example a use case ready for a higher tier or a tool held again and again. |
-| Decisions | The review queue. For each decision: the action the rule proposes, the result, the inputs, the program and earlier reviews. **Run the rule again** replays it in memory and lists each computed step. **Approve**, **Override** and **Reject** write the same record as `approve`. |
+| Decisions | The review queue. For each decision: the action the rule proposes, the result, the inputs, the program and its verdict. **Run the rule again** replays it in memory and lists each computed step. **Approve**, **Override** and **Reject** write the same record as `approve`. |
 | Use cases | Each row of the use-case table with its calls, blocks, refusals, held tools, tokens and override rate. |
 | Request flow | The state machine every request goes through: key, use case, route and body, model, inspection, decision, token budget, provider, tool gate, record. Each state shows how many requests reached it and where they stopped. |
 | Requests | One row per request or refusal. A request opens with its path through the state machine and the context sent to the model: each block in prompt order, its kind, size and age, the first changed byte, and what made the context large. |
