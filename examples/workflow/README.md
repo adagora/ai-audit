@@ -25,7 +25,7 @@ Choose a new workbench output filename for each export. The generated HTML is pr
 While the real workflow launcher is running, open a second terminal and use the `aia-` key printed by the launcher:
 
 ```sh
-cd /Users/gora/AI_Project/EternalChat/uniichat
+cd path/to/uniichat
 export OPENAI_API_KEY='aia-key-printed-by-the-workflow-launcher'
 export UNII_OPENAI_BASE='http://127.0.0.1:8792/v1'
 export UNII_VENDORS='openai-api'

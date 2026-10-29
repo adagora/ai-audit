@@ -1,7 +1,5 @@
 # ai-audit
 
-For a browser-driven integration test with your own OpenAI API key, run `npm run example:workflow:real` and follow the [workflow cockpit guide](examples/workflow/README.md). The same guide shows how to point UniiChat at the running proxy. Use `npm run example:workflow` for deterministic mock-provider scenarios.
-
 <div align="center">
 <pre>
 client  --->  ai-audit  --->  api.openai.com
@@ -111,6 +109,8 @@ codex -m gpt-6-sol \
 The OpenAI API key remains in the proxy process as `AI_AUDIT_UPSTREAM_OPENAI_KEY`. Codex sends only the `aia-` virtual key. The proxy supports `/v1/responses`; `gpt-6-sol` must be available to your API key. These flags apply to this Codex invocation and do not change your normal Codex configuration. [Codex provider settings](https://learn.chatgpt.com/docs/config-file/config-reference).
 
 Optional request headers `x-audit-system-id` and `x-audit-use-case` are copied onto the log record as labels.
+
+For a browser-driven integration test with your own OpenAI API key, run `npm run example:workflow:real` and follow the [workflow cockpit guide](examples/workflow/README.md). The same guide shows how to point UniiChat at the running proxy. Use `npm run example:workflow` for deterministic mock-provider scenarios.
 
 ## Design
 
