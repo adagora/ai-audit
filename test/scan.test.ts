@@ -168,6 +168,15 @@ test("found by fuzzing: masking an email in a database URL is a fixpoint, becaus
   assert.equal(inspect("postgres://[REDACTED:pii-email]:hunter2@db.local/app").value, "[REDACTED:database-credentials]");
 });
 
+test("a text with more findings than one call can take as arguments is still masked, also as JSON inside a string", () => {
+  const text = "a@b.pl ".repeat(150_000);
+  for (const v of [text, JSON.stringify({ list: text })]) {
+    const r = inspect(v);
+    assert.equal(r.findings.length, 150_000);
+    assert.ok(!(r.value as string).includes("a@b.pl"));
+  }
+});
+
 test("found by fuzzing: masking repeats across content parts, so a mask that completes a finding over a part boundary is masked too", () => {
   assert.deepEqual(inspect(["postgres://", "apikey:ase6/png;@"]), { value: ["[REDACTED:database-credentials]", ""],
     findings: [{ rule: "named-credential", path: "$[1]" }, { rule: "database-credentials", path: "$[0..1]" }] });

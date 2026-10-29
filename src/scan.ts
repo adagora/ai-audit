@@ -166,7 +166,8 @@ function maskOnce(v: string, carnet: Allowlist | undefined, path: string, findin
       }
       const nested = inspect(parsed, carnet, `${path}#json`, [], false, depth), json = nested.findings.length ? JSON.stringify(nested.value) : v;
       const spans = scanText(outsideStrings(json), carnet);
-      findings.push(...nested.findings); spans.forEach((s) => findings.push({ rule: s.rule, path }));
+      for (const f of nested.findings) findings.push(f);
+      spans.forEach((s) => findings.push({ rule: s.rule, path }));
       return spans.length ? redactText(json, spans) : json;
     }
   }
@@ -180,7 +181,7 @@ export function inspect(v: unknown, carnet?: Allowlist, path = "$", findings: Fi
     let value = v;
     for (let pass = 0; ; pass++) {
       const found: Finding[] = [], masked = maskOnce(value, carnet, path, found, depth);
-      findings.push(...found.map((f) => (pass < MASKING_PASSES ? f : { ...f, unredactable: true })));
+      for (const f of found) findings.push(pass < MASKING_PASSES ? f : { ...f, unredactable: true });
       if (!found.length) return { value, findings };
       value = masked;
       if (pass === MASKING_PASSES || found.some((f) => f.inKey || f.unredactable)) return { value, findings };
@@ -196,7 +197,7 @@ export function inspect(v: unknown, carnet?: Allowlist, path = "$", findings: Fi
     if (findings.length === before) return { value, findings };
     for (let pass = 1; ; pass++) {
       const found: Finding[] = [], joined = joinParts(value, carnet, path, found);
-      findings.push(...found.map((f) => (pass < MASKING_PASSES ? f : { ...f, unredactable: true })));
+      for (const f of found) findings.push(pass < MASKING_PASSES ? f : { ...f, unredactable: true });
       if (!found.length || pass === MASKING_PASSES) return { value: joined, findings };
       value = joined.map((x, i) => (partText(x) === partText(value[i]) ? x : inspect(x, carnet, `${path}[${i}]`, findings, false, depth + 1).value));
     }
