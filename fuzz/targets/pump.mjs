@@ -1,6 +1,6 @@
 import { scanText, inspect, redact, fail } from "./common.mjs";
 
-const SLOW_MS = 75, BUDGET_MS = 1000, GROWTH = 10;
+const SLOW_MS = 40, MIB_BUDGET_MS = 2500, GROWTH = 10;
 const timed = (run) => { const c0 = process.cpuUsage(); run(); const c = process.cpuUsage(c0); return (c.user + c.system) / 1000; };
 const fastest = (run) => Math.min(timed(run), timed(run), timed(run));
 const scanners = (text) => {
@@ -15,6 +15,6 @@ export function fuzz(data) {
   scanners(pumped(64 * 1024)).forEach(([name, run], k) => {
     if (timed(run) < SLOW_MS) return;
     const ms = fastest(run), fourTimes = fastest(scanners(pumped(256 * 1024))[k][1]);
-    if (ms >= SLOW_MS && (ms >= BUDGET_MS || fourTimes >= GROWTH * ms)) fail(`${name} took ${ms.toFixed(0)} ms for 64 KiB and ${fourTimes.toFixed(0)} ms for 256 KiB`, { pre, pump, suf });
+    if (fourTimes >= GROWTH * ms || fourTimes * 4 >= MIB_BUDGET_MS) fail(`${name} took ${ms.toFixed(0)} ms for 64 KiB and ${fourTimes.toFixed(0)} ms for 256 KiB`, { pre, pump, suf });
   });
 }

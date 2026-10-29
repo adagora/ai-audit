@@ -29,5 +29,5 @@ export function createInspectionProfile(options: InspectionOptions) {
     attachments: options.scope === "history" ? "excluded" : "inspect", allowlistDigest: hash([...entries]), ...(options.actionGate && { actionGateDigest: hash(options.actionGate) }) });
   const identity = { scannerVersion: SCANNER_VERSION, rulesDigest: RULES_DIGEST, configDigest };
   const receipt: InspectionProfile = Object.freeze({ ...identity, digest: hash(identity) });
-  return Object.freeze({ receipt, carnet, pageRedaction, mode: options.mode, id: receipt.digest });
+  return Object.freeze({ receipt, carnet, allowHashes: Object.freeze(hashes), pageRedaction, mode: options.mode, id: receipt.digest });
 }

@@ -353,6 +353,8 @@ ai-audit serve \
 
 `--rotate-bytes` closes the log into a segment before an append once the file is larger than that, default 256 MiB, `0` to never rotate. See [Rotation and retention](#rotation-and-retention).
 
+A request whose text adds up to more than 256 KiB is scanned in a worker thread, so other requests are not held while it runs. `--inspect-timeout-ms`, default 5000, is its deadline. A scan that takes longer is stopped, the request is refused with 422 `audit_inspection_timeout` and is not forwarded. At most `min(4, CPUs - 1)` workers run; when 64 more requests already wait, the next one gets 503 `audit_inspection_busy`. Ordinary text scans at about 26 ms per MiB on an M1; some repeated patterns take up to 0.74 s per MiB. [ADR 0050](docs/adr/0050-text-inspection-deadline-off-the-event-loop.md).
+
 `--mode` is `redact`, `no-go` or `advisory`. The default is `redact`. `--no-page-redaction` and `"pageRedaction": false` both turn PDF rasterizing off. A PDF finding then returns 409 instead of a rebuilt file. [ADR 0013](docs/adr/0013-rasterize-pdfs-by-default.md).
 
 `--unsafe-no-sandbox`, or `AI_AUDIT_UNSAFE_NO_SANDBOX=1`, runs attachment workers with no bubblewrap. Development only. The log records `decision.sandbox` as `disabled`. [ADR 0021](docs/adr/0021-attachment-sandbox-hardening.md).
@@ -499,7 +501,7 @@ ai-audit prune --log audit.jsonl --keep-days 184
 
 `GET /metrics` is OpenMetrics. Prometheus and VictoriaMetrics can scrape it. The bind address is `127.0.0.1` unless you change `--host`. The path has no authentication. If you expose the port, block `/metrics` in front of the proxy.
 
-`ai_audit_requests_total{route,decision,status}`, `ai_audit_request_duration_seconds` from 5 ms to 300 s, `ai_audit_log_unavailable_total`, `ai_audit_log_write_failures_total`, `ai_audit_refusals_suppressed_total`, `ai_audit_injection_signals_total{rule}`, `ai_audit_action_gate_total{mode,result}`, `ai_audit_quineling_events_total{where,op}`, `ai_audit_upstream_responses_total{provider,class}`, `ai_audit_upstream_errors_total{provider,reason}`, `ai_audit_unknown_usage_total{provider,field}`, `ai_audit_attachments_inspected_total`, `ai_audit_sandbox_unavailable_total`, `ai_audit_session_index_rebuild_failures_total`, gauge `ai_audit_sandbox_disabled`, gauge `ai_audit_attachment_cache_hits`, gauge `ai_audit_attachment_cache_misses`.
+`ai_audit_requests_total{route,decision,status}`, `ai_audit_request_duration_seconds` from 5 ms to 300 s, `ai_audit_log_unavailable_total`, `ai_audit_log_write_failures_total`, `ai_audit_refusals_suppressed_total`, `ai_audit_injection_signals_total{rule}`, `ai_audit_action_gate_total{mode,result}`, `ai_audit_quineling_events_total{where,op}`, `ai_audit_upstream_responses_total{provider,class}`, `ai_audit_upstream_errors_total{provider,reason}`, `ai_audit_unknown_usage_total{provider,field}`, `ai_audit_attachments_inspected_total`, `ai_audit_sandbox_unavailable_total`, `ai_audit_session_index_rebuild_failures_total`, `ai_audit_inspections_offloaded_total{result}`, gauge `ai_audit_sandbox_disabled`, gauge `ai_audit_attachment_cache_hits`, gauge `ai_audit_attachment_cache_misses`.
 
 Unknown paths are `route="other"`. Labels are taken from fixed sets. A ready-made VictoriaMetrics, Grafana and ntfy stack is in [examples/monitoring](examples/monitoring/README.md). [ADR 0019](docs/adr/0019-metrics-openmetrics.md).
 
@@ -775,6 +777,8 @@ A failure after the client already received the response is a stderr line `audit
 | 422 `audit_unsupported_attachment` | Only PNG, JPEG, WebP, GIF and PDF are inspected. |
 | 422 `audit_uninspectable_reference` | A file id or a remote URL cannot be fetched and scanned. Enforcing modes refuse the call. `advisory` allows it. |
 | 422 `audit_inspection_failed` | The file is corrupt, a limit tripped, or a tool failed. The call is not forwarded. |
+| 422 `audit_inspection_timeout` | The request text took longer than `--inspect-timeout-ms` to scan. A text of many MiB built from one repeated pattern does this. Raise the deadline only if such text is expected. |
+| 503 `audit_inspection_busy` | All scan workers are busy and 64 more requests wait. The client can retry. |
 
 `--unsafe-no-sandbox` skips the sandbox check. Do not use it on a machine that receives untrusted files.
 

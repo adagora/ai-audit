@@ -27,8 +27,8 @@ const scanners = (text: string) => {
   return [["scanText", () => scanText(text)], ["inspect", () => inspect(text)], ["inspect parts", () => inspect([text.slice(0, half), { type: "text", text: text.slice(half) }])],
     ["audit redact", () => redact(text)]] as const;
 };
-test("fuzz: scanning time grows linearly with input size, so no repeated pattern stalls the proxy", () => {
-  const g = seeded(1), slowMs = 75, budgetMs = 1000, growth = 10;
+test("fuzz: scanning time grows linearly with input size and stays under half the inspection deadline per MiB (ADR 0050)", () => {
+  const g = seeded(1), slowMs = 40, mibBudgetMs = 2500, growth = 10;
   const pump = () => (g.int(2) ? g.chars(1 + g.int(3), PUMP_CHARS) : g.pick(PUMP_TOKENS) + g.chars(g.int(3), PUMP_CHARS));
   const cases = [...STALLED, ...Array.from({ length: runs(40) }, () => [g.pick(PUMP_ENDS), pump(), g.pick(PUMP_ENDS)])];
   for (const [pre, pump, suf] of cases) {
@@ -36,7 +36,7 @@ test("fuzz: scanning time grows linearly with input size, so no repeated pattern
     scanners(pumped(64 * 1024)).forEach(([name, run], k) => {
       if (timed(run) < slowMs) return;
       const ms = fastest(run), fourTimes = fastest(scanners(pumped(256 * 1024))[k][1]);
-      assert.ok(ms < slowMs || (ms < budgetMs && fourTimes < growth * ms), `${name}: ${ms.toFixed(0)} ms for 64 KiB, ${fourTimes.toFixed(0)} ms for 256 KiB of ${JSON.stringify(pre)} + ${JSON.stringify(pump)}... + ${JSON.stringify(suf)}`);
+      assert.ok(fourTimes < growth * ms && fourTimes * 4 < mibBudgetMs, `${name}: ${ms.toFixed(0)} ms for 64 KiB, ${fourTimes.toFixed(0)} ms for 256 KiB of ${JSON.stringify(pre)} + ${JSON.stringify(pump)}... + ${JSON.stringify(suf)}`);
     });
   }
 });

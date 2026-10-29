@@ -14,6 +14,7 @@ import { Counter, Gauge, Histogram, OPENMETRICS_CONTENT_TYPE, exposition } from 
 import { discover, inspectAttachment, cacheStats, TOOLS_OK, SANDBOX_AVAILABLE, sandboxState } from "./attachments.js";
 import { timingSafeEqual } from "node:crypto";
 import { createInspectionProfile } from "./profile.js";
+import { createInspectionPool, InspectionBusy, InspectionStopped, OFFLOAD_CHARS, scannedCharsAbove } from "./inspectPool.js";
 import { BudgetError, BudgetStore, validateBudget, type Reservation, type TokenBudget } from "./budget.js";
 import { tokenCount } from "./extract.js";
 
@@ -33,6 +34,10 @@ export interface ProxyOpts {
   injectionJudge?: ProxyJudgeOptions;
   refusalsPerMinute?: number;
   actionGate?: ActionGate;
+  inspectTimeoutMs?: number;
+  inspectWorkers?: number;
+  inspectQueue?: number;
+  inspectOffloadChars?: number;
 }
 export interface VKey { name: string; sha256: string; models?: string[]; providers?: ("openai" | "anthropic")[]; logContent?: boolean; tokenBudget?: TokenBudget; tools?: KeyTools }
 export interface Alias { model: string; upstream?: string }
@@ -54,6 +59,7 @@ export const metrics = {
   upstreamResponses: new Counter("ai_audit_upstream_responses", "Upstream responses by provider and status class."),
   upstreamErrors: new Counter("ai_audit_upstream_errors", "Forwarded requests that got no upstream response, by provider and reason."),
   unknownUsage: new Counter("ai_audit_unknown_usage", "Successful upstream calls without provider-reported usage, by field (ADR 0012)."),
+  inspectionsOffloaded: new Counter("ai_audit_inspections_offloaded", "Request inspections run in a worker, by result: ok, timeout, failed or busy (ADR 0050)."),
   sessionIndexRebuildFailures: new Counter("ai_audit_session_index_rebuild_failures", "Proxy starts where the session index could not be rebuilt from the log."),
   cacheHits: new Gauge("ai_audit_attachment_cache_hits", "Attachment inspection cache hits since start.", () => cacheStats.hits),
   cacheMisses: new Gauge("ai_audit_attachment_cache_misses", "Attachment inspection cache misses since start.", () => cacheStats.misses),
@@ -82,6 +88,8 @@ export function createProxy(o: ProxyOpts) {
   const actionGate = o.actionGate && validateActionGate(o.actionGate);
   const keyTools = new Map((o.keys ?? []).flatMap((key) => key.tools === undefined ? [] : [[key, validateKeyTools(key.tools)] as const]));
   const profile = createInspectionProfile({ ...o, actionGate });
+  const inspection = createInspectionPool({ allowHashes: profile.allowHashes, timeoutMs: o.inspectTimeoutMs ?? 5_000, size: o.inspectWorkers, queueLimit: o.inspectQueue });
+  const offloadChars = o.inspectOffloadChars ?? OFFLOAD_CHARS;
   const judgeOptions = o.injectionJudge && { ...o.injectionJudge };
   if (judgeOptions && (typeof judgeOptions.task !== "string" || !judgeOptions.task.trim() || Buffer.byteLength(judgeOptions.task) > 2_000)) throw new Error("audit_injection_task_invalid");
   const injectionJudge = judgeOptions && createInjectionJudge(judgeOptions);
@@ -187,8 +195,17 @@ export function createProxy(o: ProxyOpts) {
       if (alias) { body.model = alias.model; if (alias.upstream) base = alias.upstream; }
       if (vkey?.models && !vkey.models.includes("*") && !vkey.models.includes(requestedModel ?? "") && !vkey.models.includes(body?.model)) { clearTimeout(timer); return refuse(403, "audit_model_not_allowed", { provider, ...(requestedModel && { model: requestedModel.slice(0, 128) }) }); }
       const target = base.replace(/\/$/, "") + url.pathname + url.search;
-      const { value, findings } = inspect(body, profile.carnet) as { value: any; findings: any[] };
-      const { atts, refs } = discover(value);
+      let inspected: { value: any; findings: any[] }, inspectionStopped: string | undefined;
+      if (!scannedCharsAbove(body, offloadChars)) inspected = inspect(body, profile.carnet) as { value: any; findings: any[] };
+      else try { inspected = await inspection.run(body) as { value: any; findings: any[] }; metrics.inspectionsOffloaded.inc({ result: "ok" }); }
+      catch (e) {
+        if (e instanceof InspectionBusy) { metrics.inspectionsOffloaded.inc({ result: "busy" }); clearTimeout(timer); return refuse(503, "audit_inspection_busy", { provider }); }
+        if (!(e instanceof InspectionStopped)) throw e;
+        metrics.inspectionsOffloaded.inc({ result: e.code === "audit_inspection_timeout" ? "timeout" : "failed" });
+        inspected = { value: body, findings: [] }; inspectionStopped = e.code;
+      }
+      const { value, findings } = inspected;
+      const { atts, refs } = inspectionStopped ? { atts: [], refs: [] } as ReturnType<typeof discover> : discover(value);
       const context = {
         provider: anthropic ? "anthropic" : "openai", api: route, endpoint: url.pathname, requestId: rid,
         systemId: str(req.headers["x-audit-system-id"]), useCase: str(req.headers["x-audit-use-case"]),
@@ -211,6 +228,7 @@ export function createProxy(o: ProxyOpts) {
           ...(composition && { context: composition }), ...(session && { session }), ...observe(traced), upstreamStatus: null, error: code, latencyMs: Date.now() - t0 });
         return fail(422, code);
       };
+      if (inspectionStopped) return reject(inspectionStopped);
       if (refs.length && profile.mode !== "advisory") return reject("audit_uninspectable_reference");
       if (atts.length && sandbox === "unavailable") { metrics.sandboxUnavailable.inc(); return reject("audit_sandbox_unavailable"); }
       if (atts.length && !TOOLS_OK) return reject("audit_inspection_unavailable");
@@ -340,7 +358,7 @@ export function createProxy(o: ProxyOpts) {
       catch (e) { metrics.budgetFailures.inc(); event("audit_budget_settlement_failed", e); }
     }
   });
-  server.on("close", () => { clearInterval(refusalFlush); flushSuppressed(); });
+  server.on("close", () => { clearInterval(refusalFlush); flushSuppressed(); inspection.close(); });
   return server;
 }
 const str = (v: unknown) => (typeof v === "string" ? v.slice(0, 128) : undefined);

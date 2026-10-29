@@ -31,7 +31,7 @@ const { values: a } = parseArgs({ args: rest, options: {
   decision: { type: "string" }, reviewer: { type: "string" }, verdict: { type: "string" }, note: { type: "string" },
   source: { type: "string" }, answer: { type: "string" },
   "baseline-limit": { type: "string", default: "2" }, "candidate-limit": { type: "string", default: "3" },
-  "rotate-bytes": { type: "string", default: String(256 * 1024 * 1024) }, "keep-days": { type: "string" },
+  "rotate-bytes": { type: "string", default: String(256 * 1024 * 1024) }, "keep-days": { type: "string" }, "inspect-timeout-ms": { type: "string", default: "5000" },
 } });
 const NOT_REPRODUCED = new Set(["audit_qdl_source_missing", "audit_qdl_source_invalid", "audit_qdl_source_mismatch", "audit_qdl_intent_mismatch"]);
 const log = new AuditLog(a.log!);
@@ -142,6 +142,7 @@ if (cmd === "attest-keygen") {
   if (!["redact", "no-go", "advisory"].includes(a.mode!)) { console.error("--mode must be redact|no-go|advisory"); process.exit(2); }
   if (!/^\d{1,15}$/.test(a["rotate-bytes"]!)) { console.error("--rotate-bytes must be a whole number of bytes, 0 to disable"); process.exit(2); }
   log.rotateBytes = Number(a["rotate-bytes"]);
+  if (!/^[1-9]\d{0,6}$/.test(a["inspect-timeout-ms"]!)) { console.error("--inspect-timeout-ms must be a whole number of milliseconds above 0"); process.exit(2); }
   const carnet = a["allow-hashes"] ? new Set<string>(JSON.parse(readFileSync(a["allow-hashes"], "utf8"))) : undefined;
   const env = process.env, cfg = a.config ? JSON.parse(readFileSync(a.config, "utf8")) : {};
   const unsafeNoSandbox = a["unsafe-no-sandbox"] === true || env.AI_AUDIT_UNSAFE_NO_SANDBOX === "1";
@@ -155,7 +156,8 @@ if (cmd === "attest-keygen") {
     injectionJudge, actionGate: cfg.actionGate,
     pageRedaction: !a["no-page-redaction"] && cfg.pageRedaction !== false, keys, budgetDirectory: cfg.budgetDirectory,
     aliases: cfg.aliases, adminKeySha256: env.AI_AUDIT_ADMIN_KEY ? sha256(env.AI_AUDIT_ADMIN_KEY) : cfg.adminKeySha256,
-    upstreamKeys: { openai: env.AI_AUDIT_UPSTREAM_OPENAI_KEY, anthropic: env.AI_AUDIT_UPSTREAM_ANTHROPIC_KEY }, unsafeNoSandbox });
+    upstreamKeys: { openai: env.AI_AUDIT_UPSTREAM_OPENAI_KEY, anthropic: env.AI_AUDIT_UPSTREAM_ANTHROPIC_KEY }, unsafeNoSandbox,
+    inspectTimeoutMs: Number(a["inspect-timeout-ms"]) });
   server.listen(Number(a.port), a.host, () => {
     const addr = server.address();
     const bound = addr && typeof addr === "object" ? addr : { address: a.host, port: Number(a.port) };

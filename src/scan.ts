@@ -149,7 +149,7 @@ const assemble = (joined: string, pieces: BendPiece[], spans: Span[]) => pieces.
 export const redactText = (text: string, spans: Span[]) => assemble(text, maskPlan([text.length], spans)[0], spans);
 
 const MASKING_PASSES = 4;
-const isPayload = (s: string) => /^data:[\w.+-]+\/[\w.+-]+(?:;[^,]*)?;base64,/.test(s);
+export const isPayload = (s: string) => /^data:[\w.+-]+\/[\w.+-]+(?:;[^,]*)?;base64,/.test(s);
 const outsideStrings = (json: string) => json.replace(/"(?:[^"\\]|\\.)*"/g, (s) => `"${" ".repeat(s.length - 2)}"`);
 function maskOnce(v: string, carnet: Allowlist | undefined, path: string, findings: Finding[], depth: number): string {
   if (/^\s*[\[{]/.test(v)) {
