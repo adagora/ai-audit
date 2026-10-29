@@ -168,6 +168,16 @@ test("found by fuzzing: masking an email in a database URL is a fixpoint, becaus
   assert.equal(inspect("postgres://[REDACTED:pii-email]:hunter2@db.local/app").value, "[REDACTED:database-credentials]");
 });
 
+test("found by fuzzing: masking repeats across content parts, so a mask that completes a finding over a part boundary is masked too", () => {
+  assert.deepEqual(inspect(["postgres://", "apikey:ase6/png;@"]), { value: ["[REDACTED:database-credentials]", ""],
+    findings: [{ rule: "named-credential", path: "$[1]" }, { rule: "database-credentials", path: "$[0..1]" }] });
+  const parts = ["44051401359VBwe", { type: "text", text: "_xGclient_secret = wUiTpN64L0v8i440514" }], once = inspect(parts);
+  assert.deepEqual(once, { value: ["[REDACTED:pii-pesel]VBwe", { type: "text", text: "_xGclient_secret = [REDACTED:named-credential]" }],
+    findings: [{ rule: "pii-pesel", path: "$[0]" }, { rule: "named-credential", path: "$[0..1]" }] });
+  assert.ok(!JSON.stringify(once.value).includes("wUiTpN64L0v8i440514"));
+  assert.deepEqual(inspect(once.value).findings, []);
+});
+
 test("found by fuzzing: a database URL with a password is found when another database URL without one runs into it", () => {
   assert.equal(inspect("DATABASE_URLS=mysql://localhost/app,postgres://admin:hunter2@db:5432/x").value, "DATABASE_URLS=mysql://localhost/app,[REDACTED:database-credentials]");
   assert.equal(inspect("postgres://u@h/db?fallback=mysql://x:y@z").value, "postgres://u@h/db?fallback=[REDACTED:database-credentials]");

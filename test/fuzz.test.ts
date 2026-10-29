@@ -245,3 +245,13 @@ test("fuzz: masking any text is a fixpoint, so no mask leaves a finding standing
     assert.deepEqual(inspect(once.value).findings, [], JSON.stringify({ text, once: once.value }));
   }
 });
+
+test("fuzz: masking text split into content parts is a fixpoint, so a mask never completes a finding across parts", () => {
+  const g = seeded(10);
+  for (let i = 0; i < runs(3000); i++) {
+    const parts = Array.from({ length: 2 + g.int(3) }, () => piecesText(g).slice(0, 1 + g.int(40))).map((t) => (g.int(2) ? t : { type: "text", text: t }));
+    const once = inspect(parts);
+    if (decide("redact", once.findings).action === "block") continue;
+    assert.deepEqual(inspect(once.value).findings, [], JSON.stringify({ parts, once: once.value }));
+  }
+});

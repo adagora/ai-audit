@@ -8,7 +8,7 @@ import { bendList, bendListOf, fromBendList, type BendList } from "./context.js"
 export type Mode = "redact" | "no-go" | "advisory";
 export type Allowlist = Pick<ReadonlySet<string>, "has">;
 interface Rule { readonly id: string; readonly re: RegExp; readonly group?: number; readonly keywords?: readonly string[]; readonly valid?: (m: string) => boolean; readonly field?: RegExp }
-export const SCANNER_VERSION = "6";
+export const SCANNER_VERSION = "7";
 export const MAX_JSON_DEPTH = 256;
 const KEY_END = String.raw`(?![\w-])`, JWT_END = String.raw`(?![\w\/\\=-])`;
 
@@ -190,7 +190,17 @@ export function inspect(v: unknown, carnet?: Allowlist, path = "$", findings: Fi
     findings.push({ rule: "deep-json", path, unredactable: true });
     return { value: v, findings };
   }
-  if (Array.isArray(v)) return { value: joinParts(v, carnet, path, findings).map((x, i) => inspect(x, carnet, `${path}[${i}]`, findings, false, depth + 1).value), findings };
+  if (Array.isArray(v)) {
+    const before = findings.length;
+    let value = joinParts(v, carnet, path, findings).map((x, i) => inspect(x, carnet, `${path}[${i}]`, findings, false, depth + 1).value);
+    if (findings.length === before) return { value, findings };
+    for (let pass = 1; ; pass++) {
+      const found: Finding[] = [], joined = joinParts(value, carnet, path, found);
+      findings.push(...found.map((f) => (pass < MASKING_PASSES ? f : { ...f, unredactable: true })));
+      if (!found.length || pass === MASKING_PASSES) return { value: joined, findings };
+      value = joined.map((x, i) => (partText(x) === partText(value[i]) ? x : inspect(x, carnet, `${path}[${i}]`, findings, false, depth + 1).value));
+    }
+  }
   if (v && typeof v === "object") {
     const o: Record<string, unknown> = {};
     for (const [k, x] of Object.entries(v)) {
@@ -223,9 +233,10 @@ export function maskParts(texts: string[], spans: Span[]): string[] {
   return maskPlan(ends, spans).map((pieces) => assemble(joined, pieces, spans));
 }
 
+const partText = (x: any): string | undefined => (typeof x === "string" ? x : x && typeof x === "object" && typeof x.text === "string" ? x.text : undefined);
 function joinParts(arr: unknown[], carnet: Allowlist | undefined, path: string, findings: Finding[]): unknown[] {
   const idx: number[] = [], texts: string[] = [];
-  arr.forEach((x: any, i) => { const t = typeof x === "string" ? x : x && typeof x === "object" && typeof x.text === "string" ? x.text : undefined; if (t !== undefined && !isPayload(t)) { idx.push(i); texts.push(t); } });
+  arr.forEach((x, i) => { const t = partText(x); if (t !== undefined && !isPayload(t)) { idx.push(i); texts.push(t); } });
   if (texts.length < 2) return arr;
   const starts: number[] = []; let joined = ""; texts.forEach((t) => { starts.push(joined.length); joined += t; });
   const part = (pos: number) => lastWhere(starts.length, (k) => starts[k] <= pos);
