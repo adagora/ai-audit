@@ -17,6 +17,8 @@ npm run example:injection -- --ollama --model qwen3.5:4b --timeout-ms 60000 --ou
 
 For repeated measurements, add `--repeats 3`. Change `--model` to compare another installed local model or quantization. `--url http://127.0.0.1:11434` selects the loopback service. No keys, external providers, automatic downloads or cloud fallback are used. Model names containing `cloud` and aliases reporting remote model metadata are refused before case content is sent. The local Ollama service must be trusted.
 
+`--input examples/injection-evaluation/ordinary.json` runs the 24 ordinary chunks of this repository's own code and docs instead; [ordinary.mjs](ordinary.mjs) built that file and records the commit it read. To publish a model run, save it with `--output docs/evidence/injection/<date>-<model>-<cases|ordinary>.json` and run `npm run results -- --write`: the run then appears in [the detection guide](../../docs/prompt-injection.md#measured-results) with its repeats as a range ([ADR 0052](../../docs/adr/0052-published-numbers-from-committed-evidence.md)).
+
 `--input path/to/cases.json` accepts the fixture schema shown in [cases.json](cases.json). Use separate native English and Polish evaluation data before making accuracy claims. Include unseen attack families, quoted attacks, normal imperative instructions and detector-targeting attacks. Keep related translations and paraphrases in the same split. Never commit real traffic, secrets or real keys.
 
 The report includes dataset/rule/prompt identities, model digests reported by Ollama, per-case enums, and aggregate metrics by language, split and source. It contains no raw task text, source content, model reasoning or arbitrary error text. Output files are created exclusively; an existing file is not overwritten.

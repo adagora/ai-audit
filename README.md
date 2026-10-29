@@ -872,6 +872,8 @@ Point that client back at the provider. There is no per-request bypass header. `
 
 `npm test` builds, then runs `node --test` on `dist/test/*.test.js`. The seeded generators in `test/fuzz.test.ts` are part of that run. `npm run fuzz` runs them 50 times longer. `FUZZ_SCALE` and `FUZZ_SEED` change that. `npm run fuzz:coverage` runs the [Jazzer.js](https://github.com/CodeIntelligenceTesting/jazzer.js) targets in `fuzz/` for `FUZZ_SECONDS` each. The default is 300. Jazzer.js has native code, so it lives in `fuzz/package.json` and is not part of the main install. It cannot see inside regular expressions. Slow-regex inputs are caught by timing a repeated pattern. A finding saved under `fuzz/artifacts/` should become a regression test.
 
+Measured tables in the docs are generated, not typed. `npm run results` checks them against the committed data and `npm run results -- --write` rewrites them; `npm test` fails when one is out of date. [ADR 0052](docs/adr/0052-published-numbers-from-committed-evidence.md).
+
 CI runs `npm test` on Linux with Node 22, 24 and 26, with the attachment tools and bubblewrap installed, so those tests are not skipped. It also runs `npm run verify:bend` and `spec/run.sh` on every push to `main` and every pull request. Each night it runs `npm run fuzz` and 600 seconds of Jazzer.js per target, and it keeps the corpus. [ADR 0030](docs/adr/0030-ci-and-pinned-bend-archive.md).
 
 ```bash

@@ -59,3 +59,4 @@ Format: Nygard (Status, Context, Decision, Consequences), at most ~40 lines, fil
 - [49. The audit log rotates into linked segments; old segments leave only by a recorded prune](0049-log-segments-and-retention.md)
 - [50. Large request texts are inspected in a worker with a deadline](0050-text-inspection-deadline-off-the-event-loop.md)
 - [51. A record stores each finding once per rule and path, with a count](0051-findings-stored-with-counts.md)
+- [52. Published measurements are generated from committed evidence and checked by the tests](0052-published-numbers-from-committed-evidence.md)

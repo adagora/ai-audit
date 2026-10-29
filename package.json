@@ -23,6 +23,7 @@
     "codex:proxy": "bash scripts/codex-proxy.sh",
     "bench:overhead": "npm run build && node bench/overhead.mjs",
     "bench:bend": "npm run build && node bench/bend.mjs",
+    "results": "npm run build && node scripts/results.mjs",
     "check:tsc": "tsc --noEmit",
     "verify:formal": "bash spec/run.sh && npm run build && node --test dist/test/logsafety.test.js dist/test/audit.test.js dist/test/qdl.test.js dist/test/laws.test.js",
     "verify:bend": "bash bend/run.sh"
