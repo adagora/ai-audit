@@ -74,3 +74,22 @@ test("a refusal flood keeps details of the first refusals in a minute and one su
   assert.match(report(p.log, "1970", "9999").md, /limit na minutę\): 2/);
   assert.deepEqual(p.log.verifyChain(), { ok: true });
 });
+
+test("an exception before forwarding answers 500 and leaves one content-free refusal record, upstream not called", async () => {
+  const up = await mockUpstream(), log = new AuditLog(join(mkdtempSync(join(tmpdir(), "refusals-")), "audit.jsonl"));
+  const server = createProxy({ upstreamOpenai: up.url, upstreamAnthropic: up.url, mode: "redact", log, quiet: true, sessionKey: {} as Buffer });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const res = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/chat/completions`, { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "m", messages: [{ role: "user", content: "mail ada@example.com" }] }) });
+    assert.equal(res.status, 500); assert.equal((await res.json()).error.code, "audit_internal_error");
+    assert.equal(up.seen.length, 0);
+    const records = log.read() as any[];
+    assert.equal(records.length, 1);
+    assert.deepEqual({ kind: records[0].kind, id: records[0].id, status: records[0].status, code: records[0].code, reason: records[0].reason },
+      { kind: "refusal", id: res.headers.get("x-request-id"), status: 500, code: "audit_internal_error", reason: "ERR_INVALID_ARG_TYPE" });
+    const raw = readFileSync(log.path, "utf8");
+    assert.ok(!raw.includes("ada@example.com") && !raw.includes("argument"));
+    assert.match(report(log, "1970", "9999").md, /- 500 audit_internal_error: 1/);
+  } finally { const closed = once(server, "close"); server.closeAllConnections(); server.close(); await closed; up.close(); }
+});

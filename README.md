@@ -820,7 +820,7 @@ The proxy's `serve` command does not need this import.
 - Inspected types are PNG, JPEG, WebP, GIF and PDF. Other files, file ids and remote URLs are refused in `redact` and `no-go`.
 - The attachment cache is memory only. It dies with the process.
 - CLI readers hold every record of the log series in memory. A long series needs that much memory; `prune` bounds it.
-- Requests refused with 401, 403, 400, 404 or 413 are `refusal` records without content, at most 60 per minute per process; the rest of that minute is one summary record with a count ([ADR 0047](docs/adr/0047-record-refusals-before-inspection.md)). `count_tokens` is scanned and not logged.
+- Requests refused with 401, 403, 400, 404 or 413, and requests stopped by an internal error before forwarding (500, with the error class or code as `reason`), are `refusal` records without content, at most 60 per minute per process; the rest of that minute is one summary record with a count ([ADR 0047](docs/adr/0047-record-refusals-before-inspection.md)). `count_tokens` is scanned and not logged.
 - `scrub` rewrites an export you already have. It does not reach the provider, backups, or data URIs.
 - Prompt-injection rules never block, and they are easy to walk around. The tool-call gate blocks only listed tools, keys with a `tools` list and destinations it can parse.
 - `check-quotes` misses a wrong value backed by a real quote of a different sentence. It flags numbers written as words, translated text, and reformatted dates.

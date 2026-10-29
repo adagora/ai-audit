@@ -117,7 +117,7 @@ export function createProxy(o: ProxyOpts) {
   const server = http.createServer(async (req, res) => {
     const rid = randomUUID(), t0 = Date.now(); res.setHeader("x-request-id", rid);
     let decisionTag = "none", routeTag = "", forwarded = false;
-    let reservation: Reservation | undefined, budgetSent = false, vkey: VKey | undefined;
+    let reservation: Reservation | undefined, budgetSent = false, vkey: VKey | undefined, timer: ReturnType<typeof setTimeout> | undefined;
     res.on("finish", () => {
       const ms = Date.now() - t0;
       metrics.requests.inc({ route: routeLabel(routeTag), decision: decisionTag, status: String(res.statusCode) });
@@ -163,7 +163,8 @@ export function createProxy(o: ProxyOpts) {
         if (k) anthropic ? (headers["x-api-key"] = k) : (headers.authorization = `Bearer ${k}`);
       }
       const who = { virtualKey: vkey?.name, client: str(req.headers["user-agent"]) };
-      const ac = new AbortController(), timer = setTimeout(() => ac.abort(), timeoutMs);
+      const ac = new AbortController();
+      timer = setTimeout(() => ac.abort(), timeoutMs);
       res.on("close", () => { if (!res.writableFinished) ac.abort(); });
 
       if (req.method === "GET" && url.pathname === "/v1/models" || (req.method === "GET" && url.pathname.startsWith("/v1/models/"))) {
@@ -327,8 +328,14 @@ export function createProxy(o: ProxyOpts) {
     } catch (e) {
       if (e instanceof BudgetError) { metrics.budgetFailures.inc(); if (!res.writableEnded) fail(e.status, e.message); return; }
       if (e instanceof AuditLogUnavailable || forwarded) { metrics.logWriteFailures.inc(); event("audit_log_write_failed", e); }
+      else {
+        event("audit_internal_error", e);
+        recordRefusal({ id: rid, status: 500, code: "audit_internal_error", method: req.method, route: routeLabel(routeTag), ...(vkey && { virtualKey: vkey.name }),
+          remoteAddress: req.socket.remoteAddress, reason: contentFreeReason(e) });
+      }
       if (!res.writableEnded) fail(500, "audit_internal_error");
     } finally {
+      clearTimeout(timer);
       if (reservation) try { if (budgetSent) budgets.settle(reservation); else budgets.cancel(reservation); }
       catch (e) { metrics.budgetFailures.inc(); event("audit_budget_settlement_failed", e); }
     }
