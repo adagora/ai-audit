@@ -1,0 +1,40 @@
+stateDiagram-v2
+  s0 : Decision recorded
+  s1 : Waiting for a person
+  s2 : App about to act
+  s3 : Verdict recorded, app not told yet
+  s4 : App gave up waiting
+  s5 : Action done, not recorded yet
+  s6 : App about to skip
+  s7 : App gave up, then approved
+  s8 : Done and authorized
+  s9 : Skipped
+  s10 : Done, flagged as without approval
+  s11 : Skipped, then approved
+  [*] --> s0
+  s0 --> s1 : the rule asks for a person
+  s0 --> s2 : the rule allows the action
+  s0 --> s3 : the rule asks for a person
+  s1 --> s3 : a person records approved, or a person records taken over, or a person records rejected
+  s1 --> s4 : the wait times out
+  s2 --> s5 : the app acts
+  s3 --> s2 : the app reads approved
+  s3 --> s6 : the app reads rejected or taken over
+  s4 --> s7 : a person records approved
+  s5 --> s8 : the app records done
+  s6 --> s9 : the app records skipped
+  s7 --> s4 : a person records taken over, or a person records rejected
+  s5 --> s10 : the app records done [a reject or take-over came first]
+  s6 --> s11 : the app records skipped
+  s9 --> s11 : a person records approved
+  s4 --> [*]
+  s7 --> [*]
+  s8 --> [*]
+  s9 --> [*]
+  s10 --> [*]
+  s11 --> [*]
+  classDef breaks fill:#ffecee,stroke:#e72e3b,color:#cd2834
+  classDef mayBreak fill:#fff3e6,stroke:#e8730c,color:#b85a06
+  class s7 breaks
+  class s10 breaks
+  class s11 breaks

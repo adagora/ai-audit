@@ -18,7 +18,7 @@ The questions were about the order of steps between processes and between a requ
 ## Results at the fix of findings 3 to 6
 | Config | Expected | Result |
 |---|---|---|
-| AuditChain.cfg (2 writers x 2, rotation after 2 records, one crash, one prune, 2 anchors, one clock step back) | pass | pass, 147,400 distinct states |
+| AuditChain.cfg (2 writers x 2, rotation after 2 records, one crash, one prune, 2 anchors, one clock step back) | pass | pass, 1,109,143 distinct states |
 | AuditChain_nolock.cfg | fail | ChainIntact violated |
 | AuditChain_norestart.cfg (no `startSegment` for a missing current file) | fail | ChainIntact violated |
 | AuditChain_unlinkfirst.cfg (prune deletes before it records) | fail | ChainIntact violated |
@@ -35,6 +35,17 @@ The questions were about the order of steps between processes and between a requ
 Real-code mutations caught by `verify:formal`: append without `withLock` (multi-process test fails), outer catch without `res.writableEnded` (late-failure test fails), both `ensureWritable()` checks removed (torn-tail 503 test fails). Checked at f6b1865: no `startSegment` for a missing current file (`test/segments.test.ts` fails), no `|| forwarded` in the outer catch (`test/logsafety.test.ts` fails, the test added with this check), no refusal record for an internal error (`test/refusals.test.ts` fails). Prune that deletes before it records passes every test; only `AuditChain_unlinkfirst.cfg` catches it. The old segment naming, the time rule for pruned anchors, the open-then-write segment start and the reuse of a pruned name each fail a test in `test/segments.test.ts` (run on the code before the fix).
 
 Not modelled: attachment cache vs inspection profile (reviewed: key includes `profile.id`, profile frozen per instance; no stale path).
+
+## The decision loop (ADR 0055)
+`spec/DecisionLoop.tla` models one decision after the answer. The rule either allows its action or asks for a person. A person records up to two verdicts at any time, in the console or with `approve`, and the latest one counts. An application that follows the protocol acts at once on an action the rule allows; otherwise it runs `ai-audit await`, acts on `approved`, skips on `rejected` or `overridden`, or gives up when the wait times out. It records what it did with `ai-audit effect`. A done effect counts as authorized as `effectAuthorized` decides: the latest review before it is `approved`, or there is none and the rule allowed the action. 159 distinct states.
+
+Chart: `decision-loop.mmd` (12 states, 15 arrows), labels from `decision-loop.view.mjs`, which `/statechart` (pstack) can use to draw it again from `spec/DecisionLoop.tla`. Red states break a rule.
+
+Open findings. Both are questions about what the loop should promise, not code that differs from ADR 0055.
+7. An application that follows the protocol can be flagged as acting without approval (`DecisionLoop_flagged.cfg`). Shortest path: the rule allows the action; a person records taken over; the app acts on the rule and records done. A second path: the app reads `approved`, acts, and a person records `rejected` before the app records done. The console then reports "ran without approval", and after a take-over the action ran although ADR 0055 says the application does not run it.
+8. An approval can end with nothing done and nothing on the console's attention list (`DecisionLoop_unacted.cfg`). Shortest path: the app waits, the wait times out, the app gives up, and a person then records `approved`. The same happens when a person records `approved` after the app read `rejected` and recorded skipped. The console shows the decision as approved; no action follows.
+
+Fixed while building this model: `awaitVerdict` looked for a review only in the two newest files, so after two rotations it returned `timeout` for an approved decision (commit afd1757).
 
 ## Proofs in Bend 2 (ADR 0029)
 Run: `npm run verify:bend` (needs Bend 2.0.38 on PATH; `sh bend/install.sh` installs it into `~/.bend` and checks the archive's sha256, ADR 0030). CI runs it on every push to `main` and every pull request. Code `bend/context.bend` (token split, ADR 0017), `bend/arena.bend` (arena ages, first change and runs, ADR 0020), `bend/usage.bend` (turn tokens, the provider-cache-drop signal and report totals, ADR 0012 and ADR 0020) `bend/spans.bend` (the merge of overlapping finding spans before redaction, ADR 0007) `bend/parts.bend` (which spans are removed from the joined text when a message has several text parts, ADR 0007) `bend/mask.bend` (which bytes of each text part the provider gets after redaction, ADR 0007), `bend/decide.bend` (the decision to forward or block a request, ADR 0009) and `bend/policies.bend` (the policy versions of each use case in `report` and `ai-audit policies`, ADR 0027), laws `bend/LAWS.bend`, proofs `bend/PROOF.bend`, runner `bend/run.sh`. The committed `src/bend/*.mjs` must match the code; `bash bend/run.sh --write` regenerates them.
