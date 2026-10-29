@@ -31,7 +31,7 @@ Not covered: the stale-lock takeover race (>10 s stall of a live holder; a dead 
 
 Findings 1 to 8 are fixed; 7 and 8 by ADR 0057, which keeps two known windows of the decision loop. Traces and replays: `docs/verification/README.md`. Chart of the decision loop: `docs/verification/decision-loop.mmd`, labels from `docs/verification/decision-loop.view.mjs` for `/statechart`.
 
-## Coverage record (sync commit: c133928)
+## Coverage record (sync commit: b07696d)
 - `src/audit.ts`: `AuditLog.withLock`, `AuditLog.lastHash`, `AuditLog.ensureWritable`, `AuditLog.append` (the `rotateBytes` check and the `startSegment` call for a missing or empty current file), `AuditLog.rotate`, `AuditLog.rotateLocked`, `AuditLog.segmentTime`, `segmentNameTime`, `AuditLog.startSegment`, `AuditLog.closedSegments`, `AuditLog.files`, `checkSeries`, `prune`, `anchor`, `verifyAnchors`, `AuditLogUnavailable`
 - `src/proxy.ts`: `createProxy` handler: `ensureWritable` checks before step 2 and step 3, `refuse`/`recordRefusal`/`appendRefusal`, `reject`, `write`, the block and budget-reject `write`, the fetch catch, `forwarded = true` after the fetch, the final `write(...)` after `pipe` or `pipeGated`, the outer `catch` (`AuditLogUnavailable || forwarded`, the refusal for an internal error, `res.writableEnded` guard), `logUnavailable`, and `observe(...)`, which adds Quinelings events to each of those records (ADR 0024)
 - `src/extract.ts`: `extract` usage fields (only set when reported)
@@ -39,7 +39,7 @@ Findings 1 to 8 are fixed; 7 and 8 by ADR 0057, which keeps two known windows of
 - Other writers of the chain, each a writer process in AuditChain, all through `AuditLog.append`: `src/qdl.ts` (`program`, decision and `:qdl` step records, ADR 0023 and 0026), `src/console.ts` (`approve`), and the CLI `decide`, `approve`, `effect`, `rotate` and `prune`
 - Tests tied to the models: `test/logsafety.test.ts`, `test/audit.test.ts`, `test/qdl.test.ts` (new writers keep the chain), `test/laws.test.ts` (one record per request, also with Quinelings traffic; no planted secret in the log; any tampering fails verification), `test/segments.test.ts` (rotation, restart of a missing or empty current file, a leftover `<log>.segment`, names across a clock step back and after a prune, prune, anchors across segments and of pruned segments), `test/refusals.test.ts` (an internal error before forwarding leaves one refusal), `test/verdict.test.ts` (the latest review, also across rotations; effect authorization)
 
-Does my change touch this? Run `git diff c133928 -- src/audit.ts src/proxy.ts src/extract.ts src/qdl.ts src/console.ts src/cli.ts src/verdict.ts src/consoleModel.ts`. If any listed function changed, or new code calls `append`/`record`/`approve`/`effect`/`rotate`/`prune`, run the check and re-read the matching model actions.
+Does my change touch this? Run `git diff b07696d -- src/audit.ts src/proxy.ts src/extract.ts src/qdl.ts src/console.ts src/cli.ts src/verdict.ts src/consoleModel.ts`. If any listed function changed, or new code calls `append`/`record`/`approve`/`effect`/`rotate`/`prune`, run the check and re-read the matching model actions.
 
 ## Run
 `npm run verify:formal` (needs Java 11+ on PATH or `JAVA=/path/to/java`; downloads tla2tools v1.8.0 to `~/.cache` on first run, or set `TLA2TOOLS_JAR`). About 20 s.
