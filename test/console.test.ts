@@ -5,9 +5,10 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } fro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
+import { fileURLToPath } from "node:url";
 import { AuditLog, sha256 } from "../src/audit.js";
 import { createConsole } from "../src/console.js";
-import { decisionViews, flow, requestPath, suggestions } from "../src/consoleModel.js";
+import { decisionViews, flow, requestPath, STAGES, suggestions } from "../src/consoleModel.js";
 import { AWS, mockUpstream, startProxy } from "./helpers.js";
 
 const chat = (key: string, body: object, headers: Record<string, string> = {}) => ({ method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
@@ -141,4 +142,20 @@ test("over real proxy traffic the console shows paths, context blocks, use cases
     const everything = JSON.stringify([requests, detail, session, overview, await get("/api/decisions")]);
     for (const secret of [AWS, "jan@firma.pl", "Be brief.", sha256("vk-s")]) assert.ok(!everything.includes(secret), `${secret} reached the console`);
   } finally { app.server.close(); proxy.close(); up.close(); }
+});
+
+test("the README state machine has the console's states, labels and order, and every README image exists", () => {
+  const root = fileURLToPath(new URL("../../", import.meta.url));
+  const readme = readFileSync(join(root, "README.md"), "utf8"), ui = readFileSync(join(root, "console/console.js"), "utf8");
+  const labels = Object.fromEntries([...ui.matchAll(/\["(\w+)", "([^"]+)", "[^"]+"\]/g)].map((m) => [m[1], m[2]]));
+  const block = readme.split("```mermaid").find((b) => b.includes("received : Request received"))!.split("```")[0];
+  const declared = Object.fromEntries([...block.matchAll(/^ {2}(\w+) : (.+)$/gm)].map((m) => [m[1], m[2]]));
+  for (const stage of STAGES) assert.equal(declared[stage], labels[stage], stage);
+  const next = new Map([...block.matchAll(/^ {2}(\w+) --> (\w+)$/gm)].map((m) => [m[1], m[2]]));
+  const chain = ["received"];
+  while (next.has(chain[chain.length - 1]) && chain.length <= STAGES.length) chain.push(next.get(chain[chain.length - 1])!);
+  assert.deepEqual(chain, [...STAGES]);
+  const images = [...readme.matchAll(/!\[[^\]]*\]\((docs\/images\/[^)]+)\)/g)].map((m) => m[1]);
+  assert.ok(images.length >= 7, String(images.length));
+  for (const image of images) assert.ok(existsSync(join(root, image)), image);
 });

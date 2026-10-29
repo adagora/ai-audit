@@ -51,6 +51,26 @@ There is no install script. This repository is not published on npm. `npm instal
 
 TypeScript, Node's standard library, no runtime dependencies. [Quinelings](https://github.com/CharlesHoskinson/quinelings) is optional and is not on the request path. Decisions are in [docs/adr](docs/adr/).
 
+## What it looks like
+
+The [operator console](#operator-console) over the synthetic log of `npm run example:workflow` and `npm run example:wycena -- --console --wait`. No real traffic.
+
+**What needs attention now**, and what the log suggests changing:
+
+![Console overview: key figures, items that need attention, suggestions](docs/images/console-overview.jpg)
+
+**The state machine of a request**, with how many requests reached each state and where they stopped:
+
+![Request flow: eleven states from request received to delivered and recorded, with stops and flags](docs/images/console-request-flow.jpg)
+
+**What is in the context** of one request: each block in prompt order, its kind, size and age, and what made it large. The log stores sizes, never text:
+
+![Context of one request: block strip by kind, parts table, why it is this big, largest blocks](docs/images/console-context.jpg)
+
+**Decisions and their verdicts**: the rule's result, the person's verdict and what the application did after it:
+
+![Decisions: recorded, waiting, done by rule, approved, overridden, rejected, action done](docs/images/console-decisions.jpg)
+
 ## Quick example
 
 For one local Codex session, run `npm run codex:proxy` from the repo root. It builds the proxy, asks for your OpenAI API key if `AI_AUDIT_UPSTREAM_OPENAI_KEY` is unset, generates a temporary `aia-` client key, starts the proxy on `127.0.0.1:8788`, and launches Codex through it. The provider key stays out of Codex's environment; the proxy stops when Codex exits. The audit log and proxy diagnostics stay in ignored `live/`. Set `AI_AUDIT_PORT=8787` if you have stopped the existing demo proxy and want the native Grafana scrape to follow this session. This launcher starts the proxy and Codex, not Grafana.
@@ -123,6 +143,105 @@ For a browser-driven integration test with your own OpenAI API key, run `npm run
 **Provider keys stay in the proxy environment.** `keygen` prints an `aia-` key. Config stores its SHA-256. The upstream call uses `AI_AUDIT_UPSTREAM_OPENAI_KEY` or `AI_AUDIT_UPSTREAM_ANTHROPIC_KEY`. [ADR 0008](docs/adr/0008-virtual-keys.md).
 
 **A decision is a later record.** `ai-audit decide` links a policy result to `x-request-id`. Replay reads the log. The proxy still serves when the Quinelings package is absent. [ADR 0004](docs/adr/0004-quinelings-optional.md).
+
+## Requests and decisions
+
+There are two kinds of decision, and only the first one can stop a request.
+
+- **The proxy decides about each request**, before anything is forwarded: a key, a use case, the request shape, the model and the scan can refuse it, and a `no-go` finding blocks it. The provider never sees a stopped request. After the answer, the tool gate checks the tool calls the model proposed. One `llm-call` or `refusal` record is written.
+- **A rule decides about the work** after the model has answered, in your application. It does not stop the request; the answer is already back. It decides whether the action that follows, such as sending a quote, may run now or waits for a person. The application waits with `await` and records what it did with `effect`.
+
+All of these are records in the same hash-chained log: `llm-call`, `refusal`, `decision` with its `:qdl` step, `program`, `review` and `effect`. The console reads them from there.
+
+```mermaid
+sequenceDiagram
+  participant App as Application
+  participant Proxy as ai-audit proxy
+  participant LLM as Provider
+  participant Rule as QDL rule
+  participant You as Reviewer in the console
+  App->>Proxy: request, with key and use case
+  Note over Proxy: may refuse or block here, then nothing is forwarded
+  Proxy->>LLM: forwarded request, redacted if needed
+  LLM-->>Proxy: answer
+  Note over Proxy: tool gate checks proposed tool calls
+  Proxy-->>App: answer, llm-call record
+  App->>Rule: decide with the model's numbers
+  Rule-->>App: result and proposed action, decision record
+  App->>App: await verdict
+  You-->>App: approve, override or reject, review record
+  App->>App: run or skip the action, effect record
+```
+
+The request path, in the order the proxy checks it. The console's Request flow page counts each state:
+
+```mermaid
+stateDiagram-v2
+  received : Request received
+  key : Virtual key
+  useCase : Use case
+  shape : Route and body
+  model : Model allowed
+  inspect : Inspection
+  decide : Decision
+  budget : Token budget
+  upstream : Provider
+  gate : Tool gate
+  recorded : Delivered and recorded
+  refused : Refused 400, 401, 403, 404 or 413
+  rejected : Rejected 422
+  blocked : Blocked 409
+  budgetRefused : Budget refused 429 or 503
+  noAnswer : No provider answer 408 or 502
+  [*] --> received
+  received --> key
+  key --> useCase
+  useCase --> shape
+  shape --> model
+  model --> inspect
+  inspect --> decide
+  decide --> budget
+  budget --> upstream
+  upstream --> gate
+  gate --> recorded
+  recorded --> [*]
+  key --> refused: unknown key or provider
+  useCase --> refused: missing, not allowed or off
+  shape --> refused: route, size or JSON
+  model --> refused: model not on a list
+  inspect --> rejected: deadline or uninspectable part
+  decide --> blocked: finding in no-go mode
+  budget --> budgetRefused: budget used up
+  upstream --> noAnswer: deadline or network
+  note right of gate : enforce mode rewrites the answer when a call is held
+```
+
+A decision after the answer. The console's Decisions page counts each state:
+
+```mermaid
+stateDiagram-v2
+  recorded : Decision recorded
+  waiting : Waiting for a person
+  approved : Approved
+  overridden : Overridden
+  rejected : Rejected
+  done : Action done
+  skipped : Action skipped
+  [*] --> recorded: rule result
+  recorded --> done: the rule allows its own action
+  recorded --> waiting: the rule routes it to a person
+  waiting --> approved: review
+  waiting --> overridden: review
+  waiting --> rejected: review
+  approved --> done: application runs the action
+  overridden --> skipped: the person takes over
+  rejected --> skipped
+  done --> [*]
+  skipped --> [*]
+  note right of done : an action without the rule or an approval is recorded and flagged
+```
+
+The formal model of the request lifecycle, with log failures, is in [docs/verification](docs/verification/README.md).
 
 ## How it compares
 
@@ -525,6 +644,16 @@ It prints a URL with a token, for example `http://127.0.0.1:8793/#token=…`. Op
 The console binds only to a loopback address; reach it from another machine through an SSH tunnel. It refuses requests whose `Host` is not its own address. Without `--reviewer` it is read-only. A review note is at most 500 characters and is refused when it contains a secret or personal data. The console never shows prompt text, because the log does not have it, and never edits `gateway.json`. [ADR 0054](docs/adr/0054-loopback-console.md).
 
 `npm run example:workflow` starts the same console over the synthetic log; open it from the dashboard with **Operator console**.
+
+One request on its path through the state machine:
+
+![Path of one request: each state passed, flagged, not applicable or stopped](docs/images/console-request-path.jpg)
+
+How the context of a five-turn session grew, by kind of block and by age. In turn 4 a tool definition changed, so everything after the first changed byte is new again and the provider cache cannot cover it:
+
+![Session context by kind of block](docs/images/console-session-kind.jpg)
+
+![Session context by age of block, with the prefix rewrite in turn 4](docs/images/console-session-age.jpg)
 
 #### Evidence workbench
 

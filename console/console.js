@@ -421,7 +421,7 @@ function contextPanel(record) {
           h("dt", {}, "Carried from earlier turns"), h("dd", {}, turn ? `${bytes(old)} (${pct(old, sum)})` : "not linked to a session"),
           h("dt", {}, "New in this turn"), h("dd", {}, turn ? `${bytes(fresh)} (${pct(fresh, sum)})` : "—"),
           h("dt", {}, "Cache"), h("dd", {}, record.session?.firstChanged ? `prefix changed at ${bytes(record.session.firstChanged.offset)}; later tokens are paid again` : record.session ? "prefix unchanged; only appended" : "—")),
-          h("div", { class: "section-title" }, "Largest blocks"), h("ol", { class: "trace" }, largest.map((b) => h("li", {}, h("span", {}, `${KIND_LABELS[b.kind] ?? b.kind}`, h("span", { class: "muted" }, ` · block ${b.i + 1}`)), h("span", { class: "muted small" }, ageText(b.age, turn)), h("b", { class: "num" }, bytes(b.bytes))))))),
+          h("div", { class: "section-title" }, "Largest blocks"), h("ol", { class: "trace" }, largest.map((b) => h("li", {}, h("span", {}, `${KIND_LABELS[b.kind] ?? b.kind}`, h("span", { class: "muted" }, ` · block ${b.i + 1}`), h("div", { class: "muted small" }, ageText(b.age, turn))), h("b", { class: "num nowrap" }, bytes(b.bytes))))))),
       h("p", { class: "small muted" }, "The log stores the size, kind and age of each block, never its text (ADR 0007, 0017, 0020)."));
   };
   draw();
