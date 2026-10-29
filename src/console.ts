@@ -75,9 +75,9 @@ export function createConsole(o: ConsoleOptions) {
     const unauthorized = decisions.flatMap((d) => d.effects.filter((e) => e.status === "done" && !e.authorized));
     if (unauthorized.length) attention.push({ severity: "critical", title: `${unauthorized.length} action${unauthorized.length === 1 ? "" : "s"} ran without approval`, detail: `${[...new Set(unauthorized.map((e) => e.action))].join(", ")}: the rule did not propose it and no person approved it first.`, page: "decisions" });
     if (waiting.length) attention.push({ severity: "warn", title: `${waiting.length} ${waiting.length === 1 ? "decision waits" : "decisions wait"} for a review`, detail: "No person has recorded a verdict yet.", page: "decisions" });
-    const overdueMs = (o.overdueMinutes ?? 240) * 60_000;
-    const idle = decisions.filter((d) => d.state === "approved" && !d.effects.some((e) => e.status === "done") && Date.now() - Date.parse(d.reviews[0].at) >= overdueMs);
-    if (idle.length) attention.push({ severity: "warn", title: `${idle.length} approved ${idle.length === 1 ? "decision has" : "decisions have"} no action recorded`, detail: `Approved more than ${o.overdueMinutes ?? 240} minutes ago, and the application recorded no done action. It may have stopped waiting.`, page: "decisions" });
+    const overdueMinutes = o.overdueMinutes ?? 240;
+    const idle = decisions.filter((d) => d.state === "approved" && !d.effects.some((e) => e.status === "done") && Date.now() - Date.parse(d.reviews[0].at) >= overdueMinutes * 60_000);
+    if (idle.length) attention.push({ severity: "warn", title: `${idle.length} approved ${idle.length === 1 ? "decision has" : "decisions have"} no action recorded`, detail: `Approved more than ${overdueMinutes} ${overdueMinutes === 1 ? "minute" : "minutes"} ago, and the application recorded no done action. It may have stopped waiting.`, page: "decisions" });
     if (gaps.length) attention.push({ severity: "warn", title: `${gaps.length} decision${gaps.length === 1 ? " has" : "s have"} incomplete evidence`, detail: [...new Set(gaps.map((g) => g.reason))].join(", "), page: "decisions" });
     if (held) attention.push({ severity: "warn", title: `${held} tool call${held === 1 ? "" : "s"} held by the gate`, detail: "In observe mode they went through; in enforce mode the answer was rewritten.", page: "requests" });
     const failed = f.outcomes["upstream-failed"] ?? 0;

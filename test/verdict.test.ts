@@ -129,7 +129,8 @@ test("the console announces each new waiting decision and each overdue one once,
       const late = await (await fetch(old.url().replace(/#.*/, "") + "api/overview?hours=0", { headers: { authorization: `Bearer ${old.token}` } })).json() as any;
       assert.ok(late.attention.some((a: any) => a.severity === "warn" && a.title === "1 approved decision has no action recorded"), JSON.stringify(late.attention.map((a: any) => a.title)));
     } finally { old.server.close(); }
-    assert.deepEqual(events.slice(1).map((e) => e.event).sort(), ["decision_overdue", "decision_overdue"]);
+    const overdue = events.slice(1).filter((e) => e.event === "decision_overdue").map((e) => e.decisionId);
+    assert.deepEqual([events.length - 1, overdue.length, overdue.includes(before.id), overdue.includes(after.id)], [3, 3, true, true]);
   } finally { app.server.close(); receiver.close(); }
   assert.ok(readFileSync(log.path, "utf8").includes('"kind":"effect"'));
 });

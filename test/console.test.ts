@@ -44,8 +44,13 @@ test("decisions show their state, simulated actions, program and review history;
     { kind: "decision", id: "d2", ts: "3", systemId: "shop", useCase: "quote", output: 1 },
     { kind: "review", id: "r1", ts: "4", refId: "d2", review: { reviewer: "ada", decision: "approved", at: "4" } },
     { kind: "review", id: "r2", ts: "5", refId: "d2", review: { reviewer: "bo", decision: "overridden", at: "5", note: "too low" } },
+    { kind: "decision", id: "d3", ts: "6", systemId: "shop", useCase: "quote", output: [{ status: "skipped", action: "send-quote-to-customer" }, { status: "simulated", action: "route-to-estimator" }] },
+    { kind: "effect", id: "e3", ts: "7", refId: "d3", effect: { action: "send-quote-to-customer", status: "skipped", code: "timeout" } },
+    { kind: "decision", id: "d4", ts: "8", systemId: "shop", useCase: "quote", output: [{ status: "simulated", action: "send-quote-to-customer" }] },
+    { kind: "effect", id: "e4", ts: "9", refId: "d4", effect: { action: "send-quote-to-customer", status: "failed", code: "smtp_down" } },
   ];
-  const [d2, d1] = decisionViews(records);
+  const [d4, d3, d2, d1] = decisionViews(records);
+  assert.deepEqual([d3.state, d4.state], ["waiting", "acted"]);
   assert.deepEqual([d1.state, d1.actions, d1.qdl?.program, d1.qdl?.inputs], ["waiting", [{ action: "route-to-human-review", status: "simulated" }, { action: "auto-approve", status: "skipped" }], "Quote v1", { minutes: 42 }]);
   assert.deepEqual([d2.state, d2.reviews.map((r) => r.verdict), d2.reviews[1].note, d2.qdl], ["overridden", ["approved", "overridden"], "too low", undefined]);
   const row = (overrides: number, reviewed: number) => ({ useCase: "refund", tiers: ["shadow"], versions: 1, calls: 0, forwarded: 0, redacted: 0, blocked: 0, rejected: 0, refused: 0, gateHolds: 0,

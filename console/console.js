@@ -275,7 +275,7 @@ async function decisionsPage(o) {
     td(time(d.ts)), td(d.useCase ?? "—"), td(subject(d), "mono"),
     td(d.qdl && d.qdl.status !== "completed" ? chip(`rule ${d.qdl.status}`, "bad") : d.actions.filter((a) => a.status === "simulated").map((a) => chip(a.action, "accent"))), td(chip(STATE_LABELS[d.state] ?? d.state, STATE_CHIPS[d.state]))));
   return h("div", { class: "page" },
-    card("Decision states", "A recorded decision waits for a person until a review is written. The latest review counts.", h("div", { class: "body" }, decisionMachine(list))),
+    card("Decision states", "A recorded decision waits for a person until a verdict is written, unless the application ran an action the rule allows. A decision takes one verdict.", h("div", { class: "body" }, decisionMachine(list))),
     h("div", { class: "grid split" },
       card("Decisions", null, h("div", { class: "body flush" }, table(["Time", "Use case", "Item", "Proposed action", "State"], rows, "No decision in this state.")), tabs),
       h("div", { class: "sticky" }, selected ? decisionDetail(selected, o) : card("No decision selected", null, h("div", { class: "empty" }, "Select a decision.")))));

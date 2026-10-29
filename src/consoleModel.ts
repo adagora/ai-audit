@@ -114,10 +114,11 @@ export function decisionViews(records: readonly Rec[]): DecisionView[] {
     }
   }
   return records.filter((r) => r.kind === "decision" && !r.qdl).map((d): DecisionView => {
-    const q = steps.get(d.id), history = reviews.get(d.id) ?? [];
+    const q = steps.get(d.id), history = reviews.get(d.id) ?? [], actions = proposedActions(d.output), done = effects.get(d.id) ?? [];
+    const byRule = done.some((e) => actions.some((p) => p.action === e.action && p.status === "simulated"));
     return {
-      id: d.id, ts: d.ts, systemId: d.systemId, useCase: d.useCase, llmCallId: d.llmCallId, output: d.output, actions: proposedActions(d.output), ...(d.params && { params: d.params }),
-      state: history.length ? history[history.length - 1].verdict : effects.has(d.id) ? "acted" : "waiting", reviews: history, effects: effects.get(d.id) ?? [],
+      id: d.id, ts: d.ts, systemId: d.systemId, useCase: d.useCase, llmCallId: d.llmCallId, output: d.output, actions, ...(d.params && { params: d.params }),
+      state: history.length ? history[history.length - 1].verdict : byRule ? "acted" : "waiting", reviews: history, effects: done,
       ...(q && { qdl: { status: q.status ?? "completed", sourceHash: q.sourceHash, program: q.sourceHash ? programs.get(q.sourceHash) : undefined, inputs: q.inputs, error: q.error } }),
     };
   }).reverse();
