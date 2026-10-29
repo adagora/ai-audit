@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>ai-audit dashboard</title>
+  <link rel="stylesheet" href="./dashboard.css">
+</head>
+<body>
+  <header class="bar">
+    <div class="brand"><span class="mark" aria-hidden="true">◇</span><span>ai-audit</span><span class="sep">/</span><span class="crumb">Proxy dashboard</span></div>
+    <div class="controls">
+      <span class="live" id="live"><i aria-hidden="true"></i><span id="live-text">Connecting</span></span>
+      <label class="control"><span>Range</span><select id="range"><option value="300" selected>Last 5 min</option><option value="900">Last 15 min</option><option value="1800">Last 30 min</option></select></label>
+      <label class="control"><span>Refresh</span><select id="refresh"><option value="0">Off</option><option value="2000" selected>2s</option><option value="5000">5s</option><option value="10000">10s</option></select></label>
+      <button class="btn" id="refresh-now" type="button" aria-label="Refresh now">↻</button>
+      <button class="btn primary" id="run-all" type="button">Run all checks</button>
+      <a class="btn ghost" href="/console">Request console</a>
+    </div>
+  </header>
+  <main class="grid-page">
+    <section class="row" aria-labelledby="row-overview"><h2 class="row-title" id="row-overview">Overview</h2><div class="stats" id="stats"></div></section>
+    <section class="row" aria-labelledby="row-traffic"><h2 class="row-title" id="row-traffic">Traffic</h2>
+      <div class="panels two">
+        <article class="panel"><header><h3>API requests per second, by outcome</h3><span class="hint" id="rate-note">Proxy counters, sampled by this page</span></header><div class="chart" id="chart-requests"></div></article>
+        <article class="panel"><header><h3>Request latency (ms)</h3><span class="hint">p50 and p95 from the latency histogram</span></header><div class="chart" id="chart-latency"></div></article>
+      </div>
+    </section>
+    <section class="row" aria-labelledby="row-protection"><h2 class="row-title" id="row-protection">Protection</h2>
+      <div class="panels four">
+        <article class="panel"><header><h3>Scan findings by rule</h3><span class="hint">Audit log, rule ids only</span></header><div class="bars" id="bars-findings"></div></article>
+        <article class="panel"><header><h3>Injection signals by rule</h3><span class="hint">Counted once per session and path</span></header><div class="bars" id="bars-signals"></div></article>
+        <article class="panel"><header><h3>Tool-call gate</h3><span class="hint">Proposed calls by mode and result</span></header><div class="bars" id="bars-gate"></div></article>
+        <article class="panel"><header><h3>Refusals before inspection</h3><span class="hint">Status and code</span></header><div class="bars" id="bars-refusals"></div></article>
+      </div>
+    </section>
+    <section class="row" aria-labelledby="row-usage"><h2 class="row-title" id="row-usage">Usage and evidence</h2><div class="stats" id="stats-usage"></div></section>
+    <section class="row" aria-labelledby="row-bench"><h2 class="row-title" id="row-bench">Test bench</h2>
+      <article class="panel"><header><h3>Feature checks</h3><span class="hint" id="bench-summary">Each check runs real requests through the proxy against a mock provider.</span></header>
+        <div class="progress hidden" id="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100"><i id="progress-fill"></i><span id="progress-text"></span></div>
+        <div class="bench" id="bench"></div>
+      </article>
+    </section>
+    <section class="row" aria-labelledby="row-log"><h2 class="row-title" id="row-log">Live audit log</h2>
+      <article class="panel"><header><h3>Latest records</h3><span class="hint">All three proxies (redact, no-go, advisory). Select a row for the stored record.</span></header>
+        <div class="table-wrap"><table class="log"><thead><tr><th>Time</th><th>Proxy</th><th>Kind</th><th>Route</th><th>Key</th><th>Outcome</th><th>Status</th><th>Findings</th><th>Signals</th><th>Gate</th><th>Latency</th></tr></thead><tbody id="log-rows"><tr><td colspan="11" class="empty">No records yet. Run a check.</td></tr></tbody></table></div>
+      </article>
+    </section>
+  </main>
+  <aside class="drawer" id="drawer" aria-hidden="true" aria-labelledby="drawer-title"><header><h3 id="drawer-title">Detail</h3><button class="btn ghost" id="drawer-close" type="button">Close</button></header><pre id="drawer-body"></pre></aside>
+  <div class="tooltip" id="tooltip" role="status" hidden></div>
+  <script src="./dashboard.js" type="module"></script>
+</body>
+</html>
