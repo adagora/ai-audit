@@ -11,7 +11,10 @@ import { verifyDecision } from "./qdl.js";
 import { inspect } from "./scan.js";
 import { validateUseCases } from "./useCases.js";
 
-export interface ConsoleOptions { log: AuditLog; configPath?: string; anchorsPath?: string; metricsUrl?: string; reviewer?: string; host?: string; token?: string }
+export interface ConsoleOptions {
+  log: AuditLog; configPath?: string; anchorsPath?: string; metricsUrl?: string; reviewer?: string; host?: string; token?: string;
+  notifyUrl?: string; overdueMinutes?: number; notifyEveryMs?: number; announceAfterMs?: number;
+}
 export const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
 export const MAX_NOTE_CHARS = 500;
 const ASSETS: Record<string, [file: string, type: string]> = {
@@ -28,7 +31,10 @@ class ConsoleError extends Error { constructor(readonly status: number, code: st
 export function createConsole(o: ConsoleOptions) {
   const host = o.host ?? "127.0.0.1";
   if (!LOOPBACK_HOSTS.has(host)) throw new Error("audit_console_not_loopback");
+  if (o.notifyUrl !== undefined && !/^https?:\/\/\S+$/.test(o.notifyUrl)) throw new Error("audit_console_notify_url_invalid");
+  if (o.overdueMinutes !== undefined && !(Number.isFinite(o.overdueMinutes) && o.overdueMinutes > 0)) throw new Error("audit_console_overdue_invalid");
   const token = o.token ?? randomBytes(32).toString("base64url");
+  let notifyFailures = 0;
   const reviewer = o.reviewer?.trim() || undefined;
   let cache: { signature: string; records: Rec[]; chain: SeriesCheck } | undefined;
   let configCache: { signature: string; config: ConfigLike & Record<string, any> } | undefined;
@@ -66,6 +72,8 @@ export function createConsole(o: ConsoleOptions) {
     const gaps = evidenceGaps(records as any[], records.filter((r) => r.kind === "decision" && !r.qdl));
     const attention: { severity: "critical" | "warn" | "info"; title: string; detail: string; page: string }[] = [];
     if (!chain.ok) attention.push({ severity: "critical", title: "The audit chain is broken", detail: `${chain.file ?? basename(o.log.path)} line ${chain.badLine}: ${chain.reason}`, page: "integrity" });
+    const unauthorized = decisions.flatMap((d) => d.effects.filter((e) => e.status === "done" && !e.authorized));
+    if (unauthorized.length) attention.push({ severity: "critical", title: `${unauthorized.length} action${unauthorized.length === 1 ? "" : "s"} ran without approval`, detail: `${[...new Set(unauthorized.map((e) => e.action))].join(", ")}: the rule did not propose it and no person approved it first.`, page: "decisions" });
     if (waiting.length) attention.push({ severity: "warn", title: `${waiting.length} ${waiting.length === 1 ? "decision waits" : "decisions wait"} for a review`, detail: "No person has recorded a verdict yet.", page: "decisions" });
     if (gaps.length) attention.push({ severity: "warn", title: `${gaps.length} decision${gaps.length === 1 ? " has" : "s have"} incomplete evidence`, detail: [...new Set(gaps.map((g) => g.reason))].join(", "), page: "decisions" });
     if (held) attention.push({ severity: "warn", title: `${held} tool call${held === 1 ? "" : "s"} held by the gate`, detail: "In observe mode they went through; in enforce mode the answer was rewritten.", page: "requests" });
@@ -76,6 +84,7 @@ export function createConsole(o: ConsoleOptions) {
     return {
       log: { path: o.log.path, files: chain.files, records: chain.records, chain: { ok: chain.ok, file: chain.file, badLine: chain.badLine, reason: chain.reason }, lastTs: records[records.length - 1]?.ts ?? null },
       range: { from: from || null }, reviewer: reviewer ?? null, config: o.configPath ? basename(o.configPath) : null, metrics: !!o.metricsUrl,
+      notify: { configured: !!o.notifyUrl, failures: notifyFailures },
       kpis: { requests: f.total, delivered: f.outcomes.delivered ?? 0, blocked: (f.outcomes.blocked ?? 0) + (f.outcomes.rejected ?? 0), refused, held, waiting: waiting.length, decisions: decisions.length },
       attention, suggestions: suggestions(recent, summary, cfg), flow: f,
     };
@@ -239,6 +248,34 @@ export function createConsole(o: ConsoleOptions) {
       return json(res, 500, { error: e instanceof Error && /^audit_[a-z_]+/.test(e.message) ? e.message.split(":")[0] : "audit_console_internal_error" });
     }
   });
-  return { server, token, url: () => { const a = server.address() as AddressInfo; return `http://${host === "::1" ? "[::1]" : host}:${a.port}/#token=${token}`; } };
+  const base = () => { const a = server.address() as AddressInfo; return `http://${host === "::1" ? "[::1]" : host}:${a.port}`; };
+  const announced = new Set<string>(), escalated = new Set<string>();
+  let primed = false, inflight: Promise<void> | undefined, notifier: ReturnType<typeof setInterval> | undefined;
+  const notifyTick = (): Promise<void> => inflight ??= notifyOnce().finally(() => { inflight = undefined; });
+  const notifyOnce = async () => {
+    if (!o.notifyUrl) return;
+    try {
+      const limit = (o.overdueMinutes ?? 240) * 60_000, events: object[] = [];
+      for (const d of decisionViews(load().records).filter((x) => x.state === "waiting")) {
+        const event = (name: string) => ({ event: name, decisionId: d.id, useCase: d.useCase ?? null, systemId: d.systemId ?? null, waitingSince: d.ts,
+          proposedActions: d.actions.filter((a) => a.status === "simulated").map((a) => a.action), console: `${base()}/#/decisions/${encodeURIComponent(d.id)}` });
+        if (!announced.has(d.id) && (!primed || Date.now() - Date.parse(d.ts) >= (o.announceAfterMs ?? 30_000))) { announced.add(d.id); if (primed) events.push(event("decision_waiting")); }
+        if (!escalated.has(d.id) && Date.now() - Date.parse(d.ts) >= limit) { escalated.add(d.id); events.push(event("decision_overdue")); }
+      }
+      primed = true;
+      for (const e of events) {
+        try { const r = await fetch(o.notifyUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(e), signal: AbortSignal.timeout(3000) }); if (!r.ok) notifyFailures++; }
+        catch { notifyFailures++; }
+      }
+    } catch { notifyFailures++; }
+  };
+  server.on("listening", () => {
+    if (!o.notifyUrl) return;
+    void notifyTick();
+    notifier = setInterval(() => void notifyTick(), o.notifyEveryMs ?? 10_000);
+    notifier.unref();
+  });
+  server.on("close", () => clearInterval(notifier));
+  return { server, token, url: () => `${base()}/#token=${token}`, notifyTick };
 }
 

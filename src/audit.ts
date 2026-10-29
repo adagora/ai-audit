@@ -17,6 +17,7 @@ export class AuditLogUnavailable extends Error { constructor(reason: string) { s
 
 export interface Step { source: string; input: unknown; output: unknown }
 export interface Review { reviewer: string; decision: "approved" | "overridden" | "rejected"; note?: string; at: string }
+export interface Effect { action: string; status: "done" | "skipped" | "failed"; review?: string; code?: string }
 export interface Entry {
   systemId: string; useCase: string; llmCallId?: string;
   input: string; storeRedactedInput?: boolean;
@@ -29,12 +30,12 @@ export interface Entry {
   qdlDecision?: boolean;
 }
 export interface Rec {
-  kind: "decision" | "review" | "llm-call" | "program" | "refusal" | "segment" | "prune"; id: string; ts: string; refId?: string;
+  kind: "decision" | "review" | "llm-call" | "program" | "refusal" | "segment" | "prune" | "effect"; id: string; ts: string; refId?: string;
   systemId?: string; useCase?: string; llmCallId?: string; inputHash?: string; redactedInput?: string;
   sources?: { doc: string; page?: number }[]; model?: { name: string; version: string };
   prompt?: { templateId: string; hash: string }; params?: Record<string, unknown>; output?: unknown;
   step?: { sourceHash: string; input: unknown; outputHash: string };
-  review?: Review; prevHash: string; hash: string;
+  review?: Review; effect?: Effect; prevHash: string; hash: string;
   [extra: string]: unknown;
 }
 
@@ -195,6 +196,17 @@ export class AuditLog {
   approve(refId: string, reviewer: string, decision: Review["decision"], note?: string): Rec {
     if (!this.read().some((r) => r.kind === "decision" && r.id === refId && !r.qdl)) throw new Error("audit_unknown_decision");
     return this.append({ kind: "review", id: randomUUID(), ts: this.now(), refId, review: { reviewer, decision, note, at: this.now() } });
+  }
+
+  effect(refId: string, effect: Effect): Rec {
+    const valid = /^[A-Za-z0-9_.:-]{1,128}$/.test(effect.action) && ["done", "skipped", "failed"].includes(effect.status)
+      && (effect.code === undefined || /^[a-z0-9_]{1,64}$/.test(effect.code)) && (effect.review === undefined || typeof effect.review === "string");
+    if (!valid) throw new Error("audit_effect_invalid");
+    const records = this.read();
+    if (!records.some((r) => r.kind === "decision" && r.id === refId && !r.qdl)) throw new Error("audit_unknown_decision");
+    if (effect.review !== undefined && !records.some((r) => r.kind === "review" && r.id === effect.review && r.refId === refId)) throw new Error("audit_unknown_review");
+    const { action, status, review, code } = effect;
+    return this.append({ kind: "effect", id: randomUUID(), ts: this.now(), refId, effect: { action, status, ...(review && { review }), ...(code && { code }) } });
   }
 
   verifySeries(): SeriesCheck { return checkSeries(this.files().map((f) => [basename(f), fileLines(f)] as const)); }

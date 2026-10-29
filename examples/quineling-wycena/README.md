@@ -8,6 +8,8 @@ npm run example:wycena -- --console
 npm run example:wycena -- --live --model gpt-4o-mini --log live/wycena.jsonl --console
 ```
 
+To close the loop, add `--wait` (with `--console`, or approve with `ai-audit approve` from another terminal): quotes the rule may send go to `outbox/` at once; the others wait up to `--wait-minutes` (default 30) for your verdict. An approval sends the quote to `outbox/`, a rejection or override does not, and each outcome is recorded as an `effect` ([ADR 0055](../../docs/adr/0055-act-after-verdict.md)). `npm run example:wycena -- --console --wait`.
+
 The first command runs five example parts from [parts.json](parts.json) through the real proxy with scripted LLM answers. No provider is called. `--console` then opens the [operator console](../../README.md#operator-console) on `127.0.0.1:8795` over the same log, as reviewer `kierownik` (`--reviewer NAME`), so each quote waits in Decisions for a verdict. `--live` sends the same parts to OpenAI with the toolroom prompt in [prompt.txt](prompt.txt) and needs `OPENAI_API_KEY`; it costs money.
 
 | Rule | Value |

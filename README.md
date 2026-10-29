@@ -299,6 +299,8 @@ After `npm link`, the binary is `ai-audit`. The examples below use that name. `n
 | `decide` | `ai-audit decide --policy policy.json --inputs inputs.json --system-id shop --use-case quote` | Records a policy decision. |
 | `approve` | `ai-audit approve --decision ID --reviewer ada --verdict approved` | Appends a review. Verdicts are `approved`, `overridden`, `rejected`. |
 | `replay` | `ai-audit replay --decision ID --anchors anchors.jsonl` | Recomputes that decision from the log. |
+| `await` | `ai-audit await --decision ID --timeout-s 600` | Waits for a review of that decision. Exit 0 approved, 1 rejected or overridden, 3 timeout. |
+| `effect` | `ai-audit effect --decision ID --action send-quote-to-customer --status done --review REVIEW_ID` | Records that the application ran, skipped or failed an action of that decision. |
 | `lab` | `ai-audit lab --log audit.jsonl --session ID --baseline-limit 2 --candidate-limit 3 --output comparison.html` | Compares failure thresholds on recorded observations; never stops an agent. |
 | `receipt` | `ai-audit receipt --decision ID --output receipt.html` | HTML page with downloads for a completed QDL decision. `--format svg` or `--format json` exports a portable receipt. |
 | `verify-receipt` | `ai-audit verify-receipt --input receipt.svg` | Replays a portable JSON or SVG receipt without the original log. |
@@ -650,6 +652,17 @@ ai-audit policies --system-id shop --use-case quote
 `--llm-call` must already be an `llm-call` id in the same log. The response header can arrive before that row is appended, and `decide` in that window returns `audit_unknown_llm_call`.
 
 A policy file is either a QDL intent, `"format": "qdl-intent"`, or `{"source": "<program source>"}`. Inputs are a JSON object. Both are scanned before compile. Any finding refuses the decision and does not store the value.
+
+#### Act on a decision after its verdict
+
+A rule only proposes its actions; your application runs them. When the rule sends a decision to a person, the application waits, then records what it did:
+
+```bash
+ai-audit await --decision "$DECISION_ID" --timeout-s 1800   # exit 0 approved, 1 rejected or overridden, 3 timeout
+ai-audit effect --decision "$DECISION_ID" --action send-quote-to-customer --status done --review "$REVIEW_ID"
+```
+
+`await` returns the latest review at once when there is one. `overridden` means the person takes the case over, so the application does not run the rule's action. `effect` stores the action name, `done`, `skipped` or `failed`, the review it followed and an optional code, never a payload or an amount. An action is authorized when the rule proposed it and no person rejected or overrode it, or when a person approved the decision before the action. A `done` action without that is recorded anyway, and the console lists it under Needs attention. From JavaScript, use `awaitVerdict` and `log.effect`. The console's **Notify me** shows a browser notification when a decision starts to wait; `--notify-url URL` also posts `decision_waiting` and, after `--overdue-minutes` (default 240), `decision_overdue` with the decision id, use case and proposed action names. [ADR 0055](docs/adr/0055-act-after-verdict.md).
 
 `replay` exits 0 when the output matches and 1 when it does not. A refusal stored without its inputs cannot be rebuilt. That code is `audit_qdl_not_replayable`. `node:vm` replay of a plain JavaScript step is not a sandbox. Run only code you trust there.
 

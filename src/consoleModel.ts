@@ -1,6 +1,7 @@
 import type { Rec, Review, UseCaseRow } from "./audit.js";
 import { findingTotals } from "./scan.js";
 import { TIERS, type Tier } from "./useCases.js";
+import { effectAuthorized, proposedActions } from "./verdict.js";
 
 export const STAGES = ["received", "key", "useCase", "shape", "model", "inspect", "decide", "budget", "upstream", "gate", "recorded"] as const;
 export type Stage = (typeof STAGES)[number];
@@ -12,12 +13,13 @@ export interface RequestPath {
 }
 export interface FlowStage { stage: Stage; reached: number; skipped: number; flagged: number; stopped: number; stops: Record<string, number>; flags: Record<string, number> }
 export interface Flow { total: number; offPath: number; stages: FlowStage[]; outcomes: Partial<Record<Outcome, number>> }
-export type DecisionState = "waiting" | Review["decision"];
+export type DecisionState = "waiting" | "acted" | Review["decision"];
 export interface DecisionAction { action: string; status: string }
 export interface DecisionView {
   id: string; ts: string; systemId?: string; useCase?: string; llmCallId?: string; state: DecisionState; output: unknown; outputNames?: string[]; actions: DecisionAction[]; params?: Record<string, unknown>;
   qdl?: { status: string; sourceHash?: string; program?: string; inputs?: unknown; error?: unknown };
   reviews: { verdict: Review["decision"]; reviewer: string; at: string; note?: string }[];
+  effects: { id: string; ts: string; action: string; status: string; code?: string; review?: string; authorized: boolean }[];
 }
 export interface Suggestion { id: string; severity: "info" | "warn"; title: string; detail: string; evidence: string[]; snippet?: string }
 export interface ConfigLike { useCases?: Record<string, any>; keys?: { name: string; tools?: { mode: string; allow: string[] }; useCases?: string[] }[]; actionGate?: unknown }
@@ -95,13 +97,14 @@ export function flow(records: readonly any[]): Flow {
   return { total, offPath, stages, outcomes };
 }
 
-const actionsOf = (value: unknown): DecisionAction[] => (Array.isArray(value) ? value : value && typeof value === "object" ? Object.values(value) : [])
-  .filter((v): v is { action: string; status: string } => !!v && typeof v === "object" && typeof (v as any).action === "string" && typeof (v as any).status === "string")
-  .map((v) => ({ action: v.action, status: v.status }));
-
 export function decisionViews(records: readonly Rec[]): DecisionView[] {
-  const steps = new Map<string, any>(), programs = new Map<string, string>(), reviews = new Map<string, DecisionView["reviews"]>();
+  const steps = new Map<string, any>(), programs = new Map<string, string>(), reviews = new Map<string, DecisionView["reviews"]>(), effects = new Map<string, DecisionView["effects"]>();
   for (const r of records) {
+    if (r.kind === "effect" && r.refId && r.effect) {
+      const list = effects.get(r.refId) ?? [];
+      list.push({ id: r.id, ts: r.ts, action: r.effect.action, status: r.effect.status, ...(r.effect.code && { code: r.effect.code }), ...(r.effect.review && { review: r.effect.review }), authorized: effectAuthorized(records, r.id) });
+      effects.set(r.refId, list);
+    }
     if (r.kind === "decision" && r.qdl && typeof r.refId === "string") steps.set(r.refId, r.qdl);
     else if (r.kind === "program" && typeof r.name === "string") programs.set(r.id, r.name);
     else if (r.kind === "review" && r.refId && r.review) {
@@ -113,8 +116,8 @@ export function decisionViews(records: readonly Rec[]): DecisionView[] {
   return records.filter((r) => r.kind === "decision" && !r.qdl).map((d): DecisionView => {
     const q = steps.get(d.id), history = reviews.get(d.id) ?? [];
     return {
-      id: d.id, ts: d.ts, systemId: d.systemId, useCase: d.useCase, llmCallId: d.llmCallId, output: d.output, actions: actionsOf(d.output), ...(d.params && { params: d.params }),
-      state: history.length ? history[history.length - 1].verdict : "waiting", reviews: history,
+      id: d.id, ts: d.ts, systemId: d.systemId, useCase: d.useCase, llmCallId: d.llmCallId, output: d.output, actions: proposedActions(d.output), ...(d.params && { params: d.params }),
+      state: history.length ? history[history.length - 1].verdict : effects.has(d.id) ? "acted" : "waiting", reviews: history, effects: effects.get(d.id) ?? [],
       ...(q && { qdl: { status: q.status ?? "completed", sourceHash: q.sourceHash, program: q.sourceHash ? programs.get(q.sourceHash) : undefined, inputs: q.inputs, error: q.error } }),
     };
   }).reverse();

@@ -2,7 +2,7 @@
 import { parseArgs } from "node:util";
 import { basename } from "node:path";
 import { readFileSync, statSync, writeFileSync } from "node:fs";
-import { AuditLog, AuditLogUnavailable, anchor, prune, report, sha256, stats, verifyAnchors, type Review } from "./audit.js";
+import { AuditLog, AuditLogUnavailable, anchor, prune, report, sha256, stats, verifyAnchors, type Effect, type Review } from "./audit.js";
 import { recordQdl, verifyDecision } from "./qdl.js";
 import { decisionReceipt, renderReceipt } from "./receipt.js";
 import { policyHistories, withChanges } from "./policies.js";
@@ -18,6 +18,7 @@ import { checkQuotes } from "./quotes.js";
 import { readEvidenceRecords } from "./evidence.js";
 import { renderWorkbench } from "./workbench.js";
 import { createConsole } from "./console.js";
+import { awaitVerdict, effectAuthorized } from "./verdict.js";
 import { createAttestation, generateAttestationKeys, parseAttestation, verifyAttestation } from "./attestation.js";
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -30,7 +31,8 @@ const { values: a } = parseArgs({ args: rest, options: {
   policy: { type: "string" }, inputs: { type: "string" }, "system-id": { type: "string" }, "use-case": { type: "string" }, "llm-call": { type: "string" },
   "private-key": { type: "string" }, "public-key": { type: "string" }, attestation: { type: "string" },
   decision: { type: "string" }, reviewer: { type: "string" }, verdict: { type: "string" }, note: { type: "string" },
-  source: { type: "string" }, answer: { type: "string" }, metrics: { type: "string" },
+  source: { type: "string" }, answer: { type: "string" }, metrics: { type: "string" }, "notify-url": { type: "string" }, "overdue-minutes": { type: "string" },
+  "timeout-s": { type: "string", default: "600" }, action: { type: "string" }, status: { type: "string" }, code: { type: "string" }, review: { type: "string" },
   "baseline-limit": { type: "string", default: "2" }, "candidate-limit": { type: "string", default: "3" },
   "rotate-bytes": { type: "string", default: String(256 * 1024 * 1024) }, "keep-days": { type: "string" }, "inspect-timeout-ms": { type: "string", default: "5000" },
 } });
@@ -85,9 +87,23 @@ if (cmd === "attest-keygen") {
   }
 } else if (cmd === "console") {
   try {
-    const app = createConsole({ log, configPath: a.config, anchorsPath: a.anchors, metricsUrl: a.metrics, reviewer: a.reviewer, host: a.host });
+    const app = createConsole({ log, configPath: a.config, anchorsPath: a.anchors, metricsUrl: a.metrics, reviewer: a.reviewer, host: a.host,
+      notifyUrl: a["notify-url"], overdueMinutes: a["overdue-minutes"] === undefined ? undefined : Number(a["overdue-minutes"]) });
     const port = rest.some((x) => x === "--port" || x.startsWith("--port=")) ? Number(a.port) : 8793;
-    app.server.listen(port, a.host, () => console.error(JSON.stringify({ event: "console", url: app.url(), log: a.log, config: a.config ?? null, reviewer: a.reviewer ?? null, writes: a.reviewer ? "reviews" : "none" })));
+    app.server.listen(port, a.host, () => console.error(JSON.stringify({ event: "console", url: app.url(), log: a.log, config: a.config ?? null, reviewer: a.reviewer ?? null, writes: a.reviewer ? "reviews" : "none", notify: a["notify-url"] ? "on" : "off" })));
+  } catch (e) { console.error((e as Error).message); process.exit(2); }
+} else if (cmd === "await") {
+  if (!a.decision || !/^\d{1,7}$/.test(a["timeout-s"]!)) { console.error("audit_missing_argument"); process.exit(2); }
+  try {
+    const verdict = await awaitVerdict(log, a.decision, { timeoutMs: Number(a["timeout-s"]) * 1000 });
+    console.log(JSON.stringify({ decision: a.decision, ...verdict }));
+    process.exitCode = verdict.state === "approved" ? 0 : verdict.state === "timeout" ? 3 : 1;
+  } catch (e) { console.error((e as Error).message); process.exit(2); }
+} else if (cmd === "effect") {
+  try {
+    if (!a.decision || !a.action || !a.status) throw new Error("audit_missing_argument");
+    const r = log.effect(a.decision, { action: a.action, status: a.status as Effect["status"], review: a.review, code: a.code });
+    console.log(JSON.stringify({ effect: r.id, decision: a.decision, action: a.action, status: a.status, authorized: effectAuthorized(log.read(), r.id) }));
   } catch (e) { console.error((e as Error).message); process.exit(2); }
 } else if (cmd === "workbench") {
   try {
@@ -275,4 +291,4 @@ if (cmd === "attest-keygen") {
     console.error(cause instanceof Error && /^audit_[a-z_]+$/.test(cause.message) ? cause.message : "audit_command_failed"); process.exitCode = 2;
   }
 } else if (cmd === "report") console.log(report(log, a.from!, a.to!).md);
-else { console.error("usage: ai-audit serve|console|verify|anchor|rotate|prune|report|stats|context|workbench|keygen|profile|scrub|check-quotes|decide|approve|replay|lab|receipt|verify-receipt|attest-keygen|attest|verify-attestation|policies [options]; see README.md for command examples"); process.exit(2); }
+else { console.error("usage: ai-audit serve|console|await|effect|verify|anchor|rotate|prune|report|stats|context|workbench|keygen|profile|scrub|check-quotes|decide|approve|replay|lab|receipt|verify-receipt|attest-keygen|attest|verify-attestation|policies [options]; see README.md for command examples"); process.exit(2); }

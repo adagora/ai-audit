@@ -7,10 +7,13 @@ import { AuditLog, report, sha256 } from "../../dist/src/audit.js";
 import { createConsole } from "../../dist/src/console.js";
 import { createProxy } from "../../dist/src/proxy.js";
 import { recordQdl, replayQdl } from "../../dist/src/qdl.js";
+import { awaitVerdict, effectAuthorized } from "../../dist/src/verdict.js";
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => args.includes(name) ? args[args.indexOf(name) + 1] : fallback;
-const live = args.includes("--live"), openConsole = args.includes("--console");
+const live = args.includes("--live"), openConsole = args.includes("--console"), wait = args.includes("--wait");
+const waitMinutes = Number(option("--wait-minutes", "30"));
+if (!Number.isFinite(waitMinutes) || waitMinutes < 0) { console.error("--wait-minutes must be a number of minutes, 0 or more"); process.exit(2); }
 const model = option("--model", "gpt-4o-mini"), reviewer = option("--reviewer", "kierownik");
 const providerKey = (process.env.OPENAI_API_KEY ?? "").trim();
 if (live && !providerKey) { console.error("--live needs OPENAI_API_KEY"); process.exit(2); }
@@ -112,8 +115,36 @@ console.log(`console: node dist/src/cli.js console --log ${logPath} --config ${j
 proxy.close(); upstream?.close();
 
 if (openConsole) {
-  const app = createConsole({ log, configPath: join(dir, "gateway.json"), reviewer });
+  const app = createConsole({ log, configPath: join(dir, "gateway.json"), reviewer, notifyUrl: option("--notify-url") });
   const port = Number(process.env.WYCENA_CONSOLE_PORT ?? 8795);
   await new Promise((r) => app.server.listen(port, "127.0.0.1", r));
-  console.log(`\nKonsola operatora: ${app.url()}\nOtwórz Decisions: każda wycena czeka na Twój werdykt. Ctrl+C kończy.`);
+  console.log(`\nKonsola operatora: ${app.url()}\nOtwórz Decisions: każda wycena czeka na Twój werdykt.${wait ? "" : " Ctrl+C kończy."}`);
+}
+
+if (wait) {
+  const outbox = join(dir, "outbox");
+  mkdirSync(outbox, { recursive: true });
+  const send = (r, review) => {
+    const file = join(outbox, `${r.part.id.replaceAll("/", "-")}.txt`);
+    writeFileSync(file, `Oferta ${r.part.id}: ${r.part.title}\nCena netto za partię: ${money(r.price)} PLN (${money(r.perPiece)} PLN za sztukę)\n`);
+    const effect = log.effect(r.decision.id, { action: "send-quote-to-customer", status: "done", ...(review && { review }) });
+    console.log(`effect ${r.part.id}: done ${effectAuthorized(log.read(), effect.id) ? "authorized" : "UNAUTHORIZED"}`);
+    return file;
+  };
+  const priced = rows.filter((r) => !r.refused);
+  for (const r of priced.filter((x) => x.route === "send-quote-to-customer")) console.log(`  ${r.part.id}: oferta wysłana bez recenzji (reguła na to pozwala): ${send(r)}`);
+  const waiting = priced.filter((r) => r.route === "route-to-estimator");
+  if (waiting.length) console.log(`\nCzekam na werdykt dla ${waiting.length} wycen (do ${waitMinutes} min). ${openConsole ? "Zatwierdź albo odrzuć je w konsoli." : `Inny terminal: node dist/src/cli.js approve --log ${logPath} --decision ID --reviewer ${reviewer} --verdict approved`}`);
+  await Promise.all(waiting.map(async (r) => {
+    const verdict = await awaitVerdict(log, r.decision.id, { timeoutMs: waitMinutes * 60_000 });
+    if (verdict.state === "approved") console.log(`  ${r.part.id}: zatwierdzone przez ${verdict.reviewer}, oferta wysłana: ${send(r, verdict.review)}`);
+    else if (verdict.state === "timeout") console.log(`  ${r.part.id}: brak werdyktu po ${waitMinutes} min; oferta nie wyszła`);
+    else {
+      log.effect(r.decision.id, { action: "send-quote-to-customer", status: "skipped", review: verdict.review, code: verdict.state === "rejected" ? "rejected" : "handed_to_estimator" });
+      console.log(`  ${r.part.id}: ${verdict.state === "rejected" ? "odrzucone" : "przejęte przez kierownika"} (${verdict.reviewer}); oferta nie wyszła automatycznie`);
+    }
+  }));
+  console.log(`\nchain after actions: ${log.verifyChain().ok ? "ok" : "BROKEN"}`);
+  if (!openConsole) process.exit(0);
+  console.log("Konsola dalej działa: Decisions pokazuje, co zrobiła aplikacja. Ctrl+C kończy.");
 }

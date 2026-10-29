@@ -36,7 +36,8 @@ const OUTCOMES = {
 };
 const KINDS = { s: "system", t: "tools", u: "user", a: "assistant", r: "toolResults", f: "attachments", o: "other" };
 const KIND_LABELS = { system: "System", tools: "Tool definitions", user: "User", assistant: "Assistant", toolResults: "Tool results", attachments: "Attachments", other: "Other" };
-const STATE_CHIPS = { waiting: "warn", approved: "ok", overridden: "info", rejected: "bad" };
+const STATE_CHIPS = { waiting: "warn", acted: "ok", approved: "ok", overridden: "info", rejected: "bad" };
+const STATE_LABELS = { waiting: "Waiting", acted: "Done by rule", approved: "Approved", overridden: "Overridden", rejected: "Rejected", all: "All" };
 
 let token = "";
 let route = { page: "overview", id: null };
@@ -252,10 +253,14 @@ function decisionMachine(list) {
   const qdl = { completed: 0, refused: 0, failed: 0 };
   for (const d of list) if (d.qdl) qdl[d.qdl.status] = (qdl[d.qdl.status] ?? 0) + 1;
   const state = (name, n, label) => h("div", { class: `state ${name}` }, h("span", {}, label), h("strong", { class: "num" }, fmt(n)));
-  return h("div", { class: "machine" },
-    state("", list.length, "Recorded"), h("span", { class: "arrow" }, "→"), state("waiting", count("waiting"), "Waiting for a person"), h("span", { class: "arrow" }, "→"),
+  const effects = list.flatMap((d) => d.effects ?? []);
+  const done = effects.filter((e) => e.status === "done"), unauthorized = done.filter((e) => !e.authorized);
+  return h("div", {}, h("div", { class: "machine" },
+    state("", list.length, "Recorded"), h("span", { class: "arrow" }, "→"), h("div", { class: "fan" }, state("waiting", count("waiting"), "Waiting for a person"), state("approved", count("acted"), "Done by the rule, no review needed")), h("span", { class: "arrow" }, "→"),
     h("div", { class: "fan" }, state("approved", count("approved"), "Approved"), state("overridden", count("overridden"), "Overridden"), state("rejected", count("rejected"), "Rejected")),
-    h("div", { class: "muted small", style: { marginLeft: "12px" } }, `Rule results: ${fmt(qdl.completed)} completed, ${fmt(qdl.refused)} refused, ${fmt(qdl.failed)} failed`));
+    h("span", { class: "arrow" }, "→"),
+    h("div", { class: "fan" }, state("approved", done.length - unauthorized.length, "Action done"), state("", effects.length - done.length, "Skipped or failed"), unauthorized.length ? state("rejected", unauthorized.length, "Done without approval") : null)),
+    h("p", { class: "muted small" }, `Rule results: ${fmt(qdl.completed)} completed, ${fmt(qdl.refused)} refused, ${fmt(qdl.failed)} failed. An action is recorded by the application with ai-audit effect; a rule's own action needs no review, any other needs an approval first.`));
 }
 
 async function decisionsPage(o) {
@@ -263,12 +268,12 @@ async function decisionsPage(o) {
   const filter = route.filter ?? (route.id && route.id !== "all" ? null : "waiting");
   const shown = list.filter((d) => !filter || filter === "all" || d.state === filter);
   const selected = route.id && route.id !== "all" ? list.find((d) => d.id === route.id) : shown[0];
-  const tabs = h("div", { class: "tabs" }, ["waiting", "approved", "overridden", "rejected", "all"].map((f) =>
-    h("button", { type: "button", "aria-pressed": String((filter ?? "all") === f), onclick: () => go(`#/decisions/all/${f}`) }, `${f[0].toUpperCase()}${f.slice(1)} ${fmt(f === "all" ? list.length : list.filter((d) => d.state === f).length)}`)));
+  const tabs = h("div", { class: "tabs" }, ["waiting", "acted", "approved", "overridden", "rejected", "all"].map((f) =>
+    h("button", { type: "button", "aria-pressed": String((filter ?? "all") === f), onclick: () => go(`#/decisions/all/${f}`) }, `${STATE_LABELS[f]} ${fmt(f === "all" ? list.length : list.filter((d) => d.state === f).length)}`)));
   const subject = (d) => Object.values(d.params ?? {}).find((v) => typeof v === "string") ?? d.systemId ?? "—";
   const rows = shown.map((d) => h("tr", { class: "clickable", "aria-selected": String(selected?.id === d.id), onclick: () => go(`#/decisions/${encodeURIComponent(d.id)}/${filter ?? "all"}`) },
     td(time(d.ts)), td(d.useCase ?? "—"), td(subject(d), "mono"),
-    td(d.qdl && d.qdl.status !== "completed" ? chip(`rule ${d.qdl.status}`, "bad") : d.actions.filter((a) => a.status === "simulated").map((a) => chip(a.action, "accent"))), td(chip(d.state, STATE_CHIPS[d.state]))));
+    td(d.qdl && d.qdl.status !== "completed" ? chip(`rule ${d.qdl.status}`, "bad") : d.actions.filter((a) => a.status === "simulated").map((a) => chip(a.action, "accent"))), td(chip(STATE_LABELS[d.state] ?? d.state, STATE_CHIPS[d.state]))));
   return h("div", { class: "page" },
     card("Decision states", "A recorded decision waits for a person until a review is written. The latest review counts.", h("div", { class: "body" }, decisionMachine(list))),
     h("div", { class: "grid split" },
@@ -320,6 +325,12 @@ function decisionDetail(d, o) {
       d.qdl.error ? [h("dt", {}, "Error"), h("dd", { class: "mono" }, value(d.qdl.error))] : null) : h("p", { class: "muted" }, "Recorded without a QDL rule."),
     d.llmCallId ? h("p", {}, "Model call: ", link(short(d.llmCallId, 16), `#/requests/${encodeURIComponent(d.llmCallId)}`)) : null,
     h("div", { class: "actions-row" }, d.qdl ? h("button", { class: "btn", type: "button", onclick: replay }, "Run the rule again") : null), result,
+    h("div", { class: "section-title" }, "What the application did"),
+    (d.effects ?? []).length ? h("ul", { class: "list" }, d.effects.map((e) => h("li", {}, h("span", { class: `sev ${e.status === "done" && !e.authorized ? "critical" : e.status === "failed" ? "warn" : ""}` }),
+      h("div", {}, h("strong", {}, `${e.status === "done" ? "Done" : e.status === "skipped" ? "Skipped" : "Failed"}: ${e.action}`),
+        h("p", { class: "small muted" }, `${time(e.ts)}${e.code ? ` · ${e.code}` : ""}${e.review ? " · after a review" : ""}`),
+        e.status === "done" ? chip(e.authorized ? "authorized" : "without approval", e.authorized ? "ok" : "bad") : null))))
+      : h("p", { class: "muted" }, d.state === "waiting" ? "Nothing yet. The application waits for a verdict." : "No action recorded."),
     h("div", { class: "section-title" }, "Reviews"),
     d.reviews.length ? h("ul", { class: "list" }, d.reviews.map((r) => h("li", {}, h("span", { class: "sev" }), h("div", {}, h("strong", {}, `${r.verdict} by ${r.reviewer}`), h("p", { class: "small muted" }, time(r.at)), r.note ? h("p", {}, r.note) : null)))) : h("p", { class: "muted" }, "No review yet."),
     o.reviewer
@@ -533,6 +544,29 @@ function login(message) {
     input, h("button", { class: "btn primary", type: "button", onclick: () => { token = input.value.trim(); try { sessionStorage.setItem("ai-audit-console", token); } catch { } go("#/overview"); } }, "Open"))));
 }
 
+let waitingSeen = null;
+async function watchWaiting() {
+  if (!token) return;
+  try {
+    const o = await api("overview?hours=0");
+    const n = o.kpis.waiting;
+    document.title = n ? `(${n}) ai-audit console` : "ai-audit console";
+    const badge = document.querySelector('#nav a[href="#/decisions"] .badge');
+    if (badge) badge.textContent = fmt(n);
+    if (waitingSeen !== null && n > waitingSeen && "Notification" in window && Notification.permission === "granted") {
+      new Notification("ai-audit: a decision waits for you", { body: `${n} decision${n === 1 ? "" : "s"} wait for a review.`, tag: "ai-audit-waiting" });
+    }
+    waitingSeen = n;
+  } catch { }
+}
+
+function notifyButton() {
+  const button = $("notify");
+  const label = () => { button.textContent = !("Notification" in window) ? "No notifications" : Notification.permission === "granted" ? "Notifications on" : Notification.permission === "denied" ? "Notifications blocked" : "Notify me"; button.disabled = !("Notification" in window) || Notification.permission !== "default"; };
+  button.addEventListener("click", async () => { try { await Notification.requestPermission(); } catch { } label(); });
+  label();
+}
+
 function schedule() {
   clearInterval(timer);
   timer = $("auto").checked ? setInterval(() => {
@@ -558,9 +592,12 @@ function start() {
   $("refresh").addEventListener("click", render);
   $("auto").addEventListener("change", schedule);
   addEventListener("hashchange", () => { adoptToken(); render(); });
+  notifyButton();
   if (!token) return login("No token yet.");
   render();
   schedule();
+  watchWaiting();
+  setInterval(watchWaiting, 10000);
 }
 
 start();
