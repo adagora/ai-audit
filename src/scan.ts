@@ -89,6 +89,27 @@ export const RULES_DIGEST = createHash("sha256").update(JSON.stringify({
 })).digest("hex");
 
 export interface Finding { rule: string; path: string; inKey?: boolean; unredactable?: boolean }
+export interface StoredFinding { rule: string; path: string; count?: number }
+export const MAX_STORED_FINDINGS = 1_000;
+export function storedFindings(findings: readonly Finding[]): { findings: StoredFinding[]; findingsOverflow?: Record<string, number> } {
+  const entries = new Map<string, StoredFinding>(), stored: StoredFinding[] = [], overflow: Record<string, number> = {};
+  for (const f of findings) {
+    const key = `${f.rule}\0${f.path}`, entry = entries.get(key);
+    if (entry) entry.count = (entry.count ?? 1) + 1;
+    else if (stored.length < MAX_STORED_FINDINGS) { const e = { rule: f.rule, path: f.path }; entries.set(key, e); stored.push(e); }
+    else overflow[f.rule] = (overflow[f.rule] ?? 0) + 1;
+  }
+  return { findings: stored, ...(Object.keys(overflow).length && { findingsOverflow: overflow }) };
+}
+const storedCount = (n: unknown) => (Number.isSafeInteger(n) && (n as number) > 0 ? n as number : 1);
+export function findingTotals(decision: unknown): Map<string, number> {
+  const totals = new Map<string, number>(), d = decision as { findings?: unknown; findingsOverflow?: unknown } | undefined;
+  const add = (rule: unknown, n: number) => { if (typeof rule === "string") totals.set(rule, (totals.get(rule) ?? 0) + n); };
+  if (Array.isArray(d?.findings)) for (const f of d.findings as { rule?: unknown; count?: unknown }[]) add(f?.rule, storedCount(f?.count));
+  if (d?.findingsOverflow && typeof d.findingsOverflow === "object") for (const [rule, n] of Object.entries(d.findingsOverflow)) add(rule, storedCount(n));
+  return totals;
+}
+export const findingTotal = (decision: unknown) => [...findingTotals(decision).values()].reduce((a, n) => a + n, 0);
 export interface Span { start: number; end: number; matchStart: number; matchEnd: number; rule: string; value: string }
 
 const allowed = (value: string, carnet?: Allowlist) => carnet?.has(createHash("sha256").update(value).digest("hex")) === true;

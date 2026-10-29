@@ -7,6 +7,7 @@ import { bendCount, bendListOf } from "./context.js";
 import { tokenCount } from "./extract.js";
 import { firstSightings } from "./injection.js";
 import { policyHistories } from "./policies.js";
+import { findingTotals } from "./scan.js";
 
 export const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 const GENESIS = "0".repeat(64);
@@ -335,7 +336,7 @@ export function report(log: AuditLog, from: string, to: string) {
     "## Wywołania LLM przez proxy", "| Metryka | Wartość |", "|---|---|", ...Object.entries(llm).map(([k, x]) => `| ${k} | ${x} |`), "",
     ...(llm.tokensComplete ? [] : [`> Token totals are a lower bound: ${llm.unknownUsage} call(s) without usage from the provider (unknown, not zero).`, ""]),
     "### Według dostawcy / modelu / systemu", ...count(calls.map((c) => `${c.provider} / ${c.model ?? "?"} / ${c.systemId ?? "-"}`)), "",
-    "### Wykryte reguły (tylko ID)", ...(calls.length ? count(calls.flatMap((c) => c.decision.findings.map((f: any) => f.rule))) : []), "",
+    "### Wykryte reguły (tylko ID)", ...[...calls.reduce((m: Map<string, number>, c) => { findingTotals(c.decision).forEach((n, rule) => m.set(rule, (m.get(rule) ?? 0) + n)); return m; }, new Map<string, number>())].map(([k, x]) => `- ${k}: ${x}`), "",
     "### Sygnały prompt injection (advisory, tylko ID)", ...count(calls.flatMap((c) => firstSightings(c.decision.signals ?? [], c.session?.id, sighted).map((f: any) => f.rule))), "",
     ...(toolUses.length ? ["### Narzędzia wywołane przez model (klucz / narzędzie)", ...count(toolUses), ""] : []),
     ...(gateHolds.length ? ["### Wstrzymane wywołania narzędzi (ADR 0046, 0048)", ...count(gateHolds), ""] : []),

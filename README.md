@@ -118,7 +118,7 @@ For a browser-driven integration test with your own OpenAI API key, run `npm run
 
 **Stop when the evidence cannot be kept.** If the log is torn or cannot be appended, the proxy returns 503 and stops before the upstream call. `count_tokens` is scanned and never logged. [ADR 0016](docs/adr/0016-fail-closed-when-log-unavailable.md).
 
-**The log stores a rule id and a JSON path.** Response bodies are stored as `outputHash` unless that virtual key opted into redacted text. [ADR 0007](docs/adr/0007-log-stores-no-values.md), [ADR 0011](docs/adr/0011-response-content-per-key.md).
+**The log stores a rule id and a JSON path.** Each pair is stored once with a `count`, and at most 1,000 pairs per record; further matches are counted per rule in `findingsOverflow` ([ADR 0051](docs/adr/0051-findings-stored-with-counts.md)). Response bodies are stored as `outputHash` unless that virtual key opted into redacted text. [ADR 0007](docs/adr/0007-log-stores-no-values.md), [ADR 0011](docs/adr/0011-response-content-per-key.md).
 
 **Provider keys stay in the proxy environment.** `keygen` prints an `aia-` key. Config stores its SHA-256. The upstream call uses `AI_AUDIT_UPSTREAM_OPENAI_KEY` or `AI_AUDIT_UPSTREAM_ANTHROPIC_KEY`. [ADR 0008](docs/adr/0008-virtual-keys.md).
 

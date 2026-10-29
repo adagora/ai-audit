@@ -1,7 +1,7 @@
 import http from "node:http";
 import { randomUUID } from "node:crypto";
 import { AuditLog, AuditLogUnavailable, sha256, stats } from "./audit.js";
-import { decide, hasDuplicateKeys, inspect, MAX_JSON_DEPTH, nestedDeeperThan, type Mode } from "./scan.js";
+import { decide, hasDuplicateKeys, inspect, MAX_JSON_DEPTH, nestedDeeperThan, storedFindings, type Mode } from "./scan.js";
 import { checkActions, enforces, requestTexts, validateActionGate, validateKeyTools, type ActionGate, type CallResult, type KeyTools } from "./actionGate.js";
 import { heldNotice, rewriteResponse, streamGate } from "./enforce.js";
 import { firstSightings, toolResultSignals, toolResultTexts, type Signal } from "./injection.js";
@@ -224,7 +224,7 @@ export function createProxy(o: ProxyOpts) {
       const reject = (code: string) => {
         clearTimeout(timer); decisionTag = "reject";
         if (route !== "count") o.log.append({ kind: "llm-call", id: rid, ts: new Date(t0).toISOString(), ...context,
-          decision: { mode: profile.mode, action: "reject", findings: findings.map((f) => ({ rule: f.rule, path: f.path })), ...(atts.length && { sandbox }) },
+          decision: { mode: profile.mode, action: "reject", ...storedFindings(findings), ...(atts.length && { sandbox }) },
           ...(composition && { context: composition }), ...(session && { session }), ...observe(traced), upstreamStatus: null, error: code, latencyMs: Date.now() - t0 });
         return fail(422, code);
       };
@@ -261,7 +261,7 @@ export function createProxy(o: ProxyOpts) {
         ...context, forwardedPromptDigest: sha256(fwd.toString("latin1")), ...(composition && { context: composition }), ...(session && { session }),
         ...(judged && { injectionJudge: { ...judged, policyDigest: injectionPolicyDigest } }),
         ...(vkey?.tokenBudget && { tokenBudget: { policy: vkey.tokenBudget } }),
-        decision: { mode: profile.mode, action: d.action, findings: d.findings.map((f) => ({ rule: f.rule, path: f.path })), ...(signals.length && { signals }), ...(d.action === "forward-redacted" && rasterized.length && { rasterized }), ...(atts.length && { sandbox }) },
+        decision: { mode: profile.mode, action: d.action, ...storedFindings(d.findings), ...(signals.length && { signals }), ...(d.action === "forward-redacted" && rasterized.length && { rasterized }), ...(atts.length && { sandbox }) },
       };
       const write = (extra: object) => { if (route !== "count") o.log.append({ kind: "llm-call", id: rid, ts: new Date(t0).toISOString(), ...rec, ...extra, latencyMs: Date.now() - t0 } as any); };
       if (d.action === "block") { clearTimeout(timer); write({ upstreamStatus: null, ...observe(traced) }); return fail(d.status!, d.code!, d.findings.map((f) => f.rule)); }

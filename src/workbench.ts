@@ -2,7 +2,7 @@ import { sha256, type Rec } from "./audit.js";
 import { SEGMENTS, type Segment } from "./context.js";
 import { listSessions, sessionView } from "./contextView.js";
 import { tokenCount } from "./extract.js";
-import { scanText } from "./scan.js";
+import { findingTotal, scanText } from "./scan.js";
 
 const MAX_ROWS = 500;
 const MAX_SESSIONS = 100;
@@ -24,6 +24,8 @@ const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 const str = (value: unknown): string => typeof value === "string" ? value : typeof value === "number" && Number.isFinite(value) ? String(value) : "";
 const count = (value: unknown): number | null => tokenCount(value) ?? null;
 const bytes = (value: unknown): number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
+const times = (value: unknown): string => typeof value === "number" && Number.isSafeInteger(value) && value > 1 ? ` ×${value.toLocaleString("en-US")}` : "";
+const OVERFLOW_PATH = "(paths beyond the stored 1,000)";
 const escapeHtml = (value: string): string => value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
 const safeText = (value: unknown, max = 128): string => {
   const text = str(value);
@@ -92,8 +94,10 @@ export function renderWorkbench(records: Rec[], digest: string, options: Workben
   const findings = calls.flatMap((call) => {
     const decision = obj(call.decision);
     return [...array(decision.findings).map((finding) => ({ call, kind: "Scan finding", value: obj(finding) })),
+      ...Object.entries(obj(decision.findingsOverflow)).map(([rule, n]): { call: Call; kind: string; value: Obj } => ({ call, kind: "Scan finding", value: { rule, path: OVERFLOW_PATH, count: n } })),
       ...array(decision.signals).map((signal) => ({ call, kind: "Injection signal", value: obj(signal) }))];
   });
+  const scanEvents = calls.reduce((total, call) => total + findingTotal(call.decision) + array(obj(call.decision).signals).length, 0);
   const events = calls.flatMap((call) => array(call.quinelings).map((event) => ({ call, event: obj(event) })));
   const unknownUsage = calls.filter((call) => {
     const status = bytes(call.upstreamStatus), values = obj(call.usage);
@@ -104,7 +108,7 @@ export function renderWorkbench(records: Rec[], digest: string, options: Workben
   const head = records.length ? safeHash(records[records.length - 1].hash) : "genesis";
   const cards = [
     ["LLM calls", calls.length, "Requests in interval"], ["Sessions", sessions.length, "Linked conversations in interval"],
-    ["Scan events", findings.length, "Rules and paths only"], ["Quinelings seen", events.length, "Observed tool traffic"],
+    ["Scan events", scanEvents, "Rules and paths only"], ["Quinelings seen", events.length, "Observed tool traffic"],
     ["Decisions", decisions.length, "Recorded decisions"], ["Unknown usage", unknownUsage, "Successful calls with missing tokens"],
   ].map(([name, value, caption]) => `<div class="metric"><div class="metric-label">${name}</div><div class="metric-value">${fmt(Number(value))}</div><div class="metric-caption">${caption}</div></div>`).join("");
 
@@ -125,7 +129,7 @@ export function renderWorkbench(records: Rec[], digest: string, options: Workben
   });
 
   const historyRows = callRows.map((call) => {
-    const decision = obj(call.decision), session = obj(call.session), found = array(decision.findings), signals = array(decision.signals);
+    const decision = obj(call.decision), session = obj(call.session), signals = array(decision.signals);
     const status = typeof call.upstreamStatus === "number" ? String(call.upstreamStatus) : "—";
     const client = call.virtualKey ? `client ${safeText(call.virtualKey)}` : "no virtual key";
     const alias = call.requestedModel ? `requested ${safeText(call.requestedModel)}` : "";
@@ -134,11 +138,11 @@ export function renderWorkbench(records: Rec[], digest: string, options: Workben
     const extra = [decision.sandbox ? `sandbox ${safeText(decision.sandbox)}` : "", call.content === "redacted" ? "redacted output retained" : call.content === "hash" ? "output hash only" : ""].filter(Boolean).join(" · ");
     return dataRow([safeText(call.ts, 40), `<span id="${anchor("call", str(call.id))}"><a href="#${anchor("investigate", str(call.id))}">${short(call.id)}</a></span>`, `${safeText(call.provider)} / ${safeText(call.model)}`,
       `${safeText(call.systemId)}<div class="subtle">${client}${alias ? ` · ${alias}` : ""}</div>`, session.id ? `${visibleSessions.has(str(session.id)) ? `<a href="#${anchor("session", str(session.id))}">${short(session.id)}</a>` : short(session.id)} · t${safeText(session.turn)}` : "unlinked",
-      action, `${status}<div class="subtle">${fmt(found.length)} findings · ${fmt(signals.length)} signals${extra ? ` · ${extra}` : ""}</div>`, usage(call)]);
+      action, `${status}<div class="subtle">${fmt(findingTotal(decision))} findings ·${fmt(signals.length)} signals${extra ? ` · ${extra}` : ""}</div>`, usage(call)]);
   });
 
   const findingRows = findings.slice(-MAX_ROWS).reverse().map(({ call, kind, value }) => dataRow([
-    safeText(call.ts, 40), label(kind, kind === "Scan finding" ? "red" : "amber"), safeText(value.rule), safeText(value.path, 256),
+    safeText(call.ts, 40), label(kind, kind === "Scan finding" ? "red" : "amber"), safeText(value.rule), `${safeText(value.path, 256)}${times(value.count)}`,
     safeText(obj(call.decision).action), callLink(call, displayed), obj(call.session).id ? short(obj(call.session).id) : "—",
   ]));
 
@@ -168,7 +172,8 @@ export function renderWorkbench(records: Rec[], digest: string, options: Workben
     const requestFacts = [fact("API route", `${safeText(call.api)} · ${safeText(call.endpoint)}`, "observed record"), fact("Provider / model", `${safeText(call.provider)} · ${safeText(call.model)}`, "observed record"),
       fact("Client / system", `${safeText(call.virtualKey)} · ${safeText(call.systemId)}`, "observed record"), fact("Context", bytes(context.totalBytes) ? `${fmt(bytes(context.totalBytes))} bytes` : "unknown", bytes(context.totalBytes) ? "observed size" : "not recorded"),
       fact("Input tokens", fmtCount(values.input), count(values.input) === null ? "unknown" : "provider reported"), fact("Output tokens", fmtCount(values.output), count(values.output) === null ? "unknown" : "provider reported")].join("");
-    const findingList = [...findings.map((entry) => `<li>Finding · ${safeText(entry.rule)} · <code>${safeText(entry.path, 256)}</code></li>`),
+    const findingList = [...findings.map((entry) => `<li>Finding · ${safeText(entry.rule)} · <code>${safeText(entry.path, 256)}</code>${times(entry.count)}</li>`),
+      ...Object.entries(obj(decision.findingsOverflow)).map(([rule, n]) => `<li>Finding · ${safeText(rule)} · ${OVERFLOW_PATH}${times(n)}</li>`),
       ...signals.map((entry) => `<li>Advisory signal · ${safeText(entry.rule)} · <code>${safeText(entry.path, 256)}</code></li>`)].join("");
     const eventList = events.map((entry) => `<li>${safeText(entry.where)} · ${safeText(entry.op)} · ${safeText(entry.status)} · <code>${safeText(entry.path, 256)}</code></li>`).join("");
     const linkedList = linked.map((entry) => {
@@ -177,7 +182,7 @@ export function renderWorkbench(records: Rec[], digest: string, options: Workben
     }).join("");
     const flow = [
       traceStep(1, "Client request", "observed", "Route and context metadata", `<div class="case-facts">${fact("Requested model", safeText(call.requestedModel ?? call.model), "observed record")}${fact("Stream", call.stream === true ? "yes" : call.stream === false ? "no" : "unknown", call.stream === undefined ? "unknown" : "observed record")}${fact("Session", session.id ? `${short(session.id)} · turn ${safeText(session.turn)}` : "unlinked", session.id ? "derived from message prefix" : "unknown")}</div><div class="case-composition">${contextBar(call)}</div><p>Prompt text is not retained in the audit log.</p>`),
-      traceStep(2, "Inspection", decision.action ? "observed" : "unknown", `${safeText(decision.mode)} · ${safeText(decision.action)}`, `<p>${fmt(findings.length)} scan findings · ${fmt(signals.length)} advisory signals. Values are not retained.</p>${findingList ? `<ul>${findingList}</ul>` : "<p>No rule paths recorded.</p>"}<p>Profile digest: <code>${safeHash(obj(call.inspectionProfile).digest)}</code></p>`),
+      traceStep(2, "Inspection", decision.action ? "observed" : "unknown", `${safeText(decision.mode)} · ${safeText(decision.action)}`, `<p>${fmt(findingTotal(decision))} scan findings ·${fmt(signals.length)} advisory signals. Values are not retained.</p>${findingList ? `<ul>${findingList}</ul>` : "<p>No rule paths recorded.</p>"}<p>Profile digest: <code>${safeHash(obj(call.inspectionProfile).digest)}</code></p>`),
       traceStep(3, "Forwarding", stopped || upstreamKnown ? "observed" : "unknown", stopped ? "Stopped by policy" : upstreamKnown ? `Upstream status ${call.upstreamStatus}` : "No upstream response recorded", `<div class="case-facts">${fact("Action", safeText(decision.action), "observed record")}${fact("Upstream status", upstreamKnown ? safeText(call.upstreamStatus) : "unknown", upstreamKnown ? "observed record" : "not recorded")}${fact("Error", safeText(call.error), call.error ? "observed record" : "not recorded")}</div><p>${stopped ? "The policy record says this request was stopped before forwarding." : upstreamKnown ? "An upstream response was recorded. The audit log does not retain the forwarded request body." : "The record does not establish that the upstream received this request."}</p>`),
       traceStep(4, "Provider result", upstreamKnown ? "observed" : "unknown", upstreamKnown ? `HTTP ${call.upstreamStatus} · ${fmtCount(values.input)} input / ${fmtCount(values.output)} output tokens` : "No provider response metadata", `<div class="case-facts">${fact("Response model", safeText(call.responseModel), call.responseModel ? "observed record" : "unknown")}${fact("Latency", typeof call.latencyMs === "number" ? `${fmt(call.latencyMs)} ms` : "unknown", "proxy measured")}${fact("Output content", call.content === "redacted" ? "redacted content retained in log" : call.content === "hash" ? "hash only" : "not recorded", "retention mode")}</div><p>Unknown usage is not counted as zero.</p>`),
       traceStep(5, "Tool observations", events.length ? "observed" : "unknown", events.length ? `${events.length} Quineling event${events.length === 1 ? "" : "s"}` : "No Quineling event recorded", eventList ? `<ul>${eventList}</ul><p>A tool call is a request; a tool result is an observation in traffic. Neither proves independent execution.</p>` : "<p>No Quineling tool event is linked to this call.</p>"),
@@ -212,5 +217,5 @@ export function renderWorkbench(records: Rec[], digest: string, options: Workben
     row(["Quote checks and history scrub", "Not written to the proxy log by default", "Use <code>check-quotes</code> and <code>scrub</code> explicitly; keep their outputs separately."]),
   ], ""))}
   <footer class="foot">Generated from a verified local log snapshot. Tables show at most ${fmt(MAX_ROWS)} latest rows per section and ${fmt(MAX_SESSIONS)} sessions. Regenerate after new requests. Retained source, inputs, output content and reviewer notes are excluded from this page.</footer></main></div><script>const search=document.getElementById('search');search.addEventListener('input',()=>{const q=search.value.trim().toLocaleLowerCase();for(const row of document.querySelectorAll('[data-search-row]'))row.classList.toggle('filter-hidden',!!q&&!row.textContent.toLocaleLowerCase().includes(q))});function revealHash(){const target=document.getElementById(decodeURIComponent(location.hash.slice(1)));if(!target)return;for(let node=target;node;node=node.parentElement)if(node instanceof HTMLDetailsElement)node.open=true}addEventListener('hashchange',revealHash);document.addEventListener('click',event=>{const link=event.target.closest?.('a[href^=\"#\"]');if(!link)return;const target=document.getElementById(decodeURIComponent(link.hash.slice(1)));for(let node=target;node;node=node.parentElement)if(node instanceof HTMLDetailsElement)node.open=true});revealHash()</script></body></html>`;
-  return { html: content, calls: calls.length, sessions: sessions.length, findings: findings.length, decisions: decisions.length, observedQuinelings: events.length };
+  return { html: content, calls: calls.length, sessions: sessions.length, findings: scanEvents, decisions: decisions.length, observedQuinelings: events.length };
 }

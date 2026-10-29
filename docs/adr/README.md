@@ -58,3 +58,4 @@ Format: Nygard (Status, Context, Decision, Consequences), at most ~40 lines, fil
 - [48. Virtual keys can limit which tools the model may call](0048-per-key-tool-allowlist.md)
 - [49. The audit log rotates into linked segments; old segments leave only by a recorded prune](0049-log-segments-and-retention.md)
 - [50. Large request texts are inspected in a worker with a deadline](0050-text-inspection-deadline-off-the-event-loop.md)
+- [51. A record stores each finding once per rule and path, with a count](0051-findings-stored-with-counts.md)
