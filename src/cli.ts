@@ -12,6 +12,7 @@ import { listSessions, renderSessionHtml } from "./contextView.js";
 import type { Mode } from "./scan.js";
 import { scrubHistory } from "./history.js";
 import { createInspectionProfile } from "./profile.js";
+import { validateActionGate } from "./actionGate.js";
 import { checkQuotes } from "./quotes.js";
 import { readEvidenceRecords } from "./evidence.js";
 import { renderWorkbench } from "./workbench.js";
@@ -127,11 +128,11 @@ if (cmd === "attest-keygen") {
     } else {
       if (!["redact", "no-go", "advisory"].includes(a.mode!)) throw new Error("audit_invalid_mode");
       const cfg = a.config ? JSON.parse(readFileSync(a.config, "utf8")) : {};
-      console.log(JSON.stringify(createInspectionProfile({ mode: a.mode as Mode, carnet,
+      console.log(JSON.stringify(createInspectionProfile({ mode: a.mode as Mode, carnet, actionGate: cfg.actionGate && validateActionGate(cfg.actionGate),
         pageRedaction: !a["no-page-redaction"] && cfg.pageRedaction !== false }).receipt));
     }
   } catch (cause) {
-    const code = cause instanceof Error && /^(?:scrub_[a-z0-9_]+|audit_invalid_allowlist|audit_invalid_mode)$/.test(cause.message)
+    const code = cause instanceof Error && /^(?:scrub_[a-z0-9_]+|audit_invalid_allowlist|audit_invalid_mode|audit_action_gate_[a-z_]+)$/.test(cause.message)
       ? cause.message : "audit_command_failed";
     console.error(code); process.exitCode = 2;
   }
@@ -147,7 +148,7 @@ if (cmd === "attest-keygen") {
     console.error("audit_injection_model_required"); process.exit(2);
   }
   const server = createProxy({ upstreamOpenai: a["upstream-openai"]!, upstreamAnthropic: a["upstream-anthropic"]!, mode: a.mode as Mode, log, carnet,
-    injectionJudge,
+    injectionJudge, actionGate: cfg.actionGate,
     pageRedaction: !a["no-page-redaction"] && cfg.pageRedaction !== false, keys, budgetDirectory: cfg.budgetDirectory,
     aliases: cfg.aliases, adminKeySha256: env.AI_AUDIT_ADMIN_KEY ? sha256(env.AI_AUDIT_ADMIN_KEY) : cfg.adminKeySha256,
     upstreamKeys: { openai: env.AI_AUDIT_UPSTREAM_OPENAI_KEY, anthropic: env.AI_AUDIT_UPSTREAM_ANTHROPIC_KEY }, unsafeNoSandbox });

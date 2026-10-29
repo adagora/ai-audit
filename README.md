@@ -388,6 +388,21 @@ Prompt injection uses deterministic English and Polish rules on tool results and
 
 An optional local Ollama judge adds semantic observations on tool-result text: `--injection-model qwen3.5:4b --injection-task 'Describe the authorized task here'`. It examines the newest tool results first, reuses a verdict for text it has already judged, remains advisory and reports incomplete inspection explicitly. Run `npm run example:injection -- --ollama` to compare it with the regex baseline on synthetic English/Polish/mixed-language cases. See [setup and evaluation](examples/injection-evaluation/README.md) and [ADR 0045](docs/adr/0045-local-advisory-injection-judge.md).
 
+#### Tool-call gate
+
+Text checks are too slow or too inaccurate to block on, so blocking belongs at the action. `actionGate` in `gateway.json` lists dangerous tools by exact name, their sensitive arguments and the destinations they may use:
+
+```json
+"actionGate": { "tools": {
+  "send_email": { "mode": "observe", "arguments": ["$.to", "$.cc"], "allow": ["@company.example"] },
+  "http_post": { "mode": "observe", "arguments": ["$.url"], "allow": ["*.company.example"] }
+} }
+```
+
+For each tool call the model proposes to a listed tool, the proxy takes URL hosts, email addresses, phone numbers and IBANs from those arguments. A destination passes if it is allowed or the user typed it. A destination that came only from a tool result, a tool definition or the system prompt, or from nowhere, is held. A secret in the arguments is always held. No model runs, so the check costs microseconds and does not depend on language or wording.
+
+`observe` delivers the response unchanged and records `actionGate.calls`: per value its argument path, kind, origin (`user`, `system`, `untrusted`, `none`, `unknown`), the source path of an untrusted occurrence, and the result. Values are never stored. `enforce`, which will replace held calls with a text answer, is not available yet; the proxy refuses to start with it. Unlisted tools and tools the provider runs itself are not checked. [ADR 0046](docs/adr/0046-deterministic-action-gate.md).
+
 #### What the scanner matches
 
 Rules are adapted from Gitleaks, plus the rows below. A match followed by punctuation still counts. A secret split across text parts still counts. OCR text, PDF text and PDF metadata are scanned. JSON inside tool arguments and tool results is walked. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [ADR 0028](docs/adr/0028-named-credentials.md).
@@ -463,7 +478,7 @@ The workbench omits retained output text, QDL source and inputs, reviewer names 
 
 `GET /metrics` is OpenMetrics. Prometheus and VictoriaMetrics can scrape it. The bind address is `127.0.0.1` unless you change `--host`. The path has no authentication. If you expose the port, block `/metrics` in front of the proxy.
 
-`ai_audit_requests_total{route,decision,status}`, `ai_audit_request_duration_seconds` from 5 ms to 300 s, `ai_audit_log_unavailable_total`, `ai_audit_log_write_failures_total`, `ai_audit_refusals_suppressed_total`, `ai_audit_injection_signals_total{rule}`, `ai_audit_quineling_events_total{where,op}`, `ai_audit_upstream_responses_total{provider,class}`, `ai_audit_upstream_errors_total{provider,reason}`, `ai_audit_unknown_usage_total{provider,field}`, `ai_audit_attachments_inspected_total`, `ai_audit_sandbox_unavailable_total`, `ai_audit_session_index_rebuild_failures_total`, gauge `ai_audit_sandbox_disabled`, gauge `ai_audit_attachment_cache_hits`, gauge `ai_audit_attachment_cache_misses`.
+`ai_audit_requests_total{route,decision,status}`, `ai_audit_request_duration_seconds` from 5 ms to 300 s, `ai_audit_log_unavailable_total`, `ai_audit_log_write_failures_total`, `ai_audit_refusals_suppressed_total`, `ai_audit_injection_signals_total{rule}`, `ai_audit_action_gate_total{mode,result}`, `ai_audit_quineling_events_total{where,op}`, `ai_audit_upstream_responses_total{provider,class}`, `ai_audit_upstream_errors_total{provider,reason}`, `ai_audit_unknown_usage_total{provider,field}`, `ai_audit_attachments_inspected_total`, `ai_audit_sandbox_unavailable_total`, `ai_audit_session_index_rebuild_failures_total`, gauge `ai_audit_sandbox_disabled`, gauge `ai_audit_attachment_cache_hits`, gauge `ai_audit_attachment_cache_misses`.
 
 Unknown paths are `route="other"`. Labels are taken from fixed sets. A ready-made VictoriaMetrics, Grafana and ntfy stack is in [examples/monitoring](examples/monitoring/README.md). [ADR 0019](docs/adr/0019-metrics-openmetrics.md).
 
@@ -598,6 +613,7 @@ A policy file is either a QDL intent, `"format": "qdl-intent"`, or `{"source": "
 | `keys[].providers` | `openai`, `anthropic`, or both. Omit the field to allow both. |
 | `keys[].logContent` | `true` stores redacted output text and redacted tool arguments. Default is hashes only. |
 | `keys[].tokenBudget` | Optional UTC `period: day\|month`, nonnegative `inputTokens` / `outputTokens`, and positive per-request `maxOutputTokens`. |
+| `actionGate` | Optional tool-call gate: per tool name, `mode`, sensitive `arguments` paths and `allow` destinations. See [Tool-call gate](#tool-call-gate). |
 | `budgetDirectory` | Persistent local accounting directory shared by proxy processes. Default is `<log>.budgets`. |
 | `aliases` | Map from the client's model string to `{ "model", "upstream" }`. `upstream` is optional. The API format stays the same. |
 | `pageRedaction` | `false` disables PDF rasterizing. Default is on. `--no-page-redaction` also disables it. |
@@ -783,7 +799,7 @@ The proxy's `serve` command does not need this import.
 - The attachment cache is memory only. It dies with the process.
 - Requests refused with 401, 403, 400, 404 or 413 are `refusal` records without content, at most 60 per minute per process; the rest of that minute is one summary record with a count ([ADR 0047](docs/adr/0047-record-refusals-before-inspection.md)). `count_tokens` is scanned and not logged.
 - `scrub` rewrites an export you already have. It does not reach the provider, backups, or data URIs.
-- Prompt-injection rules never block, and they are easy to walk around.
+- Prompt-injection rules never block, and they are easy to walk around. The tool-call gate only observes for now.
 - `check-quotes` misses a wrong value backed by a real quote of a different sentence. It flags numbers written as words, translated text, and reformatted dates.
 - A rasterized PDF has no text layer. Answers that depend on the original text get worse, and the token count goes up.
 - The AI Act discussion in [DESIGN.md](DESIGN.md) is unverified. It is not legal advice.

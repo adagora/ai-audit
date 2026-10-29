@@ -2,6 +2,7 @@ import http from "node:http";
 import { randomUUID } from "node:crypto";
 import { AuditLog, AuditLogUnavailable, sha256, stats } from "./audit.js";
 import { decide, hasDuplicateKeys, inspect, MAX_JSON_DEPTH, nestedDeeperThan, type Mode } from "./scan.js";
+import { checkActions, requestTexts, validateActionGate, type ActionGate } from "./actionGate.js";
 import { firstSightings, toolResultSignals, toolResultTexts, type Signal } from "./injection.js";
 import { createInjectionJudge, createVerdictMemory, judgeToolTexts, type ProxyJudgeOptions } from "./injectionJudge.js";
 import { quinelingCalls, quinelingResults, type QuinelingEvent } from "./quinelings.js";
@@ -30,6 +31,7 @@ export interface ProxyOpts {
   workerOutputLimit?: number;
   injectionJudge?: ProxyJudgeOptions;
   refusalsPerMinute?: number;
+  actionGate?: ActionGate;
 }
 export interface VKey { name: string; sha256: string; models?: string[]; providers?: ("openai" | "anthropic")[]; logContent?: boolean; tokenBudget?: TokenBudget }
 export interface Alias { model: string; upstream?: string }
@@ -43,6 +45,7 @@ export const metrics = {
   attachments: new Counter("ai_audit_attachments_inspected", "Attachments sent to inspection."),
   logUnavailable: new Counter("ai_audit_log_unavailable", "Requests refused with 503 because the audit log could not take a record."),
   logWriteFailures: new Counter("ai_audit_log_write_failures", "Records lost after the response was delivered (ADR 0016)."),
+  actionGate: new Counter("ai_audit_action_gate", "Tool calls to gated tools by mode and result (ADR 0046)."),
   refusalsSuppressed: new Counter("ai_audit_refusals_suppressed", "Refusals counted in a per-minute summary record instead of one record each (ADR 0047)."),
   budgetFailures: new Counter("ai_audit_budget_failures", "Budget state operations that failed closed or retained an outstanding reservation."),
   injectionSignals: new Counter("ai_audit_injection_signals", "Advisory prompt-injection signals by rule id (ADR 0010)."),
@@ -75,7 +78,8 @@ export function createProxy(o: ProxyOpts) {
   }
   const budgets = new BudgetStore(o.budgetDirectory ?? o.log.path + ".budgets");
   const max = o.maxBodyBytes ?? 32 * 1024 * 1024, timeoutMs = o.timeoutMs ?? 180_000;
-  const profile = createInspectionProfile(o);
+  const actionGate = o.actionGate && validateActionGate(o.actionGate);
+  const profile = createInspectionProfile({ ...o, actionGate });
   const judgeOptions = o.injectionJudge && { ...o.injectionJudge };
   if (judgeOptions && (typeof judgeOptions.task !== "string" || !judgeOptions.task.trim() || Buffer.byteLength(judgeOptions.task) > 2_000)) throw new Error("audit_injection_task_invalid");
   const injectionJudge = judgeOptions && createInjectionJudge(judgeOptions);
@@ -287,6 +291,8 @@ export function createProxy(o: ProxyOpts) {
       const sse = (up.headers.get("content-type") ?? "").includes("text/event-stream");
       const captured = await pipe(up, res);
       const out = route === "count" ? undefined : extract(route, captured, sse);
+      const gated = actionGate && out && up.status >= 200 && up.status < 400 ? checkActions(actionGate, out.toolCalls, () => requestTexts(route as Api, body), profile.carnet) : [];
+      gated.forEach((call) => metrics.actionGate.inc({ mode: call.mode, result: call.result }));
       let tokenBudget: Record<string, unknown> | undefined;
       if (reservation) {
         try { tokenBudget = { policy: vkey!.tokenBudget, reserved: reservation.tokens, ...budgets.settle(reservation, out?.usage, !!anthropic) }; }
@@ -302,7 +308,7 @@ export function createProxy(o: ProxyOpts) {
         if (out.usage?.output == null) metrics.unknownUsage.inc({ provider: context.provider, field: "output" });
       }
       const full = vkey?.logContent === true;
-      write({ ...(tokenBudget && { tokenBudget }), ...(composition && { context: scaleToProvider(composition, up.status < 400 ? promptTokens(route as Api, out?.usage) : undefined) }), upstreamStatus: up.status, clientAborted: !res.writableFinished || undefined, responseModel: out?.model, usage: out?.usage, stop: out?.stop,
+      write({ ...(tokenBudget && { tokenBudget }), ...(gated.length && { actionGate: { calls: gated } }), ...(composition && { context: scaleToProvider(composition, up.status < 400 ? promptTokens(route as Api, out?.usage) : undefined) }), upstreamStatus: up.status, clientAborted: !res.writableFinished || undefined, responseModel: out?.model, usage: out?.usage, stop: out?.stop,
         ...(out && { content: full ? "redacted" : "hash", outputHash: sha256(out.text), ...(full && { output: red(out.text) }),
           toolCalls: out.toolCalls.map((t) => ({ name: t.name, argsHash: sha256(t.args), ...(full && { args: red(t.args) }) })) }),
         ...observe([...traced, ...(out ? quinelingCalls(out.toolCalls) : [])]) });
