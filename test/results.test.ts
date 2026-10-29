@@ -48,7 +48,7 @@ test("saved model runs render as one row each, with the range over repeats, and 
   const raw = JSON.stringify(report);
   for (const c of dataset.cases) assert.ok(!raw.includes(c.content) && !raw.includes(c.task), `case text of ${c.id} is in the report`);
   const block = results.modelBlock(ROOT, [{ file: "2026-10-29-fake-cases.json", report }, { file: "old.json", report: { ...report, datasetDigest: "0".repeat(64) } }]);
-  assert.match(block, /\| `2026-10-29-fake-cases\.json` \| fake-model \| cases \| 2 \| 0–18 of 18 \| 0–18 of 18 \| 1\.5 s \| 0 of 72 \|/);
+  assert.match(block, /\| `2026-10-29-fake-cases\.json` \| fake-model \| cases \| 2 \| 0–18 of 18 \| 0–18 of 18 \| 36 of 36 cases \| 1\.5 s \(max 1\.5 s\) \| 0 of 72 \|/);
   assert.match(block, /\| `old\.json` \| fake-model \| changed since this run \|/);
   assert.match(results.modelBlock(ROOT, []), /^No model run is stored/);
 });

@@ -12,7 +12,7 @@ const fileDigest = (root, path) => createHash("sha256").update(readFileSync(join
 const of = (n, d) => `${n} of ${d}`;
 const range = (xs) => (xs.length ? (Math.min(...xs) === Math.max(...xs) ? String(xs[0]) : `${Math.min(...xs)}–${Math.max(...xs)}`) : "—");
 const median = (xs) => { const s = [...xs].sort((a, b) => a - b); return s[(s.length - 1) >> 1]; };
-const seconds = (xs) => (xs.length ? `${(median(xs) / 1000).toFixed(1)} s` : "—");
+const seconds = (xs) => (xs.length ? `${(median(xs) / 1000).toFixed(1)} s (max ${(Math.max(...xs) / 1000).toFixed(1)} s)` : "—");
 const LANGUAGES = [["en", "English"], ["pl", "Polish"], ["mixed", "mixed"]];
 
 export async function regexBlock(root = ROOT) {
@@ -39,14 +39,15 @@ export function modelBlock(root = ROOT, reports = evidenceReports(root)) {
   if (!reports.length) return `No model run is stored in \`${EVIDENCE}/\` yet. Save a run there with \`npm run example:injection -- --ollama --repeats 3 --output ${EVIDENCE}/<date>-<model>-<dataset>.json\`, then run \`npm run results -- --write\`.`;
   const datasets = new Map([[readInjectionDataset(join(root, CASES)), "cases"], [readInjectionDataset(join(root, ORDINARY)), "ordinary"]]
     .map(([dataset, name]) => [createHash("sha256").update(JSON.stringify(dataset)).digest("hex"), name]));
-  const lines = ["| run | model | dataset | repeats | attacks caught | harmless flagged | p50 time | not decided |", "|---|---|---|---|---|---|---|---|"];
+  const lines = ["| run | model | dataset | repeats | attacks caught | harmless flagged | changed between repeats | time, first repeat: p50 (max) | not decided |", "|---|---|---|---|---|---|---|---|---|"];
   for (const { file, report } of reports) {
     const dataset = datasets.get(report.datasetDigest) ?? "changed since this run";
     const perRepeat = (expected) => Array.from({ length: report.repeats }, (_, i) => report.rows.filter((r) => r.expected === expected && r.samples[i]?.status === "ok" && r.samples[i].verdict === "injection").length);
     const total = (expected) => report.rows.filter((r) => r.expected === expected).length;
     const samples = report.rows.flatMap((r) => r.samples);
     const undecided = samples.filter((s) => s.status !== "ok" || s.verdict === "uncertain").length;
-    lines.push(`| \`${file}\` | ${report.judge?.model ?? "—"} | ${dataset} | ${report.repeats} | ${total("injection") ? `${range(perRepeat("injection"))} of ${total("injection")}` : "—"} | ${total("benign") ? `${range(perRepeat("benign"))} of ${total("benign")}` : "—"} | ${seconds(samples.map((s) => s.durationMs))} | ${undecided} of ${samples.length} |`);
+    const changed = report.rows.filter((r) => new Set(r.samples.filter((s) => s.status === "ok").map((s) => s.verdict)).size > 1).length;
+    lines.push(`| \`${file}\` | ${report.judge?.model ?? "—"} | ${dataset} | ${report.repeats} | ${total("injection") ? `${range(perRepeat("injection"))} of ${total("injection")}` : "—"} | ${total("benign") ? `${range(perRepeat("benign"))} of ${total("benign")}` : "—"} | ${of(changed, report.rows.length)} cases | ${seconds(report.rows.flatMap((r) => (r.samples[0] ? [r.samples[0].durationMs] : [])))} | ${undecided} of ${samples.length} |`);
   }
   return lines.join("\n");
 }
