@@ -332,6 +332,13 @@ def ExpectedPrefix(before: U.Turn, anthropic: Bool) -> Maybe<&2, Nat>:
             case False{}:
               Some{p}
 
+def ExpectedTurn(anthropic: Bool, +input: Nat, output: Maybe<&2, Nat>, +cached: Maybe<&2, Nat>, +write: Maybe<&2, Nat>) -> U.Turn:
+  match anthropic:
+    case True{}:
+      U.Turn{Some{Or0(cached)}, Some{Or0(write)}, Some{input}, output, Some{Nat.add(Nat.add(input, Or0(cached)), Or0(write))}}
+    case False{}:
+      U.Turn{Some{Or0(cached)}, None{}, Some{Nat.sub(input, Or0(cached))}, output, Some{input}}
+
 def BelowHalf(read: Maybe<&2, Nat>, +prefix: Nat) -> Bool:
   match read:
     case None{}:
@@ -551,6 +558,14 @@ law usage_unknown_input_stays_unknown:
   for cached: Maybe<&2, Nat>
   for write: Maybe<&2, Nat>
   {U.turn(anthropic, U.Usage{None{}, output, cached, write}) == U.Turn{None{}, None{}, None{}, output, None{}} : U.Turn}
+
+law usage_known_input_splits_the_prompt:
+  for anthropic: Bool
+  for +input: Nat
+  for +output: Maybe<&2, Nat>
+  for +cached: Maybe<&2, Nat>
+  for +write: Maybe<&2, Nat>
+  {U.turn(anthropic, U.Usage{Some{input}, output, cached, write}) == ExpectedTurn(anthropic, input, output, cached, write) : U.Turn}
 
 law usage_cache_drop_only_from_evidence:
   for +anthropic: Bool

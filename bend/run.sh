@@ -60,6 +60,8 @@ mutant never-merge arena 's/Bool\.and\(Nat\.is_eq\(k, k2\), Nat\.is_eq\(a, a2\)\
 mutant merge-across-change arena 's/                case 0n:\n                  False\{\}/                case 0n:\n                  joins.head(k, a, acc)/'
 mutant hash-ordered arena 's/Nat\.is_eq\(h, g\)/Nat.is_ge(g, h)/'
 mutant unknown-as-zero usage 's/        case None\{\}:\n          Turn\{None\{\}, None\{\}, None\{\}, o, None\{\}\}/        case None{}:\n          Turn{Some{0n}, Some{0n}, Some{0n}, o, Some{0n}}/'
+mutant write-subtracted usage 's/Some\{Nat\.add\(Nat\.add\(n, or0\(c\)\), or0\(w\)\)\}/Some{Nat.sub(Nat.add(n, or0(c)), or0(w))}/'
+mutant cached-added usage 's/Some\{Nat\.sub\(n, or0\(c\)\)\}/Some{Nat.add(n, or0(c))}/'
 mutant threshold-off usage 's/Nat\.is_ge\(e, 1024n\)/Nat.is_ge(e, 1023n)/'
 mutant half-wrong usage 's/Nat\.is_lt\(Nat\.add\(c, c\), e\)/Nat.is_lt(c, e)/'
 mutant unknown-not-counted usage 's/Nat\.add\(ui, unknown\(i\)\)/ui/'

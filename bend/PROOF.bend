@@ -1825,6 +1825,29 @@ def Laws.arena_runs_merge_neighbours_of_one_kind_and_age(prev, bs, turn, tracked
 def Laws.usage_unknown_input_stays_unknown(anthropic, output, cached, write):
   {==}
 
+def Laws.usage_known_input_splits_the_prompt(anthropic, input, output, cached, write):
+  match anthropic:
+    case True{}:
+      match cached:
+        case None{}:
+          match write:
+            case None{}:
+              {==}
+            case Some{w}:
+              {==}
+        case Some{c}:
+          match write:
+            case None{}:
+              {==}
+            case Some{w}:
+              {==}
+    case False{}:
+      match cached:
+        case None{}:
+          {==}
+        case Some{c}:
+          {==}
+
 def and_false(b: Bool) -> {Bool.and(b, False{}) == False{} : Bool}:
   match b:
     case True{}:
