@@ -1,5 +1,5 @@
 import BendUsage from "./bend/usage.mjs";
-import { bendCount, fromBendMaybe, KIND_BY_CODE, SEGMENTS, type ArenaBlock, type BendMaybe, type ContextComposition, type Segment } from "./context.js";
+import { BEND_NAT_MAX, BEND_NONE, bendCount, fromBendMaybe, KIND_BY_CODE, SEGMENTS, type ArenaBlock, type BendMaybe, type ContextComposition, type Segment } from "./context.js";
 import type { Usage } from "./extract.js";
 import type { SessionLink } from "./session.js";
 
@@ -11,8 +11,11 @@ export interface TurnView { call: SessionCall; kind: "" | "retry" | "branch"; to
 export interface SessionView { turns: TurnView[]; peakTokens: number | null; cacheHit: number | null; busts: number; preambleShare: number; unknownUsage: number }
 
 type BendTurn = { read: BendMaybe<number>; write: BendMaybe<number>; input: BendMaybe<number>; output: BendMaybe<number>; prompt: BendMaybe<number> };
-const bendTurn = (call: Pick<SessionCall, "provider" | "usage">): BendTurn => BendUsage.turn(call.provider === "anthropic",
-  { $: "Usage", input: bendCount(call.usage?.input), output: bendCount(call.usage?.output), cached: bendCount(call.usage?.cached), write: bendCount(call.usage?.cacheWrite) });
+const bendTurn = (call: Pick<SessionCall, "provider" | "usage">): BendTurn => {
+  const anthropic = call.provider === "anthropic", input = bendCount(call.usage?.input), cached = bendCount(call.usage?.cached), write = bendCount(call.usage?.cacheWrite);
+  const c = fromBendMaybe(cached) ?? 0, sumsFit = c + c <= BEND_NAT_MAX && (!anthropic || (fromBendMaybe(input) ?? 0) + c + (fromBendMaybe(write) ?? 0) <= BEND_NAT_MAX);
+  return BendUsage.turn(anthropic, { $: "Usage", input: sumsFit ? input : BEND_NONE, output: bendCount(call.usage?.output), cached, write });
+};
 
 export function sessionCalls(records: object[]): SessionCall[] {
   return (records as Partial<SessionCall & { kind: string }>[])

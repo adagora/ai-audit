@@ -3,7 +3,7 @@ import { accessSync, appendFileSync, closeSync, constants, existsSync, fstatSync
 import { basename, dirname, extname, join } from "node:path";
 import vm from "node:vm";
 import BendUsage from "./bend/usage.mjs";
-import { bendCount, bendListOf } from "./context.js";
+import { BEND_NONE, bendList, bendRunningCount } from "./context.js";
 import { tokenCount } from "./extract.js";
 import { firstSightings } from "./injection.js";
 import { policyHistories } from "./policies.js";
@@ -315,8 +315,9 @@ export function evidenceGaps(records: any[], decisions: any[]): EvidenceGap[] {
 
 const billed = (c: any) => c.kind === "llm-call" && c.decision?.action !== "block" && c.upstreamStatus >= 200 && c.upstreamStatus < 400;
 export function tokenTotals(calls: any[]) {
-  const t: { input: number; output: number; unknownInput: number; unknownOutput: number; unknownUsage: number } = BendUsage["totals.fast"](
-    bendListOf(calls, (c) => ({ $: "Call", billed: billed(c), input: bendCount(c.usage?.input), output: bendCount(c.usage?.output) })));
+  const input = bendRunningCount(), output = bendRunningCount();
+  const counted = calls.map((c) => { const b = billed(c); return { $: "Call", billed: b, input: b ? input(c.usage?.input) : BEND_NONE, output: b ? output(c.usage?.output) : BEND_NONE }; });
+  const t: { input: number; output: number; unknownInput: number; unknownOutput: number; unknownUsage: number } = BendUsage["totals.fast"](bendList(counted));
   return { inputTokens: t.input, outputTokens: t.output, unknownInputUsage: t.unknownInput, unknownOutputUsage: t.unknownOutput, unknownUsage: t.unknownUsage,
     tokensComplete: t.unknownInput === 0 && t.unknownOutput === 0 };
 }

@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { tokenTotals } from "../src/audit.js";
+import { BEND_NAT_MAX } from "../src/context.js";
 import { bustSignals, turnTokens, type SessionCall } from "../src/contextView.js";
 import { usageInputs, usageOutputs, type UsageGoldenInput } from "./fixtures/capture-usage-goldens.js";
 import { bustSignalsReference, tokenTotalsReference, turnTokensReference } from "./usageReference.js";
@@ -32,4 +33,16 @@ test("usage: a token count above 2^48-1 (281 trillion) is unknown, where Bend's 
     { inputTokens: huge - 1, outputTokens: 2, unknownInputUsage: 1, unknownOutputUsage: 0, unknownUsage: 1, tokensComplete: false });
   assert.deepEqual(turnTokens({ provider: "anthropic", usage: { input: 10, cached: huge, output: 1 } }), { cacheRead: 0, cacheWrite: 0, input: 10, output: 1, prompt: 10 });
   assert.equal(tokenTotalsReference([call({ input: huge, output: 1 })]).inputTokens, huge);
+});
+
+test("usage: found by fuzzing: a count that would push a token sum past 2^48-1 is unknown, so stats, report and the session view do not throw (ADR 0012, ADR 0029)", () => {
+  const max = BEND_NAT_MAX, billedCall = (usage: object) => ({ kind: "llm-call", upstreamStatus: 200, usage });
+  assert.deepEqual(tokenTotals([billedCall({ input: max, output: 1 }), billedCall({ input: 1, output: max }), billedCall({ input: 2, output: 3 })]),
+    { inputTokens: max, outputTokens: 4, unknownInputUsage: 2, unknownOutputUsage: 1, unknownUsage: 2, tokensComplete: false });
+  const unknownTurn = { cacheRead: null, cacheWrite: null, input: null, output: 1, prompt: null };
+  assert.deepEqual(turnTokens({ provider: "anthropic", usage: { input: max, cached: 1, output: 1 } }), unknownTurn);
+  assert.deepEqual(turnTokens({ provider: "anthropic", usage: { input: 1, cacheWrite: max, output: 1 } }), unknownTurn);
+  assert.deepEqual(turnTokens({ provider: "openai", usage: { input: max, cached: 2 ** 47, output: 1 } }), unknownTurn);
+  assert.deepEqual(turnTokens({ provider: "openai", usage: { input: max, cached: 2 ** 47 - 1, output: 1 } }), { cacheRead: 2 ** 47 - 1, cacheWrite: null, input: 2 ** 47, output: 1, prompt: max });
+  assert.deepEqual(bustSignals(call("anthropic", { input: 0, cached: 2 ** 47, output: 1 }), call("anthropic", { input: 10, cached: 5000, output: 1 })), []);
 });

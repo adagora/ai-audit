@@ -131,8 +131,12 @@ export const bendListOf = <T, U>(xs: readonly T[], f: (x: T, i: number) => U): B
 export const bendList = <T>(xs: readonly T[]) => bendListOf(xs, (x) => x);
 export const fromBendList = <T>(list: BendList<T>) => { const out: T[] = []; for (let l = list; l.$ === "Con"; l = l.tail) out.push(l.head); return out; };
 export type BendMaybe<T> = { $: "None" } | { $: "Some"; value: T };
-const BEND_NONE: BendMaybe<never> = Object.freeze({ $: "None" });
+export const BEND_NONE: BendMaybe<never> = Object.freeze({ $: "None" });
 export const bendCount = (v: unknown): BendMaybe<number> => { const n = tokenCount(v); return n !== undefined && n <= BEND_NAT_MAX ? { $: "Some", value: n } : BEND_NONE; };
+export const bendRunningCount = () => {
+  let sum = 0;
+  return (v: unknown): BendMaybe<number> => { const n = bendCount(v); if (n.$ === "None" || n.value > BEND_NAT_MAX - sum) return BEND_NONE; sum += n.value; return n; };
+};
 export const fromBendMaybe = <T>(m: BendMaybe<T>) => (m.$ === "Some" ? m.value : null);
 
 export function scaleToProvider(c: ContextComposition, providerPromptTokens: number | undefined): ContextComposition {
