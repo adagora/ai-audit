@@ -1,5 +1,5 @@
 import { SEGMENTS, KIND_CODES, BEND_NAT_MAX, scaleToProvider, arenaOf, tokenTotals, turnTokens, bustSignals, policyHistories,
-  turnTokensReference, bustSignalsReference, tokenTotalsReference, policyHistoriesReference, admission, charge, admissionReference, chargeReference, fail } from "./common.mjs";
+  turnTokensReference, bustSignalsReference, tokenTotalsReference, policyHistoriesReference, admission, charge, admissionReference, chargeReference, effectAuthorized, effectAuthorizedReference, fail } from "./common.mjs";
 
 const MAX_REQUEST_BYTES = 2 ** 32, SESSION = { id: "s", turn: 2, digest: "d2", parent: "d1", messages: 2 };
 const isNat = (n) => Number.isSafeInteger(n) && n >= 0;
@@ -96,7 +96,13 @@ function budget(b) {
   if (reserved) agreeBudget("charge", b, () => charge(reserved, isRecord(b.usage) ? b.usage : undefined, b.anthropic === true), () => chargeReference(reserved, isRecord(b.usage) ? b.usage : undefined, b.anthropic === true));
 }
 
-const MODES = [usage, policies, split, arena, budget];
+function verdict(v) {
+  if (!isRecord(v) || !Array.isArray(v.records)) return;
+  const records = v.records.filter(isRecord), ids = [...new Set(records.filter((r) => r.kind === "effect").map((r) => r.id)), "missing"];
+  for (const id of ids) agree("effectAuthorized", { id, records }, () => effectAuthorized(records, id), () => effectAuthorizedReference(records, id));
+}
+
+const MODES = [usage, policies, split, arena, budget, verdict];
 export function fuzz(data) {
   if (!data.length) return;
   let input;

@@ -7,7 +7,7 @@ found=$("$BEND" version 2>/dev/null)
 [ "$found" = "bend $BEND_VERSION" ] || { echo "FAIL need bend $BEND_VERSION, found '${found:-no bend}'"; exit 1; }
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 rc=0; ran=""
-MODULES="context arena usage spans parts mask decide policies budget"
+MODULES="context arena usage spans parts mask decide policies budget verdict"
 
 verdict() {
   if (cd "$1" && "$BEND" "$2" 2>&1) | grep -qx "ALL PROOFS CHECK"; then echo pass; else echo fail; fi
@@ -100,6 +100,12 @@ mutant unknown-charged-zero budget 's/case None\{\}:\n      reserved/case None{}
 mutant cache-not-charged budget 's/Nat\.add\(Nat\.add\(n, or0\(cached\)\), or0\(write\)\)/Nat.add(n, or0(write))/'
 mutant overrun-at-reservation budget 's/Nat\.is_gt\(charged\(i, reservedInput\), reservedInput\)/Nat.is_ge(charged(i, reservedInput), reservedInput)/'
 mutant overrun-output-ignored budget 's/Bool\.or\(Nat\.is_gt\(charged\(i, reservedInput\), reservedInput\), Nat\.is_gt\(charged\(o, reservedOutput\), reservedOutput\)\)/Nat.is_gt(charged(i, reservedInput), reservedInput)/'
+mutant first-review-wins verdict 's/case Con\{v, rest\}:\n      latest\.go\(rest, Some\{v\}\)/case Con{v, rest}:\n      Some{v}/'
+mutant approval-ignored verdict 's/case Some\{Approved\{\}\}:\n      True\{\}/case Some{Approved{}}:\n      simulated/'
+mutant rejection-follows-rule verdict 's/case Some\{Rejected\{\}\}:\n      False\{\}/case Some{Rejected{}}:\n      simulated/'
+mutant override-authorizes verdict 's/case Some\{Overridden\{\}\}:\n      False\{\}/case Some{Overridden{}}:\n      True{}/'
+mutant not-done-needs-rule verdict 's/case False\{\}:\n      True\{\}\n    case True\{\}:\n      authorized\.after/case False{}:\n      simulated\n    case True{}:\n      authorized.after/'
+mutant no-review-authorizes verdict 's/case None\{\}:\n      simulated/case None{}:\n      True{}/'
 for f in stops/*.bend; do case "$ran" in *" $(basename "$f" .bend) "*) ;; *) echo "FAIL $f has no mutant"; rc=1;; esac; done
 
 if command -v lean >/dev/null 2>&1; then

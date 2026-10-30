@@ -9,6 +9,7 @@ import ./mask.bend as K
 import ./decide.bend as D
 import ./policies.bend as Q
 import ./budget.bend as B
+import ./verdict.bend as V
 
 def add_zero(a: Nat) -> {a == Nat.add(a, 0n) : Nat}:
   match a:
@@ -6512,4 +6513,74 @@ def Laws.budget_admitted_and_not_overrun_stays_within_the_limit(ui, uo, ri, ro, 
         Equal.sym(B.Verdict, B.admit(False{}, ui, uo, ri, ro, li, lo), Laws.ExpectedVerdict(Bool.and(Nat.is_le(Nat.add(ui, ri), li), Nat.is_le(Nat.add(uo, ro), lo))), Laws.budget_admits_exactly_what_fits(ui, uo, ri, ro, li, lo)),
         admitted)),
     within)
+
+def OrElse(m: Maybe<&2, V.Verdict>, d: Maybe<&2, V.Verdict>) -> Maybe<&2, V.Verdict>:
+  match m:
+    case None{}:
+      d
+    case Some{x}:
+      Some{x}
+
+def or_lastor(m: Maybe<&2, V.Verdict>, +v: V.Verdict, -acc: Maybe<&2, V.Verdict>) -> {OrElse(m, Some{v}) == OrElse(Laws.LastOr(m, v), acc) : Maybe<&2, V.Verdict>}:
+  match m:
+    case None{}:
+      {==}
+    case Some{x}:
+      {==}
+
+def or_none(m: Maybe<&2, V.Verdict>) -> {OrElse(m, None{}) == m : Maybe<&2, V.Verdict>}:
+  match m:
+    case None{}:
+      {==}
+    case Some{x}:
+      {==}
+
+def go_last(rs: List<&2, V.Verdict>, +acc: Maybe<&2, V.Verdict>) -> {V.latest.go(rs, acc) == OrElse(Laws.LastOf(rs), acc) : Maybe<&2, V.Verdict>}:
+  match rs:
+    case Nil{}:
+      {==}
+    case Con{+v, +rest}:
+      Equal.trans(Maybe<&2, V.Verdict>, V.latest.go(rest, Some{v}), OrElse(Laws.LastOf(rest), Some{v}), OrElse(Laws.LastOr(Laws.LastOf(rest), v), acc),
+        go_last(rest, Some{v}), or_lastor(Laws.LastOf(rest), v, acc))
+
+def go_none(+rs: List<&2, V.Verdict>) -> {V.latest.go(rs, None{}) == Laws.LastOf(rs) : Maybe<&2, V.Verdict>}:
+  Equal.trans(Maybe<&2, V.Verdict>, V.latest.go(rs, None{}), OrElse(Laws.LastOf(rs), None{}), Laws.LastOf(rs), go_last(rs, None{}), or_none(Laws.LastOf(rs)))
+
+def after_eq(s: Bool, m: Maybe<&2, V.Verdict>) -> {V.authorized.after(s, m) == Laws.ExpectedAuthorized(s, m) : Bool}:
+  match s m:
+    case True{} None{}:
+      {==}
+    case False{} None{}:
+      {==}
+    case True{} Some{V.Approved{}}:
+      {==}
+    case False{} Some{V.Approved{}}:
+      {==}
+    case True{} Some{V.Rejected{}}:
+      {==}
+    case False{} Some{V.Rejected{}}:
+      {==}
+    case True{} Some{V.Overridden{}}:
+      {==}
+    case False{} Some{V.Overridden{}}:
+      {==}
+
+def last_snoc(rs: List<&2, V.Verdict>, +v: V.Verdict) -> {Laws.LastOf(Laws.Snoc(rs, v)) == Some{v} : Maybe<&2, V.Verdict>}:
+  match rs:
+    case Nil{}:
+      {==}
+    case Con{+x, +rest}:
+      %Equal.sym(Maybe<&2, V.Verdict>, Laws.LastOf(Laws.Snoc(rest, v)), Some{v}, last_snoc(rest, v)) : {Laws.LastOr(_, x) == Some{v} : Maybe<&2, V.Verdict>}
+      {==}
+
+def Laws.verdict_an_effect_not_done_needs_no_verdict(simulated, rs):
+  {==}
+
+def Laws.verdict_a_done_effect_follows_the_latest_review(simulated, rs):
+  %go_none(rs) : {V.authorized.after(simulated, V.latest.go(rs, None{})) == Laws.ExpectedAuthorized(simulated, _) : Bool}
+  after_eq(simulated, V.latest.go(rs, None{}))
+
+def Laws.verdict_the_review_recorded_last_decides(simulated, rs, v):
+  %last_snoc(rs, v) : {V.authorized(True{}, simulated, Laws.Snoc(rs, v)) == Laws.ExpectedAuthorized(simulated, _) : Bool}
+  Laws.verdict_a_done_effect_follows_the_latest_review(simulated, Laws.Snoc(rs, v))
 

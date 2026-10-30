@@ -8,6 +8,7 @@ import ./mask.bend as K
 import ./decide.bend as D
 import ./policies.bend as Q
 import ./budget.bend as B
+import ./verdict.bend as V
 
 def RoundedUp(r: Nat, o: Nat, q: Nat) -> Type:
   match r:
@@ -1036,3 +1037,60 @@ law budget_admitted_and_not_overrun_stays_within_the_limit:
   for admitted: {B.admit(False{}, ui, uo, ri, ro, li, lo) == B.Ok{} : B.Verdict}
   for within: {OverrunOf(B.charge(anthropic, ri, ro, input, cached, write, output)) == False{} : Bool}
   {Bool.and(Nat.is_le(Nat.add(ui, ChargedInput(B.charge(anthropic, ri, ro, input, cached, write, output))), li), Nat.is_le(Nat.add(uo, ChargedOutput(B.charge(anthropic, ri, ro, input, cached, write, output))), lo)) == True{} : Bool}
+
+def LastOr(m: Maybe<&2, V.Verdict>, v: V.Verdict) -> Maybe<&2, V.Verdict>:
+  match m:
+    case None{}:
+      Some{v}
+    case Some{x}:
+      Some{x}
+
+def LastOf(rs: List<&2, V.Verdict>) -> Maybe<&2, V.Verdict>:
+  match rs:
+    case Nil{}:
+      None{}
+    case Con{v, rest}:
+      LastOr(LastOf(rest), v)
+
+def Snoc(rs: List<&2, V.Verdict>, v: V.Verdict) -> List<&2, V.Verdict>:
+  match rs:
+    case Nil{}:
+      [v]
+    case Con{x, rest}:
+      x <> Snoc(rest, v)
+
+def Refused(m: Maybe<&2, V.Verdict>) -> Bool:
+  match m:
+    case Some{V.Rejected{}}:
+      True{}
+    case Some{V.Overridden{}}:
+      True{}
+    case _:
+      False{}
+
+def IsApproved(m: Maybe<&2, V.Verdict>) -> Bool:
+  match m:
+    case Some{V.Approved{}}:
+      True{}
+    case _:
+      False{}
+
+def ExpectedAuthorized(simulated: Bool, +last: Maybe<&2, V.Verdict>) -> Bool:
+  Bool.or(Bool.and(simulated, Bool.not(Refused(last))), IsApproved(last))
+
+law verdict_an_effect_not_done_needs_no_verdict:
+  for simulated: Bool
+  for rs: List<&2, V.Verdict>
+  {V.authorized(False{}, simulated, rs) == True{} : Bool}
+
+law verdict_a_done_effect_follows_the_latest_review:
+  for +simulated: Bool
+  for +rs: List<&2, V.Verdict>
+  {V.authorized(True{}, simulated, rs) == ExpectedAuthorized(simulated, LastOf(rs)) : Bool}
+
+law verdict_the_review_recorded_last_decides:
+  for +simulated: Bool
+  for +rs: List<&2, V.Verdict>
+  for +v: V.Verdict
+  {V.authorized(True{}, simulated, Snoc(rs, v)) == ExpectedAuthorized(simulated, Some{v}) : Bool}
+

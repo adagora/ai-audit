@@ -1,4 +1,6 @@
 import type { AuditLog, Rec, Review } from "./audit.js";
+import BendVerdict from "./bend/verdict.mjs";
+import { bendListOf } from "./context.js";
 
 export type Verdict = { state: Review["decision"]; review: string; reviewer: string; at: string; note?: string } | { state: "timeout" };
 export interface ProposedAction { action: string; status: string }
@@ -29,12 +31,13 @@ export async function awaitVerdict(log: AuditLog, decisionId: string, o: AwaitOp
   }
 }
 
+const BEND_VERDICTS: Readonly<Record<string, string>> = { approved: "Approved", rejected: "Rejected", overridden: "Overridden" };
 export function effectAuthorized(records: readonly Rec[], effectId: string): boolean {
   const at = records.findIndex((r) => r.kind === "effect" && r.id === effectId);
   const effect = records[at]?.effect;
-  if (!effect || effect.status !== "done") return true;
-  const decision = records.find((r) => r.kind === "decision" && r.id === records[at].refId && !r.qdl);
-  const latest = latestReview(records, records[at].refId!, at);
-  if (latest) return latest.review!.decision === "approved";
-  return proposedActions(decision?.output).some((p) => p.action === effect.action && p.status === "simulated");
+  if (!effect) return true;
+  const refId = records[at].refId, decision = records.find((r) => r.kind === "decision" && r.id === refId && !r.qdl);
+  const simulated = proposedActions(decision?.output).some((p) => p.action === effect.action && p.status === "simulated");
+  const reviews = records.slice(0, at).filter((r) => r.kind === "review" && r.refId === refId && r.review);
+  return BendVerdict.authorized(effect.status === "done", simulated, bendListOf(reviews, (r) => ({ $: Object.hasOwn(BEND_VERDICTS, r.review!.decision) ? BEND_VERDICTS[r.review!.decision] : "Rejected" })));
 }

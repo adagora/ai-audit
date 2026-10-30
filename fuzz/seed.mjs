@@ -86,6 +86,7 @@ const seeds = {
       { spent: { input: 11, output: 0 }, pending: {}, limits: { input: 10, output: 10 }, request: { input: 0, output: 0 }, blocked: true },
       { reserved: { input: 10, output: 10 }, usage: { input: 4, cached: 3, cacheWrite: 4, output: 6 }, anthropic: true },
       { reserved: { input: 10, output: 10 }, usage: { output: 11 } }, { reserved: { input: 10, output: 10 } }].map((j) => [4, JSON.stringify(j)]),
+    ...goldenInputs("verdict", 12).map((s) => [5, s]),
   ].map(([b, s]) => Buffer.concat([Buffer.from([b]), Buffer.from(s)])),
 };
 for (const [target, list] of Object.entries(seeds)) {
@@ -101,7 +102,7 @@ const tokens = ["AKIA", AWS, "ey", "eyJ", "@", ".pl", "@tcp(", "@unix(", "passwo
   '"session"', '"firstChanged"', '"records"', '"filter"', '"systemId"', '"useCase"', '"refId"', '"qdl"', '"kind"', '"program"', '"name"', '"id"', '"ts"', '"bytes"',
   "281474976710655", "281474976710656", "4294967296", "-1", "0.5", "1e308", "null",
   '"send_email"', '"fetch_url"', '"to"', '"cc"', '"url"', '"allow"', '"keyAllow"', '"useCaseAllow"', '"args"', '"body"', '"system"', '"developer"', '"user"', '"instructions"', '"previous_response_id"',
-  '"conversation"', "https://", "evil.example", "*.", "\r", "\r\r", "\r\n\r\n", "\ndata: ", '"spent"', '"pending"', '"limits"', '"request"', '"reserved"', '"blocked"', '"cacheWrite"', '"finish_reason"', '"message"', '"content_block_start"', '"content_block"', '"message_delta"',
+  '"conversation"', "https://", "evil.example", "*.", "\r", "\r\r", "\r\n\r\n", "\ndata: ", '"spent"', '"pending"', '"limits"', '"request"', '"reserved"', '"blocked"', '"cacheWrite"', '"review"', '"effect"', '"approved"', '"rejected"', '"overridden"', '"simulated"', '"done"', '"finish_reason"', '"message"', '"content_block_start"', '"content_block"', '"message_delta"',
   '"stop_reason"', '"item"', '"response.completed"', '"response.output_item.added"', '"response.function_call_arguments.delta"'];
 const libfuzzerByte = (b) => (b === 0x5c ? "\\\\" : b === 0x22 ? '\\"' : b < 0x20 || b > 0x7e ? "\\x" + b.toString(16).padStart(2, "0") : String.fromCharCode(b));
 writeFileSync(join(root, "dict.txt"), tokens.map((t) => `"${[...Buffer.from(t)].map(libfuzzerByte).join("")}"`).join("\n") + "\n");
