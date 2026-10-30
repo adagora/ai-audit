@@ -1,8 +1,10 @@
 import type { Api } from "./extract.js";
 
 export const HELD_CODE = "audit_action_held";
-const EVENT_END = /\r\n\r\n|\n\n|\r\r/;
+const EVENT_END = /(?:\r\n|\r(?!\n)|\n)[\r\n]/;
 const TERMINAL_RESPONSE = new Set(["response.completed", "response.incomplete", "response.failed"]);
+const list = (v: unknown): any[] => (Array.isArray(v) ? v : []);
+const argumentsEvent = (d: any) => typeof d?.type === "string" && d.type.startsWith("response.function_call_arguments");
 const safeName = (name: string) => /^[A-Za-z0-9_.:-]{1,64}$/.test(name) ? name : "tool";
 
 export function heldNotice(tools: string[]) {
@@ -24,21 +26,21 @@ const emit = (e: { event?: string; data: unknown }) => `${e.event ? `event: ${e.
 function startsHold(api: Api, e: SseEvent) {
   const d = e.data;
   if (!d) return false;
-  if (api === "openai-chat") return (d.choices ?? []).some((c: any) => c?.finish_reason || c?.delta?.tool_calls?.length);
-  if (api === "openai-responses") return TERMINAL_RESPONSE.has(d.type) || d.type?.startsWith("response.function_call_arguments")
+  if (api === "openai-chat") return list(d.choices).some((c: any) => c?.finish_reason || c?.delta?.tool_calls?.length);
+  if (api === "openai-responses") return TERMINAL_RESPONSE.has(d.type) || argumentsEvent(d)
     || ((d.type === "response.output_item.added" || d.type === "response.output_item.done") && d.item?.type === "function_call");
   return (d.type === "content_block_start" && d.content_block?.type === "tool_use") || d.type === "message_delta" || d.type === "message_stop";
 }
 
 function chatEvents(held: SseEvent[], notice: string): string {
-  const template = held.find((e) => e.data?.choices)?.data ?? {};
+  const template = held.find((e) => Array.isArray(e.data?.choices))?.data ?? {};
   const head = Object.fromEntries(["id", "object", "created", "model", "system_fingerprint"].filter((k) => template[k] !== undefined).map((k) => [k, template[k]]));
   let out = emit({ data: { ...head, choices: [{ index: 0, delta: { role: "assistant", content: notice }, finish_reason: null }] } });
   for (const e of held) {
-    if (!e.data?.choices) { out += e.raw; continue; }
+    if (!Array.isArray(e.data?.choices)) { out += e.raw; continue; }
     const choices = e.data.choices.map((c: any) => {
-      const { tool_calls, ...delta } = c.delta ?? {};
-      return { ...c, delta, ...(c.finish_reason && { finish_reason: c.finish_reason === "tool_calls" ? "stop" : c.finish_reason }) };
+      const { tool_calls, ...delta } = c?.delta ?? {};
+      return { ...c, delta, ...(c?.finish_reason && { finish_reason: c.finish_reason === "tool_calls" ? "stop" : c.finish_reason }) };
     }).filter((c: any) => c.finish_reason || Object.keys(c.delta).some((k) => k !== "role" && c.delta[k] !== undefined && c.delta[k] !== null && c.delta[k] !== ""));
     if (choices.length || e.data.usage) out += emit({ event: e.event, data: { ...e.data, choices } });
   }
@@ -48,7 +50,7 @@ function chatEvents(held: SseEvent[], notice: string): string {
 function responsesEvents(held: SseEvent[], notice: string, id: string): string {
   const calls = new Set<string>(), named = held.some((e) => e.event);
   for (const e of held) if (e.data?.item?.type === "function_call" && e.data.item.id) calls.add(e.data.item.id);
-  const first = held.find((e) => e.data?.item?.type === "function_call" || e.data?.type?.startsWith("response.function_call_arguments"));
+  const first = held.find((e) => e.data?.item?.type === "function_call" || argumentsEvent(e.data));
   const index = first?.data?.output_index ?? 0;
   const message = (status: string, text: string) => ({ id, type: "message", status, role: "assistant", content: text ? [{ type: "output_text", text, annotations: [] }] : [] });
   const part = (text: string) => ({ type: "output_text", text, annotations: [] });
@@ -64,7 +66,7 @@ function responsesEvents(held: SseEvent[], notice: string, id: string): string {
   for (const e of held) {
     const d = e.data;
     if (d === first?.data) synthetic.forEach((s) => events.push({ ...(named && { event: s.type }), data: s }));
-    if (d?.item?.type === "function_call" || d?.type?.startsWith("response.function_call_arguments") || (d?.item_id && calls.has(d.item_id))) continue;
+    if (d?.item?.type === "function_call" || argumentsEvent(d) || (d?.item_id && calls.has(d.item_id))) continue;
     if (d && TERMINAL_RESPONSE.has(d.type) && Array.isArray(d.response?.output)) {
       let placed = false;
       const output = d.response.output.flatMap((item: any) => item?.type !== "function_call" ? [item] : placed ? [] : (placed = true, [message("completed", notice)]));
@@ -113,7 +115,7 @@ export function streamGate(api: Api, messageId: string) {
         const event = parseEvent(pending.slice(0, m.index + m[0].length));
         pending = pending.slice(m.index + m[0].length);
         holding ||= startsHold(api, event);
-        if (holding) held.push(event); else { now += event.raw; textBefore ||= (event.data?.choices ?? []).some((c: any) => c?.delta?.content); }
+        if (holding) held.push(event); else { now += event.raw; textBefore ||= list(event.data?.choices).some((c: any) => c?.delta?.content); }
       }
       return now;
     },

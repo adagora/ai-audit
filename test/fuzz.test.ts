@@ -132,7 +132,11 @@ test("fuzz: extract keeps its contract for any upstream body: strings and token 
     assert.ok(Object.values(o.usage ?? {}).every((c) => c === undefined || (Number.isSafeInteger(c) && c >= 0)), `${JSON.stringify(o.usage)} from ${body}`);
     if (!sse) continue;
     const lines = body.split("\n");
-    for (let k = 1 + g.int(4); k > 0; k--) lines.splice(g.int(lines.length + 1), 0, g.pick(junk));
+    for (let k = 1 + g.int(4); k > 0; k--) {
+      const line = g.pick(junk);
+      if (line.startsWith("data:")) lines.splice(g.pick(lines.flatMap((l, at) => (at === 0 || lines[at - 1] === "" ? [at] : []))), 0, line, "");
+      else lines.splice(g.int(lines.length + 1), 0, line);
+    }
     const again = extract(api, lines.join("\n"), true);
     assert.deepEqual(pollution(), [], body);
     assert.deepEqual(again, o, lines.join("\n"));
