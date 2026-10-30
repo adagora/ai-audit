@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { AuditLog, canon, sha256 } from "../src/audit.js";
 import { recordQdl } from "../src/qdl.js";
-import { createDecisionPackage, parseDecisionPackage, renderDecisionSvg, verifyPortableReceipt, type DecisionPackage } from "../src/decisionPackage.js";
+import { createDecisionPackage, packageJson, parseDecisionPackage, renderDecisionSvg, verifyPortableReceipt, type DecisionPackage } from "../src/decisionPackage.js";
 
 const policy = JSON.parse(readFileSync(new URL("../../examples/quineling-quote/policy.json", import.meta.url), "utf8"));
 const inputs = { minutes: 42, rate: 4.5, setup: 120, material: 85, llmPrice: 274 };
@@ -33,7 +33,7 @@ test("portable JSON and SVG reproduce in a fresh process without the original lo
   const svg = await renderDecisionSvg(bundle);
   assert.deepEqual(parseDecisionPackage(svg), bundle);
   assert.equal((await verifyPortableReceipt(svg)).presentation, "matched");
-  assert.equal((await verifyPortableReceipt(JSON.stringify(bundle))).presentation, "not-included");
+  assert.equal((await verifyPortableReceipt(packageJson(bundle))).presentation, "not-included");
   for (const omitted of ["private description", "private caller assertion", "private reviewer", "private review note"]) assert.equal(svg.includes(omitted), false);
   assert.deepEqual(bundle.run.outputs.slice(0, 3), [394, false, false]);
   assert.match(svg, /Origin not verified/);
@@ -53,6 +53,17 @@ test("portable JSON and SVG reproduce in a fresh process without the original lo
     assert.equal(evidence.reproduced, true);
     assert.equal(evidence.origin, "not-verified");
     assert.equal(evidence.humanApproval, "not-verified");
+  }
+});
+
+test("found by a probe: a JSON receipt verifies only as ai-audit writes it, so a number spelled another way cannot show a different input to a reader that keeps decimal digits (ADR 0059)", async () => {
+  const { bundle } = await fixture();
+  const written = packageJson(bundle);
+  assert.equal((await verifyPortableReceipt(written + "\n")).reproduced, true);
+  for (const respelled of [written.replace('"rate": 4.5', '"rate": 4.50000000000000001'), written.replace('"minutes": 42', '"minutes": 4.2e1'), JSON.stringify(bundle), written.replace('"rate": 4.5', '"rate" : 4.5')]) {
+    assert.notEqual(respelled, written);
+    assert.equal(parseDecisionPackage(respelled).run.inputs.rate, 4.5);
+    await assert.rejects(verifyPortableReceipt(respelled), /audit_package_not_as_written/);
   }
 });
 
@@ -76,6 +87,7 @@ test("portable verification rejects changed inputs, outputs, runtime identity, s
   await assert.rejects(verifyPortableReceipt(svg.replace("Origin not verified", "Approved by everyone")), /audit_package_presentation_mismatch/);
   await assert.rejects(verifyPortableReceipt(svg.replace("</svg>", '<script>alert(1)</script></svg>')), /audit_package_presentation_mismatch/);
   assert.throws(() => parseDecisionPackage('{"format":"unknown"}'), /audit_invalid_decision_package/);
+  assert.throws(() => parseDecisionPackage('{"format":"ai-audit-decision-package'), /audit_invalid_decision_package/);
   assert.throws(() => parseDecisionPackage(JSON.stringify(bundle).replace('"version":1', '"version":1,"version":1')), /audit_invalid_decision_package/);
   assert.throws(() => parseDecisionPackage(JSON.stringify({ ...bundle, prompt: "unexpected field" })), /audit_invalid_decision_package/);
 });
@@ -84,7 +96,7 @@ test("a rehashed origin claim remains explicitly unverified", async () => {
   const { bundle } = await fixture();
   bundle.origin.decisionHash = "0".repeat(64);
   bundle.decision.id = "invented-id";
-  const result = await verifyPortableReceipt(JSON.stringify(reseal(bundle)));
+  const result = await verifyPortableReceipt(packageJson(reseal(bundle)));
   assert.equal(result.reproduced, true);
   assert.equal(result.origin, "not-verified");
   assert.equal(result.humanApproval, "not-verified");

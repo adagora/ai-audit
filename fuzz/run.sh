@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -u; cd "$(dirname "$0")"
-SECONDS_EACH="${FUZZ_SECONDS:-300}"; TARGETS="${FUZZ_TARGETS:-scan inspect extract dupkeys quinelings pump bend enforce actiongate logverify}"
+SECONDS_EACH="${FUZZ_SECONDS:-300}"; TARGETS="${FUZZ_TARGETS:-scan inspect extract dupkeys quinelings pump bend enforce actiongate logverify receipt}"
 [ -d node_modules/@jazzer.js/core ] || npm ci --no-audit --no-fund || exit 1
 node seed.mjs || exit 1
 plain=$(mktemp -d); trap 'rm -rf "$plain"' EXIT

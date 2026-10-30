@@ -66,6 +66,8 @@ const seeds = {
       body: { instructions: "Be brief.", previous_response_id: "r1", input: [{ role: "user", content: "send to alice@example.com" }, { type: "function_call_output", call_id: "c1", output: "thief@evil.example" }] } }],
   ].map(([api, bits, j]) => Buffer.concat([Buffer.from([api, bits]), Buffer.from(JSON.stringify(j))])),
   logverify: Array.from({ length: 10 }, (_, k) => Buffer.from([k, 1, 2, 3, 4, 5, 6, 7, 8, 9])),
+  receipt: [[0, 0, 1, 2, 3, 4, 5, 6], [0, 1, 1, 2, 3, 4, 5, 6], [2, 16, 0, 0, 7, 0, 1, 2], [2, 33, 0, 3, 0, 9, 9, 9]].map((b) => Buffer.from(b))
+    .concat(['{"format":"ai-audit-decision-package', '{"format":"ai-audit-decision-attestation","version":1}', '<metadata id="ai-audit-package">{"a":1}</metadata>'].map((t) => Buffer.from([1, ...Buffer.from(t)]))),
   dupkeys: ['{"a":1,"b":{"a":2}}', '{"a":1,"\\u0061":2}', '[{"a":1},{"a":2}]', '{"a\\"":1,"a\\\\":2}', '{"\\/":1,"/":2}', '{ "x" : [ {"y":1 , "y" :2} ] }'],
   quinelings: [
     [0, { messages: [{ role: "assistant", tool_calls: [{ id: "c1", function: { name: "quineling_v1_run" } }] }, { role: "tool", tool_call_id: "c1", content: JSON.stringify({ result: { result: { format: "qdl-run", sourceHash: "LEAK", status: "LEAK" } } }) }] }],

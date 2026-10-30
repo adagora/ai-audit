@@ -249,21 +249,21 @@ if (cmd === "attest-keygen") {
       if (!a.decision) throw new Error("audit_missing_argument");
       const format = a.format ?? "html";
       if (!["html", "svg", "json"].includes(format)) throw new Error("audit_invalid_format");
-      const { createDecisionPackage, renderDecisionSvg } = await import("./decisionPackage.js");
+      const { createDecisionPackage, packageJson, renderDecisionSvg } = await import("./decisionPackage.js");
       let result: string;
       if (format === "html") {
         const receipt = await decisionReceipt(log, a.decision, a.anchors ? { anchorsPath: a.anchors } : undefined);
         let sharing: { json: string; svg: string } | { reason: string };
         try {
           const bundle = await createDecisionPackage(log, a.decision);
-          sharing = { json: JSON.stringify(bundle, null, 2), svg: await renderDecisionSvg(bundle) };
+          sharing = { json: packageJson(bundle), svg: await renderDecisionSvg(bundle) };
         } catch (cause) {
           sharing = { reason: cause instanceof Error && /^audit_[a-z_]+$/.test(cause.message) ? cause.message : "audit_package_unavailable" };
         }
         result = renderReceipt(receipt, sharing);
       } else {
         const bundle = await createDecisionPackage(log, a.decision);
-        result = format === "json" ? JSON.stringify(bundle, null, 2) : await renderDecisionSvg(bundle);
+        result = format === "json" ? packageJson(bundle) : await renderDecisionSvg(bundle);
       }
       if (a.output) {
         try { writeFileSync(a.output, result + "\n", { flag: "wx", mode: 0o600 }); }

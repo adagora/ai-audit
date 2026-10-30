@@ -422,7 +422,7 @@ After `npm link`, the binary is `ai-audit`. The examples below use that name. `n
 | `effect` | `ai-audit effect --decision ID --action send-quote-to-customer --status done --review REVIEW_ID` | Records that the application ran, skipped or failed an action of that decision. |
 | `lab` | `ai-audit lab --log audit.jsonl --session ID --baseline-limit 2 --candidate-limit 3 --output comparison.html` | Compares failure thresholds on recorded observations; never stops an agent. |
 | `receipt` | `ai-audit receipt --decision ID --output receipt.html` | HTML page with downloads for a completed QDL decision. `--format svg` or `--format json` exports a portable receipt. |
-| `verify-receipt` | `ai-audit verify-receipt --input receipt.svg` | Replays a portable JSON or SVG receipt without the original log. |
+| `verify-receipt` | `ai-audit verify-receipt --input receipt.svg` | Replays a portable JSON or SVG receipt without the original log. Either form verifies only exactly as ai-audit wrote it (ADR 0059). |
 | `attest-keygen` | `ai-audit attest-keygen --private-key reviewer.pem --public-key reviewer.pub.pem` | Creates an Ed25519 signing key pair in new files. |
 | `attest` | `ai-audit attest --log audit.jsonl --decision ID --verdict approved --private-key reviewer.pem --output decision.attestation.json` | Signs the replayable decision, latest matching review record and log checkpoint. |
 | `verify-attestation` | `ai-audit verify-attestation --input decision.svg --attestation decision.attestation.json --public-key reviewer.pub.pem` | Replays the receipt and verifies the detached signature with the supplied key. |

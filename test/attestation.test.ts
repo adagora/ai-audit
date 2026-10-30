@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { AuditLog } from "../src/audit.js";
 import { createAttestation, generateAttestationKeys, verifyAttestation } from "../src/attestation.js";
-import { createDecisionPackage, renderDecisionSvg } from "../src/decisionPackage.js";
+import { createDecisionPackage, packageJson, renderDecisionSvg } from "../src/decisionPackage.js";
 import { recordQdl } from "../src/qdl.js";
 
 const policy = JSON.parse(readFileSync(new URL("../../examples/quineling-quote/policy.json", import.meta.url), "utf8"));
@@ -29,7 +29,7 @@ test("signed review binds a portable receipt to a checkpoint with a separately s
   await assert.rejects(createAttestation(f.log, f.decision.id, readFileSync(f.privatePath, "utf8"), "approved"), /audit_review_mismatch/);
   f.log.approve(f.decision.id, "fake reviewer", "approved", "fake note");
   const original = readFileSync(f.log.path, "utf8");
-  const packageText = JSON.stringify(await createDecisionPackage(f.log, f.decision.id));
+  const packageText = packageJson(await createDecisionPackage(f.log, f.decision.id));
   const attestation = await createAttestation(f.log, f.decision.id, readFileSync(f.privatePath, "utf8"), "approved");
   const verified = await verifyAttestation(packageText, JSON.stringify(attestation), readFileSync(f.publicPath, "utf8"));
   assert.equal(verified.reproduced, true);
@@ -48,7 +48,7 @@ test("signed review binds a portable receipt to a checkpoint with a separately s
 test("attestation verification rejects changed verdict, receipt, key and fabricated approval", async () => {
   const f = await fixture();
   f.log.approve(f.decision.id, "fake reviewer", "approved");
-  const packageText = JSON.stringify(await createDecisionPackage(f.log, f.decision.id));
+  const packageText = packageJson(await createDecisionPackage(f.log, f.decision.id));
   const attestation = await createAttestation(f.log, f.decision.id, readFileSync(f.privatePath, "utf8"), "approved");
   const publicPem = readFileSync(f.publicPath, "utf8");
   await assert.rejects(createAttestation(f.log, f.decision.id, readFileSync(f.privatePath, "utf8"), "rejected"), /audit_review_mismatch/);
@@ -59,6 +59,7 @@ test("attestation verification rejects changed verdict, receipt, key and fabrica
   const other = await fixture();
   await assert.rejects(verifyAttestation(packageText, JSON.stringify(attestation), readFileSync(other.publicPath, "utf8")), /audit_attestation_key_mismatch/);
   await assert.rejects(verifyAttestation(packageText, JSON.stringify({ ...attestation, review: { ...attestation.review, extra: "x" } }), publicPem), /audit_invalid_attestation/);
+  await assert.rejects(verifyAttestation(packageText, '{"format":"ai-audit-decision-attestation', publicPem), /audit_invalid_attestation/);
 });
 
 test("CLI signs and verifies a reviewed decision without overwriting evidence", async () => {

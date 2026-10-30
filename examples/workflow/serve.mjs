@@ -13,7 +13,7 @@ import { exposition } from "../../dist/src/metrics.js";
 import { readEvidenceRecords } from "../../dist/src/evidence.js";
 import { renderWorkbench } from "../../dist/src/workbench.js";
 import { recordQdl } from "../../dist/src/qdl.js";
-import { createDecisionPackage, renderDecisionSvg, verifyPortableReceipt } from "../../dist/src/decisionPackage.js";
+import { createDecisionPackage, packageJson, renderDecisionSvg, verifyPortableReceipt } from "../../dist/src/decisionPackage.js";
 import { createAttestation, generateAttestationKeys, verifyAttestation } from "../../dist/src/attestation.js";
 import { renderSessionHtml } from "../../dist/src/contextView.js";
 import { createConsole } from "../../dist/src/console.js";
@@ -562,7 +562,7 @@ const cockpit = http.createServer(async (req, res) => {
       const artifact = decisions.get(match[1]);
       if (!artifact) return json(res, 404, { error: "decision not found" });
       const format = match[2];
-      const body = format === "svg" ? artifact.svg : format === "json" ? JSON.stringify(artifact.bundle, null, 2)
+      const body = format === "svg" ? artifact.svg : format === "json" ? packageJson(artifact.bundle)
         : format === "attestation.json" ? artifact.attestation && JSON.stringify(artifact.attestation, null, 2) : artifact.publicPem;
       if (!body) return json(res, 404, { error: "artifact not found" });
       res.writeHead(200, { "content-type": format === "svg" ? "image/svg+xml; charset=utf-8" : format === "public.pem" ? "text/plain; charset=utf-8" : "application/json; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" });

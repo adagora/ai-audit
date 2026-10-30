@@ -15,6 +15,7 @@ export interface DecisionPackage {
 }
 
 const digestOf = ({ digest, ...payload }: DecisionPackage) => sha256(canon(payload));
+export const packageJson = (value: DecisionPackage) => JSON.stringify(value, null, 2);
 const hash = (value: unknown) => typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
 const object = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const fields = (value: unknown, required: string[], optional: string[] = []): value is Record<string, unknown> => object(value)
@@ -150,5 +151,6 @@ export async function verifyPortableReceipt(text: string) {
   await reproducePackage(value);
   const svg = text.trimStart().startsWith("<");
   if (svg && text.trim() !== (await renderDecisionSvg(value)).trim()) throw new Error("audit_package_presentation_mismatch");
+  if (!svg && text.trim() !== packageJson(value)) throw new Error("audit_package_not_as_written");
   return { reproduced: true, sourceHash: value.program.sourceHash, digest: value.digest, presentation: svg ? "matched" : "not-included", origin: "not-verified", humanApproval: "not-verified" };
 }
