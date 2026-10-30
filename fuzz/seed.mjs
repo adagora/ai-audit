@@ -65,6 +65,7 @@ const seeds = {
     [1, 21, { keyAllow: ["fetch_*"], useCaseAllow: ["send_email", "fetch_url"], calls: [{ name: "send_email", args: { to: "alice@example.com" } }, { name: "fetch_url", args: { url: "evil.example" } }],
       body: { instructions: "Be brief.", previous_response_id: "r1", input: [{ role: "user", content: "send to alice@example.com" }, { type: "function_call_output", call_id: "c1", output: "thief@evil.example" }] } }],
   ].map(([api, bits, j]) => Buffer.concat([Buffer.from([api, bits]), Buffer.from(JSON.stringify(j))])),
+  logverify: Array.from({ length: 10 }, (_, k) => Buffer.from([k, 1, 2, 3, 4, 5, 6, 7, 8, 9])),
   dupkeys: ['{"a":1,"b":{"a":2}}', '{"a":1,"\\u0061":2}', '[{"a":1},{"a":2}]', '{"a\\"":1,"a\\\\":2}', '{"\\/":1,"/":2}', '{ "x" : [ {"y":1 , "y" :2} ] }'],
   quinelings: [
     [0, { messages: [{ role: "assistant", tool_calls: [{ id: "c1", function: { name: "quineling_v1_run" } }] }, { role: "tool", tool_call_id: "c1", content: JSON.stringify({ result: { result: { format: "qdl-run", sourceHash: "LEAK", status: "LEAK" } } }) }] }],
