@@ -1,9 +1,13 @@
-import { scanText, inspect, redact, fail } from "./common.mjs";
+import { pathToFileURL } from "node:url";
+import { scanText, inspect, redact, DIST, fail } from "./common.mjs";
 
-const SLOW_MS = 40, MIB_BUDGET_MS = 2500, GROWTH = 10;
+const PLAIN = process.env.FUZZ_PLAIN_DIST ? pathToFileURL(process.env.FUZZ_PLAIN_DIST + "/").href : DIST;
+const plainScan = await import(PLAIN + "scan.js"), plainAudit = await import(PLAIN + "audit.js");
+const instrumented = { scanText, inspect, redact }, plain = { scanText: plainScan.scanText, inspect: plainScan.inspect, redact: plainAudit.redact };
+const SLOW_MS = 40, MIB_BUDGET_MS = 2500, GROWTH = 10, COVERAGE_BYTES = 2048;
 const timed = (run) => { const c0 = process.cpuUsage(); run(); const c = process.cpuUsage(c0); return (c.user + c.system) / 1000; };
 const fastest = (run) => Math.min(timed(run), timed(run), timed(run));
-const scanners = (text) => {
+const scanners = ({ scanText, inspect, redact }, text) => {
   const half = text.length >> 1;
   return [["scanText", () => scanText(text)], ["inspect", () => inspect(text)], ["inspect parts", () => inspect([text.slice(0, half), { type: "text", text: text.slice(half) }])],
     ["audit redact", () => redact(text)]];
@@ -12,9 +16,10 @@ export function fuzz(data) {
   const parts = data.toString("utf8").split("\u0000"), [pre, pump, suf] = parts.length > 1 ? [parts[0], parts[1], parts.slice(2).join("")] : ["", parts[0], ""];
   if (!pump || pump.length > 32 || pre.length > 32 || suf.length > 32) return;
   const pumped = (size) => pre + pump.repeat(Math.ceil(size / pump.length)) + suf;
-  scanners(pumped(64 * 1024)).forEach(([name, run], k) => {
+  scanners(instrumented, pumped(COVERAGE_BYTES)).forEach(([, run]) => run());
+  scanners(plain, pumped(64 * 1024)).forEach(([name, run], k) => {
     if (timed(run) < SLOW_MS) return;
-    const ms = fastest(run), fourTimes = fastest(scanners(pumped(256 * 1024))[k][1]);
+    const ms = fastest(run), fourTimes = fastest(scanners(plain, pumped(256 * 1024))[k][1]);
     if (fourTimes >= GROWTH * ms || fourTimes * 4 >= MIB_BUDGET_MS) fail(`${name} took ${ms.toFixed(0)} ms for 64 KiB and ${fourTimes.toFixed(0)} ms for 256 KiB`, { pre, pump, suf });
   });
 }

@@ -1,12 +1,17 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const root = new URL(".", import.meta.url).pathname;
 const AWS = "AKIA" + "IOSFODNN7EXAMPLQ", JWT = "eyJhbGciOiJIUzI1NiJ9x.eyJzdWIiOiIxMjM0NTY3ODkw.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV";
 const sse = (evs) => evs.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
+const nested = (depth, inner) => "[".repeat(depth) + inner + "]".repeat(depth);
+const AROUND_MAX_JSON_DEPTH = [254, 255, 256, 257];
+const goldenInputs = (name, count) => JSON.parse(readFileSync(new URL(`../test/fixtures/${name}-goldens.json`, import.meta.url), "utf8")).cases
+  .map((c) => JSON.stringify(c.input)).filter((s) => s.length < 3500).slice(0, count);
 const seeds = {
   scan: [`mail jan.kowalski@firma.pl, tel +48 601 234 567`, `aws ${AWS} pesel 44051401359`, `password: hunter2hunter2`, `postgres://u:p4ss@db.local/x`, `u:secret@tcp(127.0.0.1:3306)/db`,
-    `token ${JWT}`, `${JWT.slice(0, 30)}\n  ${JWT.slice(30)}`, `client_secret = 'Q~abcdefghijklmnopqrstuvwxyz0123456789'`, `-----BEGIN RSA PRIVATE KEY-----\nMIIabc\n-----END RSA PRIVATE KEY-----`, `PL61109010140000071219812874`],
+    `token ${JWT}`, `${JWT.slice(0, 30)}\n  ${JWT.slice(30)}`, `client_secret = 'Q~abcdefghijklmnopqrstuvwxyz0123456789'`, `-----BEGIN RSA PRIVATE KEY-----\nMIIabc\n-----END RSA PRIVATE KEY-----`, `PL61109010140000071219812874`,
+    `password: hunter2hunter2 and again password: hunter2hunter2`, ...AROUND_MAX_JSON_DEPTH.map((d) => nested(d, `"${AWS}"`))],
   pump: [["", "a", " @"], ["", "%", " @"], ["", "ey", "\n12345678"], ["", "ye", "\n"], ["", "a.", "\n"], ["", "-a", "\n"], ["", "7:", "@tcp("], ["password", "1", ""], ["", "a:", "@tcp("], ["x", "1a.", "_secret = 'x'"], ["", "12345678901,", ""], ["", "mysql://a,", ""], ["", "PL61109010140000071219812875,", ""], ["", "a@b.pl ", ""], ["mysql://h#?", "&/", ""]].map((p) => p.join("\u0000")),
   inspect: [{ messages: [{ role: "user", content: `key ${AWS}` }] },
     { messages: [{ role: "user", content: [{ type: "text", text: "AKIAIOSF" }, { type: "text", text: "ODNN7EXAMPLQ" }] }] },
@@ -15,7 +20,9 @@ const seeds = {
     { messages: [{ role: "user", content: [{ type: "input_image", image_url: `data:image/png;base64,${AWS}` }] }] },
     { tools: [{ function: { arguments: JSON.stringify({ mail: "jan@firma.pl", pesel: 44051401359 }) } }] },
     { input: [{ type: "function_call_output", output: JSON.stringify({ password: "hunter2hunter2" }) }] },
-    { password: "hunter2hunter2", [AWS]: 1 }].map((b) => JSON.stringify(b)),
+    { password: "hunter2hunter2", [AWS]: 1 }].map((b) => JSON.stringify(b)).concat(
+    AROUND_MAX_JSON_DEPTH.map((d) => `{"messages":[{"role":"user","content":${nested(d - 3, `"${AWS}"`)}}]}`),
+    AROUND_MAX_JSON_DEPTH.map((d) => JSON.stringify({ messages: [{ role: "user", content: nested(d - 3, `"${AWS}"`) }] }))),
   extract: [
     [0, JSON.stringify({ model: "m", choices: [{ message: { content: "hi", tool_calls: [{ index: 0, function: { name: "f", arguments: "{}" } }] }, finish_reason: "stop" }], usage: { prompt_tokens: 5, completion_tokens: 2 } })],
     [4, sse([{ model: "m", choices: [{ delta: { content: "He", tool_calls: [{ index: 0, function: { name: "f", arguments: "{" } }] } }] }, { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: "}" } }] }, finish_reason: "stop" }] }, { choices: [], usage: { prompt_tokens: 5, completion_tokens: 3 } }]) + "data: [DONE]\n\n"],
@@ -32,6 +39,16 @@ const seeds = {
     [1, { input: [{ type: "function_call", call_id: "c1", name: "quineling_v1_offspring_admit" }, { type: "function_call_output", call_id: "c1", output: "MCP error -32602: LEAK" }] }],
     [0, { name: "quineling_v1_run", intent: { note: "LEAK" }, artifactId: "LEAK" }],
   ].map(([b, j]) => Buffer.concat([Buffer.from([b]), Buffer.from(JSON.stringify(j))])),
+  bend: [
+    ...goldenInputs("usage", 12).map((s) => [0, s]),
+    ...[{ provider: "anthropic", usage: { input: 281474976710655, cached: 1, output: 1 } }, { provider: "openai", usage: { input: 1, cached: 140737488355328 }, previous: { provider: "openai", usage: { input: 5000 } } },
+      { calls: [{ kind: "llm-call", upstreamStatus: 200, usage: { input: 281474976710655 } }, { kind: "llm-call", upstreamStatus: 200, usage: { input: 1, output: 2 } }] }].map((j) => [0, JSON.stringify(j)]),
+    ...goldenInputs("policies", 12).map((s) => [1, s]),
+    ...[{ provider: 10, bytes: [3, 2, 0, 5, 1, 0, 4] }, { provider: 7, bytes: [1, 1, 1] }, { provider: 0, bytes: [0, 0, 0, 0, 0, 0, 9] }, { provider: 1000, bytes: [0, 0, 0, 0, 0, 3, 9] },
+      { provider: 281474976, bytes: [1000000, 1] }, { bytes: [5, 5] }].map((j) => [2, JSON.stringify(j)]),
+    ...[[[[0, "system", 10], [2, "hi", 5]], [[0, "system", 10], [2, "hi", 5], [3, "ok", 7]], [[0, "system", 10], [2, "edit", 5]], null, [[0, "system", 10]]],
+      [[[2, "a", 0], [2, "b", 3], [2, "c", 0]], [[2, "a", 0], [2, "x", 3], [2, "c", 0], [2, "d", 1]], [[2, "a", 0]]]].map((j) => [3, JSON.stringify(j)]),
+  ].map(([b, s]) => Buffer.concat([Buffer.from([b]), Buffer.from(s)])),
 };
 for (const [target, list] of Object.entries(seeds)) {
   mkdirSync(join(root, "seeds", target), { recursive: true }); mkdirSync(join(root, "corpus", target), { recursive: true }); mkdirSync(join(root, "artifacts", target), { recursive: true });
@@ -41,6 +58,9 @@ const tokens = ["AKIA", AWS, "ey", "eyJ", "@", ".pl", "@tcp(", "@unix(", "passwo
   "-----BEGIN", "PRIVATE KEY-----", "44051401359", "+48 ", "PL61", "[REDACTED:", "data:", ";base64,", "image/png", "text/plain", "application/pdf", '"type"', '"base64"', '"media_type"', '"data"', '"source"',
   '"text"', '"content"', '"messages"', '"input"', '"output"', '"role"', '"tool"', '"assistant"', '"tool_calls"', '"tool_call_id"', '"tool_use"', '"tool_result"', '"tool_use_id"', '"function_call"',
   '"function_call_output"', '"call_id"', '"arguments"', '"partial_json"', '"index"', '"__proto__"', '"constructor"', '"choices"', '"delta"', '"usage"', '"model"', "data: ", "event: ", "\n\n", "[DONE]",
-  "quineling_v1_", "qdl-run", "qdl-program", '"format"', '"sourceHash"', '"status"', '"error"', '"code"', '"path"', '"result"', '"payload"', "ql_", "LEAK", "MCP error ", "\\u00", "\\\"", "\\\\", "\\/"];
+  "quineling_v1_", "qdl-run", "qdl-program", '"format"', '"sourceHash"', '"status"', '"error"', '"code"', '"path"', '"result"', '"payload"', "ql_", "LEAK", "MCP error ", "\\u00", "\\\"", "\\\\", "\\/",
+  "[[[[[[[[", "]]]]]]]]", '"provider"', '"anthropic"', '"openai"', '"cached"', '"cacheWrite"', '"previous"', '"calls"', '"llm-call"', '"upstreamStatus"', '"decision"', '"action"', '"block"',
+  '"session"', '"firstChanged"', '"records"', '"filter"', '"systemId"', '"useCase"', '"refId"', '"qdl"', '"kind"', '"program"', '"name"', '"id"', '"ts"', '"bytes"',
+  "281474976710655", "281474976710656", "4294967296", "-1", "0.5", "1e308", "null"];
 const libfuzzerByte = (b) => (b === 0x5c ? "\\\\" : b === 0x22 ? '\\"' : b < 0x20 || b > 0x7e ? "\\x" + b.toString(16).padStart(2, "0") : String.fromCharCode(b));
 writeFileSync(join(root, "dict.txt"), tokens.map((t) => `"${[...Buffer.from(t)].map(libfuzzerByte).join("")}"`).join("\n") + "\n");
