@@ -7,6 +7,7 @@ import ./parts.bend as P
 import ./mask.bend as K
 import ./decide.bend as D
 import ./policies.bend as Q
+import ./budget.bend as B
 
 def RoundedUp(r: Nat, o: Nat, q: Nat) -> Type:
   match r:
@@ -941,3 +942,97 @@ law policies_mark_the_program_of_the_latest_decision_current:
   for +g: +List<Bool>
   for +ds: +List<Q.Use>
   {CurrentOf(g, Q.histories(ds)) == LatestProgram(g, ds) : Maybe<&2, List<&2, Bool>>}
+
+def ExpectedVerdict(ok: Bool) -> B.Verdict:
+  match ok:
+    case True{}:
+      B.Ok{}
+    case False{}:
+      B.Exceeded{}
+
+def UsedInput(anthropic: Bool, input: Maybe<&2, Nat>, +cached: Maybe<&2, Nat>, +write: Maybe<&2, Nat>) -> Maybe<&2, Nat>:
+  match anthropic:
+    case True{}:
+      match input:
+        case None{}:
+          None{}
+        case Some{n}:
+          Some{Nat.add(Nat.add(n, Or0(cached)), Or0(write))}
+    case False{}:
+      input
+
+def OrReserved(used: Maybe<&2, Nat>, +reserved: Nat) -> Nat:
+  match used:
+    case None{}:
+      reserved
+    case Some{n}:
+      n
+
+def IsKnown(used: Maybe<&2, Nat>) -> Bool:
+  match used:
+    case None{}:
+      False{}
+    case Some{n}:
+      True{}
+
+def ExpectedChargeOf(+used: Maybe<&2, Nat>, +output: Maybe<&2, Nat>, +ri: Nat, +ro: Nat) -> B.Charge:
+  B.Charge{OrReserved(used, ri), OrReserved(output, ro), IsKnown(used), IsKnown(output), Bool.or(Nat.is_gt(OrReserved(used, ri), ri), Nat.is_gt(OrReserved(output, ro), ro))}
+
+def ChargedInput(c: B.Charge) -> Nat:
+  match c:
+    case B.Charge{i, o, ik, ok, over}:
+      i
+
+def ChargedOutput(c: B.Charge) -> Nat:
+  match c:
+    case B.Charge{i, o, ik, ok, over}:
+      o
+
+def OverrunOf(c: B.Charge) -> Bool:
+  match c:
+    case B.Charge{i, o, ik, ok, over}:
+      over
+
+law budget_blocked_admits_nothing:
+  for ui: Nat
+  for uo: Nat
+  for i: Nat
+  for o: Nat
+  for li: Nat
+  for lo: Nat
+  {B.admit(True{}, ui, uo, i, o, li, lo) == B.Blocked{} : B.Verdict}
+
+law budget_admits_exactly_what_fits:
+  for +ui: Nat
+  for +uo: Nat
+  for +i: Nat
+  for +o: Nat
+  for +li: Nat
+  for +lo: Nat
+  {B.admit(False{}, ui, uo, i, o, li, lo) == ExpectedVerdict(Bool.and(Nat.is_le(Nat.add(ui, i), li), Nat.is_le(Nat.add(uo, o), lo))) : B.Verdict}
+
+law budget_charges_known_usage_or_the_reservation:
+  for anthropic: Bool
+  for +ri: Nat
+  for +ro: Nat
+  for +input: Maybe<&2, Nat>
+  for +cached: Maybe<&2, Nat>
+  for +write: Maybe<&2, Nat>
+  for +output: Maybe<&2, Nat>
+  {B.charge(anthropic, ri, ro, input, cached, write, output) == ExpectedChargeOf(UsedInput(anthropic, input, cached, write), output, ri, ro) : B.Charge}
+
+law budget_admitted_and_not_overrun_stays_within_the_limit:
+  for +ui: Nat
+  for +uo: Nat
+  for +ri: Nat
+  for +ro: Nat
+  for +li: Nat
+  for +lo: Nat
+  for +anthropic: Bool
+  for +input: Maybe<&2, Nat>
+  for +cached: Maybe<&2, Nat>
+  for +write: Maybe<&2, Nat>
+  for +output: Maybe<&2, Nat>
+  for admitted: {B.admit(False{}, ui, uo, ri, ro, li, lo) == B.Ok{} : B.Verdict}
+  for within: {OverrunOf(B.charge(anthropic, ri, ro, input, cached, write, output)) == False{} : Bool}
+  {Bool.and(Nat.is_le(Nat.add(ui, ChargedInput(B.charge(anthropic, ri, ro, input, cached, write, output))), li), Nat.is_le(Nat.add(uo, ChargedOutput(B.charge(anthropic, ri, ro, input, cached, write, output))), lo)) == True{} : Bool}

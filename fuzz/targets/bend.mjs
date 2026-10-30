@@ -1,5 +1,5 @@
 import { SEGMENTS, KIND_CODES, BEND_NAT_MAX, scaleToProvider, arenaOf, tokenTotals, turnTokens, bustSignals, policyHistories,
-  turnTokensReference, bustSignalsReference, tokenTotalsReference, policyHistoriesReference, fail } from "./common.mjs";
+  turnTokensReference, bustSignalsReference, tokenTotalsReference, policyHistoriesReference, admission, charge, admissionReference, chargeReference, fail } from "./common.mjs";
 
 const MAX_REQUEST_BYTES = 2 ** 32, SESSION = { id: "s", turn: 2, digest: "d2", parent: "d1", messages: 2 };
 const isNat = (n) => Number.isSafeInteger(n) && n >= 0;
@@ -78,7 +78,25 @@ function arena(turns) {
   }
 }
 
-const MODES = [usage, policies, split, arena];
+const BUDGET_FITS = Math.floor(BEND_NAT_MAX / 4096);
+const agreeBudget = (what, input, got, want) => {
+  const a = outcome(got), b = outcome(want);
+  if (a.threw !== undefined && !a.threw.endsWith(": audit_budget_unavailable")) fail(`${what} throws`, { input, got: a });
+  if (!numbersIn(input).some((n) => n > BUDGET_FITS) && (a.value !== b.value || a.threw !== b.threw)) fail(`${what} differs from its TypeScript reference`, { input, got: a, want: b });
+};
+const tokensOf = (t) => (isRecord(t) && isNat(t.input) && isNat(t.output) ? { input: t.input, output: t.output } : undefined);
+function budget(b) {
+  if (!isRecord(b)) return;
+  const limits = tokensOf(b.limits), request = tokensOf(b.request), spent = tokensOf(b.spent), reserved = tokensOf(b.reserved);
+  if (limits && request && spent) {
+    const pending = Object.fromEntries(Object.entries(isRecord(b.pending) ? b.pending : {}).map(([k, v]) => [k, tokensOf(v)]).filter(([, v]) => v));
+    const state = { spent, pending, ...(typeof b.blocked === "boolean" && { blocked: b.blocked }) };
+    agreeBudget("admission", b, () => admission(state, limits, request), () => admissionReference(state, limits, request));
+  }
+  if (reserved) agreeBudget("charge", b, () => charge(reserved, isRecord(b.usage) ? b.usage : undefined, b.anthropic === true), () => chargeReference(reserved, isRecord(b.usage) ? b.usage : undefined, b.anthropic === true));
+}
+
+const MODES = [usage, policies, split, arena, budget];
 export function fuzz(data) {
   if (!data.length) return;
   let input;

@@ -833,7 +833,7 @@ ai-audit effect --decision "$DECISION_ID" --action send-quote-to-customer --stat
 | `keys[].logContent` | `true` stores redacted output text and redacted tool arguments. Default is hashes only. |
 | `keys[].tools` | Optional `mode` and `allow` list of tool names, or prefixes ending in `*`, that this key's model may call. See [Tool-call gate](#tool-call-gate). |
 | `keys[].useCases` | Optional list of `useCases` rows this key may name. See [Use cases](#use-cases). |
-| `keys[].tokenBudget` | Optional UTC `period: day\|month`, nonnegative `inputTokens` / `outputTokens`, and positive per-request `maxOutputTokens`. |
+| `keys[].tokenBudget` | Optional UTC `period: day\|month`, nonnegative `inputTokens` / `outputTokens`, and positive per-request `maxOutputTokens`, each at most 2^48-1 (281,474,976,710,655). |
 | `actionGate` | Optional tool-call gate: per tool name, `mode`, sensitive `arguments` paths and `allow` destinations. See [Tool-call gate](#tool-call-gate). |
 | `useCases` | Optional table from a use-case name to its `tier` and optional `models` and `tools`. See [Use cases](#use-cases). |
 | `budgetDirectory` | Persistent local accounting directory shared by proxy processes. Default is `<log>.budgets`. |

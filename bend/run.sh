@@ -7,7 +7,7 @@ found=$("$BEND" version 2>/dev/null)
 [ "$found" = "bend $BEND_VERSION" ] || { echo "FAIL need bend $BEND_VERSION, found '${found:-no bend}'"; exit 1; }
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 rc=0; ran=""
-MODULES="context arena usage spans parts mask decide policies"
+MODULES="context arena usage spans parts mask decide policies budget"
 
 verdict() {
   if (cd "$1" && "$BEND" "$2" 2>&1) | grep -qx "ALL PROOFS CHECK"; then echo pass; else echo fail; fi
@@ -92,6 +92,14 @@ mutant rollback-new-version policies 's/case Some\{st\}:\n      order/case Some{
 mutant group-listed-twice policies 's/case Some\{grp\}:\n      State\{order, /case Some{grp}:\n      State{g <> order, /'
 mutant group-dropped policies 's/case None\{\}:\n      State\{g <> order, /case None{}:\n      State{order, /'
 mutant current-is-group-key policies 's/History\{k, versions\(order, src, Nil\{\}\), cur\}/History{k, versions(order, src, Nil{}), k}/'
+mutant blocked-admits budget 's/case True\{\}:\n      Blocked\{\}/case True{}:\n      Ok{}/'
+mutant at-limit-refused budget 's/Nat\.is_le\(request, Nat\.sub\(limit, used\)\)/Nat.is_lt(request, Nat.sub(limit, used))/'
+mutant used-over-limit budget 's/Bool\.and\(Nat\.is_le\(used, limit\), Nat\.is_le\(request, Nat\.sub\(limit, used\)\)\)/Nat.is_le(request, Nat.sub(limit, used))/'
+mutant output-not-checked budget 's/admit\.fits\(Bool\.and\(fits\(usedInput, input, limitInput\), fits\(usedOutput, output, limitOutput\)\)\)/admit.fits(fits(usedInput, input, limitInput))/'
+mutant unknown-charged-zero budget 's/case None\{\}:\n      reserved/case None{}:\n      0n/'
+mutant cache-not-charged budget 's/Nat\.add\(Nat\.add\(n, or0\(cached\)\), or0\(write\)\)/Nat.add(n, or0(write))/'
+mutant overrun-at-reservation budget 's/Nat\.is_gt\(charged\(i, reservedInput\), reservedInput\)/Nat.is_ge(charged(i, reservedInput), reservedInput)/'
+mutant overrun-output-ignored budget 's/Bool\.or\(Nat\.is_gt\(charged\(i, reservedInput\), reservedInput\), Nat\.is_gt\(charged\(o, reservedOutput\), reservedOutput\)\)/Nat.is_gt(charged(i, reservedInput), reservedInput)/'
 for f in stops/*.bend; do case "$ran" in *" $(basename "$f" .bend) "*) ;; *) echo "FAIL $f has no mutant"; rc=1;; esac; done
 
 if command -v lean >/dev/null 2>&1; then

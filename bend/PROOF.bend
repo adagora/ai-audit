@@ -8,6 +8,7 @@ import ./parts.bend as P
 import ./mask.bend as K
 import ./decide.bend as D
 import ./policies.bend as Q
+import ./budget.bend as B
 
 def add_zero(a: Nat) -> {a == Nat.add(a, 0n) : Nat}:
   match a:
@@ -6375,3 +6376,140 @@ def Laws.policies_count_each_version_from_its_first_to_its_last_decision(g, s, d
 
 def Laws.policies_mark_the_program_of_the_latest_decision_current(g, ds):
   po.law_current(g, ds)
+
+def fits_eq(u: Nat, r: Nat, l: Nat) -> {B.fits(u, r, l) == Nat.is_le(Nat.add(u, r), l) : Bool}:
+  match u l:
+    case 0n 0n:
+      {==}
+    case 0n 1n+lp:
+      {==}
+    case 1n+up 0n:
+      {==}
+    case 1n+up 1n+lp:
+      fits_eq(up, r, lp)
+
+def verdict_eq(b: Bool) -> {B.admit.fits(b) == Laws.ExpectedVerdict(b) : B.Verdict}:
+  match b:
+    case True{}:
+      {==}
+    case False{}:
+      {==}
+
+def Laws.budget_blocked_admits_nothing(ui, uo, i, o, li, lo):
+  {==}
+
+def Laws.budget_admits_exactly_what_fits(ui, uo, i, o, li, lo):
+  %fits_eq(ui, i, li) : {B.admit.fits(Bool.and(B.fits(ui, i, li), B.fits(uo, o, lo))) == Laws.ExpectedVerdict(Bool.and(_, Nat.is_le(Nat.add(uo, o), lo))) : B.Verdict}
+  %fits_eq(uo, o, lo) : {B.admit.fits(Bool.and(B.fits(ui, i, li), B.fits(uo, o, lo))) == Laws.ExpectedVerdict(Bool.and(B.fits(ui, i, li), _)) : B.Verdict}
+  verdict_eq(Bool.and(B.fits(ui, i, li), B.fits(uo, o, lo)))
+
+def Laws.budget_charges_known_usage_or_the_reservation(anthropic, ri, ro, input, cached, write, output):
+  match anthropic input cached write output:
+    case True{} None{} _ _ None{}:
+      {==}
+    case True{} None{} _ _ Some{y}:
+      {==}
+    case True{} Some{n} None{} None{} None{}:
+      {==}
+    case True{} Some{n} None{} None{} Some{y}:
+      {==}
+    case True{} Some{n} None{} Some{w} None{}:
+      {==}
+    case True{} Some{n} None{} Some{w} Some{y}:
+      {==}
+    case True{} Some{n} Some{c} None{} None{}:
+      {==}
+    case True{} Some{n} Some{c} None{} Some{y}:
+      {==}
+    case True{} Some{n} Some{c} Some{w} None{}:
+      {==}
+    case True{} Some{n} Some{c} Some{w} Some{y}:
+      {==}
+    case False{} None{} _ _ None{}:
+      {==}
+    case False{} None{} _ _ Some{y}:
+      {==}
+    case False{} Some{n} _ _ None{}:
+      {==}
+    case False{} Some{n} _ _ Some{y}:
+      {==}
+
+def OkType(v: B.Verdict) -> Type:
+  match v:
+    case B.Ok{}:
+      Empty
+    case B.Blocked{}:
+      Unit
+    case B.Exceeded{}:
+      Unit
+
+def exceeded_not_ok(e: {B.Exceeded{} == B.Ok{} : B.Verdict}) -> Empty:
+  %e : OkType(_)
+  Unit{}
+
+def verdict_true(b: Bool, e: {Laws.ExpectedVerdict(b) == B.Ok{} : B.Verdict}) -> {b == True{} : Bool}:
+  match b:
+    case True{}:
+      {==}
+    case False{}:
+      Empty.absurd({False{} == True{} : Bool}, exceeded_not_ok(e))
+
+def and_true_l(a: Bool, -b: Bool, e: {Bool.and(a, b) == True{} : Bool}) -> {a == True{} : Bool}:
+  match a:
+    case True{}:
+      {==}
+    case False{}:
+      e
+
+def and_true_r(a: Bool, -b: Bool, e: {Bool.and(a, b) == True{} : Bool}) -> {b == True{} : Bool}:
+  match a:
+    case True{}:
+      e
+    case False{}:
+      Empty.absurd({b == True{} : Bool}, ft(e))
+
+def or_false_l(a: Bool, -b: Bool, e: {Bool.or(a, b) == False{} : Bool}) -> {a == False{} : Bool}:
+  match a:
+    case True{}:
+      e
+    case False{}:
+      {==}
+
+def or_false_r(a: Bool, -b: Bool, e: {Bool.or(a, b) == False{} : Bool}) -> {b == False{} : Bool}:
+  match a:
+    case True{}:
+      Empty.absurd({b == False{} : Bool}, ft(Equal.sym(Bool, True{}, False{}, e)))
+    case False{}:
+      e
+
+def and_both(+x: Bool, -y: Bool, ex: {x == True{} : Bool}, ey: {y == True{} : Bool}) -> {Bool.and(x, y) == True{} : Bool}:
+  %Equal.sym(Bool, x, True{}, ex) : {Bool.and(_, y) == True{} : Bool}
+  ey
+
+def le_add_mono(u: Nat, -a: Nat, -b: Nat, e: {Nat.is_le(a, b) == True{} : Bool}) -> {Nat.is_le(Nat.add(u, a), Nat.add(u, b)) == True{} : Bool}:
+  match u:
+    case 0n:
+      e
+    case 1n+p:
+      le_add_mono(p, a, b, e)
+
+def within_limit(+ui: Nat, +uo: Nat, +ri: Nat, +ro: Nat, +li: Nat, +lo: Nat, +ci: Nat, +co: Nat,
+  +ok: {Bool.and(Nat.is_le(Nat.add(ui, ri), li), Nat.is_le(Nat.add(uo, ro), lo)) == True{} : Bool},
+  +over: {Bool.or(Nat.is_gt(ci, ri), Nat.is_gt(co, ro)) == False{} : Bool})
+  -> {Bool.and(Nat.is_le(Nat.add(ui, ci), li), Nat.is_le(Nat.add(uo, co), lo)) == True{} : Bool}:
+  and_both(Nat.is_le(Nat.add(ui, ci), li), Nat.is_le(Nat.add(uo, co), lo),
+    le_trans(Nat.add(ui, ci), Nat.add(ui, ri), li,
+      le_add_mono(ui, ci, ri, gt_false_le(ci, ri, or_false_l(Nat.is_gt(ci, ri), Nat.is_gt(co, ro), over))),
+      and_true_l(Nat.is_le(Nat.add(ui, ri), li), Nat.is_le(Nat.add(uo, ro), lo), ok)),
+    le_trans(Nat.add(uo, co), Nat.add(uo, ro), lo,
+      le_add_mono(uo, co, ro, gt_false_le(co, ro, or_false_r(Nat.is_gt(ci, ri), Nat.is_gt(co, ro), over))),
+      and_true_r(Nat.is_le(Nat.add(ui, ri), li), Nat.is_le(Nat.add(uo, ro), lo), ok)))
+
+def Laws.budget_admitted_and_not_overrun_stays_within_the_limit(ui, uo, ri, ro, li, lo, anthropic, input, cached, write, output, admitted, within):
+  within_limit(ui, uo, ri, ro, li, lo, B.charged(B.complete(anthropic, input, cached, write), ri), B.charged(output, ro),
+    verdict_true(Bool.and(Nat.is_le(Nat.add(ui, ri), li), Nat.is_le(Nat.add(uo, ro), lo)),
+      Equal.trans(B.Verdict, Laws.ExpectedVerdict(Bool.and(Nat.is_le(Nat.add(ui, ri), li), Nat.is_le(Nat.add(uo, ro), lo))), B.admit(False{}, ui, uo, ri, ro, li, lo), B.Ok{},
+        Equal.sym(B.Verdict, B.admit(False{}, ui, uo, ri, ro, li, lo), Laws.ExpectedVerdict(Bool.and(Nat.is_le(Nat.add(ui, ri), li), Nat.is_le(Nat.add(uo, ro), lo))), Laws.budget_admits_exactly_what_fits(ui, uo, ri, ro, li, lo)),
+        admitted)),
+    within)
+

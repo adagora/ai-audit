@@ -1,6 +1,8 @@
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import BendBudget from "./bend/budget.mjs";
+import { BEND_NAT_MAX, BEND_NONE, bendCount, fromBendMaybe } from "./context.js";
 import { tokenCount, type Usage } from "./extract.js";
 
 export interface TokenBudget { period: "day" | "month"; inputTokens: number; outputTokens: number; maxOutputTokens: number }
@@ -16,23 +18,27 @@ const sum = (a: number, b: number) => {
   if (!Number.isSafeInteger(result)) throw new BudgetError(503, "audit_budget_unavailable");
   return result;
 };
+const limit = (n: unknown) => valid(n) && (n as number) <= BEND_NAT_MAX;
 export function validateBudget(value: TokenBudget) {
-  if (!value || !["day", "month"].includes(value.period) || !valid(value.inputTokens) || !valid(value.outputTokens)
-    || !valid(value.maxOutputTokens) || value.maxOutputTokens < 1) throw new Error("audit_budget_config_invalid");
+  if (!value || !["day", "month"].includes(value.period) || !limit(value.inputTokens) || !limit(value.outputTokens)
+    || !limit(value.maxOutputTokens) || value.maxOutputTokens < 1) throw new Error("audit_budget_config_invalid");
 }
 export type Admission = "ok" | "blocked" | "exceeded";
+const ADMISSIONS = { Ok: "ok", Blocked: "blocked", Exceeded: "exceeded" } as const;
+const inBend = (...ns: number[]) => { if (ns.some((n) => n > BEND_NAT_MAX)) throw new BudgetError(503, "audit_budget_unavailable"); return ns; };
 export function admission(state: { spent: Tokens; pending: Record<string, Tokens>; blocked?: boolean }, limits: Tokens, request: Tokens): Admission {
-  if (state.blocked) return "blocked";
-  const pending = Object.values(state.pending);
-  const usedInput = pending.reduce((n, v) => sum(n, v.input), state.spent.input);
-  const usedOutput = pending.reduce((n, v) => sum(n, v.output), state.spent.output);
-  return request.input > limits.input - usedInput || request.output > limits.output - usedOutput ? "exceeded" : "ok";
+  const blocked = state.blocked === true, pending = Object.values(state.pending);
+  const [usedInput, usedOutput, input, output, limitInput, limitOutput] = blocked ? [0, 0, 0, 0, 0, 0]
+    : inBend(pending.reduce((n, v) => sum(n, v.input), state.spent.input), pending.reduce((n, v) => sum(n, v.output), state.spent.output), request.input, request.output, limits.input, limits.output);
+  return ADMISSIONS[(BendBudget.admit(blocked, usedInput, usedOutput, input, output, limitInput, limitOutput) as { $: keyof typeof ADMISSIONS }).$];
 }
 export function charge(reserved: Tokens, usage: Usage | undefined, anthropic: boolean) {
-  const input = tokenCount(usage?.input), output = tokenCount(usage?.output);
-  const completeInput = anthropic && input !== undefined ? sum(sum(input, tokenCount(usage?.cached) ?? 0), tokenCount(usage?.cacheWrite) ?? 0) : input;
-  const charged = { input: completeInput ?? reserved.input, output: output ?? reserved.output };
-  return { charged, inputKnown: completeInput !== undefined, outputKnown: output !== undefined, overrun: charged.input > reserved.input || charged.output > reserved.output };
+  inBend(reserved.input, reserved.output);
+  const input = bendCount(usage?.input), cached = bendCount(usage?.cached), write = bendCount(usage?.cacheWrite);
+  const sumFits = !anthropic || (fromBendMaybe(input) ?? 0) + (fromBendMaybe(cached) ?? 0) + (fromBendMaybe(write) ?? 0) <= BEND_NAT_MAX;
+  const c: { input: number; output: number; inputKnown: boolean; outputKnown: boolean; overrun: boolean } =
+    BendBudget.charge(anthropic, reserved.input, reserved.output, sumFits ? input : BEND_NONE, cached, write, bendCount(usage?.output));
+  return { charged: { input: c.input, output: c.output }, inputKnown: c.inputKnown, outputKnown: c.outputKnown, overrun: c.overrun };
 }
 export class BudgetStore {
   constructor(private directory: string, private now = () => new Date()) {}
