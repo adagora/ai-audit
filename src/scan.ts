@@ -279,9 +279,14 @@ export function hasDuplicateKeys(t: string): boolean {
   for (let i = 0; i < t.length; i++) {
     const c = t[i];
     if (c === '"') {
-      let j = i + 1; while (t[j] !== '"') j += t[j] === "\\" ? 2 : 1;
+      let j = i + 1; while (j < t.length && t[j] !== '"') j += t[j] === "\\" ? 2 : 1;
+      if (j >= t.length) return false;
       const top = stack[stack.length - 1];
-      if (top?.keys && top.expectKey) { const k = JSON.parse(t.slice(i, j + 1)); if (top.keys.has(k)) return true; top.keys.add(k); top.expectKey = false; }
+      if (top?.keys && top.expectKey) {
+        let k: string;
+        try { k = JSON.parse(t.slice(i, j + 1)); } catch { return false; }
+        if (top.keys.has(k)) return true; top.keys.add(k); top.expectKey = false;
+      }
       i = j;
     } else if (c === "{") stack.push({ keys: new Set(), expectKey: true });
     else if (c === "[") stack.push({});
@@ -295,7 +300,7 @@ export function nestedDeeperThan(t: string, limit: number): boolean {
   let depth = 0;
   for (let i = 0; i < t.length; i++) {
     const c = t[i];
-    if (c === '"') { i++; while (t[i] !== '"') i += t[i] === "\\" ? 2 : 1; }
+    if (c === '"') { i++; while (i < t.length && t[i] !== '"') i += t[i] === "\\" ? 2 : 1; }
     else if (c === "{" || c === "[") { if (++depth > limit) return true; }
     else if (c === "}" || c === "]") depth--;
   }

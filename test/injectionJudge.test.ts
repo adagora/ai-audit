@@ -81,6 +81,7 @@ test("untrusted model output is validated and never copied into failure metadata
     { ...reply(), done: false }, { ...reply(), done_reason: "length" }, { ...reply(), model: "different-model" },
     { ...reply(), message: { role: "assistant", content: '{"verdict":"benign","category":"none","reason":"PRIVATE_CANARY"}' } },
     { ...reply(), message: { role: "assistant", content: '{"verdict":"benign","verdict":"injection","category":"none"}' } },
+    { ...reply(), message: { role: "assistant", content: '{"verdict":"benign","category":"none' } },
     { ...reply(), message: { role: "assistant", content: "PRIVATE_CANARY" } },
     reply("injection", "PRIVATE_CANARY"), reply("injection", "none"), reply("benign", "task_hijack"),
     { ...reply(), message: { role: "assistant", content: JSON.stringify({ verdict: "benign", category: "none" }), tool_calls: [{ name: "PRIVATE_CANARY" }] } },

@@ -7,7 +7,7 @@ import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { AuditLog, report, sha256 } from "../src/audit.js";
 import { createProxy } from "../src/proxy.js";
-import { hasDuplicateKeys, inspect, MAX_JSON_DEPTH, scanText } from "../src/scan.js";
+import { hasDuplicateKeys, inspect, MAX_JSON_DEPTH, nestedDeeperThan, scanText } from "../src/scan.js";
 import { mockUpstream, startProxy, AWS, PESEL, AUTH } from "./helpers.js";
 import type { Mode } from "../src/scan.js";
 
@@ -152,6 +152,14 @@ test("scanner: checksums avoid false positives, keys detected", () => {
   assert.deepEqual(scanText("IBAN PL61 1090 1014 0000 0712 1981 2874, tel +48 601 234 567").map((s) => s.rule), ["pii-iban", "pii-phone"]);
   assert.equal(scanText("ver 1.2.3 build 2026-10-20 cost 123 456 789.00").length, 0);
   assert.ok(hasDuplicateKeys('{"a":{"b":1,"\\u0062":2}}')); assert.ok(!hasDuplicateKeys('{"a":{"b":1},"c":{"b":2}}'));
+});
+
+test("found by fuzzing: the duplicate-key and depth scanners end on text that is not JSON, such as a string that never closes", () => {
+  for (const text of ['{"a', '{"a":"b', '"', '{"a\\', '{"\\x":1}', 'Vm^\u0084\u00e6&"<']) {
+    assert.equal(hasDuplicateKeys(text), false, text);
+    assert.equal(nestedDeeperThan(text, 1), false, text);
+  }
+  assert.equal(nestedDeeperThan('[[["', 2), true);
 });
 
 test("found by fuzzing: an upstream tool call with non-string arguments still gets its record", async () => {

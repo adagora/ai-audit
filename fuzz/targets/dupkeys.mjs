@@ -1,4 +1,4 @@
-import { hasDuplicateKeys, fail } from "./common.mjs";
+import { hasDuplicateKeys, nestedDeeperThan, fail } from "./common.mjs";
 
 function reference(t) {
   let i = 0, dup = false;
@@ -25,6 +25,11 @@ function reference(t) {
 
 export function fuzz(data) {
   const text = data.toString("utf8");
+  for (const [name, scan] of [["hasDuplicateKeys", () => hasDuplicateKeys(text)], ["nestedDeeperThan", () => nestedDeeperThan(text, 4)]]) {
+    let answer;
+    try { answer = scan(); } catch (e) { fail(`${name} throws on text that is not JSON`, { text, e: String(e) }); }
+    if (typeof answer !== "boolean") fail(`${name} does not answer`, { text });
+  }
   try { JSON.parse(text); } catch { return; }
   const got = hasDuplicateKeys(text), want = reference(text);
   if (got !== want) fail("duplicate-key detection disagrees with the reference parser", { text, got, want });

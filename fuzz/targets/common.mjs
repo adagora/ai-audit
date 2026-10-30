@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 export const DIST = new URL("../../dist/src/", import.meta.url).href;
 const TEST = new URL("../../dist/test/", import.meta.url).href;
-export const { scanText, inspect, decide, hasDuplicateKeys, redactText } = await import(DIST + "scan.js");
+export const { scanText, inspect, decide, hasDuplicateKeys, nestedDeeperThan, redactText } = await import(DIST + "scan.js");
 export const { discover } = await import(DIST + "attachments.js");
 export const { extract } = await import(DIST + "extract.js");
 export const { redact, tokenTotals } = await import(DIST + "audit.js");
