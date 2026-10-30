@@ -86,18 +86,18 @@ test("a changed, shortened or deleted closed segment breaks the series and names
 
 test("prune deletes closed segments older than the window after recording them; verify and anchors accept the recorded gap", () => {
   const { dir, log } = fresh(clockFrom("2026-01-01T00:00:00.000Z", 86_400_000)), anchors = join(dir, "anchors.jsonl");
-  const a = decision(log, "a"), b = decision(log, "b");
+  decision(log, "a"); const b = decision(log, "b");
   anchor(log, anchors, "2026-01-03T12:00:00.000Z");
   log.rotate(); decision(log, "c"); log.rotate(); decision(log, "d");
   anchor(log, anchors, "2026-01-09T00:00:00.000Z");
   const [first, second] = log.closedSegments();
   assert.throws(() => prune(log, 0), /audit_invalid_keep_days/);
   const pruned = prune(log, 5, new Date("2026-01-09T12:00:00.000Z"));
-  assert.deepEqual(pruned, [{ file: basename(first), count: 2, head: b.hash, first: a.hash, firstTs: "2026-01-02T00:00:00.000Z", lastTs: "2026-01-03T00:00:00.000Z" }]);
+  assert.deepEqual(pruned, [{ file: basename(first), count: 2, head: b.hash, firstTs: "2026-01-02T00:00:00.000Z", lastTs: "2026-01-03T00:00:00.000Z" }]);
   assert.ok(!existsSync(first) && existsSync(second));
   const record = log.readCurrent().at(-1)!;
   assert.equal(record.kind, "prune"); assert.equal(record.keepDays, 5); assert.deepEqual(record.segments, pruned);
-  assert.deepEqual(log.verifySeries(), { ok: true, files: 2, records: 5, prunedBefore: "2026-01-04T00:00:00.000Z" });
+  assert.deepEqual(log.verifySeries(), { ok: true, files: 2, records: 5, prunedBefore: "2026-01-04T00:00:00.000Z", prunedThrough: basename(first) });
   assert.deepEqual(verifyAnchors(log, anchors), { ok: true, anchors: 2, pruned: 1 });
   assert.deepEqual(prune(log, 5, new Date("2026-01-09T12:00:00.000Z")), []);
   assert.equal(log.readCurrent().filter((r) => r.kind === "prune").length, 1);
@@ -126,7 +126,7 @@ test("a segment name comes after the segment the current file links to, also whe
   assert.deepEqual(log.verifyChain(), { ok: true });
 });
 
-test("an anchor of a pruned segment counts as pruned by the segment it names, also in the millisecond of the rotation or before a clock step back", () => {
+test("an anchor of a pruned segment counts as pruned by its place in the series, also in the millisecond of the rotation or before a clock step back", () => {
   for (const back of [0, 60_000]) {
     let t = Date.parse("2026-01-01T00:00:00.000Z");
     const { dir, log } = fresh(() => new Date(t).toISOString()), anchors = join(dir, "anchors.jsonl");

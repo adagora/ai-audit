@@ -20,6 +20,7 @@ run AuditChain.tla AuditChain_unlinkfirst.cfg fail ChainIntact
 run AuditChain.tla AuditChain_clockback.cfg fail ChainIntact
 run AuditChain.tla AuditChain_clockback_anchors.cfg fail AnchorsConsistent
 run AuditChain.tla AuditChain_emptysegment.cfg fail ChainIntact
+run AuditChain.tla AuditChain_emptyskipped.cfg pass   # an empty current file, as the old open-then-write or a crash can leave it, is not part of the series
 run RequestLifecycle.tla RequestLifecycle.cfg pass
 run RequestLifecycle.tla RequestLifecycle_noguard.cfg fail NoCrash
 run RequestLifecycle.tla RequestLifecycle_noprecheck.cfg fail NoForwardOnBadLog

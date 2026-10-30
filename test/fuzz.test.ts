@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { AuditLog, redact } from "../src/audit.js";
+import { basename, join } from "node:path";
+import { AuditLog, anchor, prune, redact, verifyAnchors } from "../src/audit.js";
 import { discover } from "../src/attachments.js";
 import { extract, type Api } from "../src/extract.js";
 import { quinelingCalls, quinelingResults } from "../src/quinelings.js";
@@ -199,6 +199,40 @@ test("fuzz: any record content survives the log round trip: read() gives back wh
     written.push(JSON.parse(JSON.stringify(log.append({ kind: "decision", id: `d${i}`, ts: "2026-10-23T00:00:00.000Z", params: oddValue(g, 0) as Record<string, unknown>, output: oddValue(g, 0) }))));
   assert.deepEqual(log.verifyChain(), { ok: true });
   assert.deepEqual(log.read(), written);
+});
+
+test("fuzz: any run of appends, rotations, prunes, anchors, crashes and clock steps, backwards too, leaves a series that verify and its anchors accept, with no record lost (ADR 0049, 0056)", () => {
+  const g = seeded(12);
+  for (let i = 0; i < runs(30); i++) {
+    const dir = mkdtempSync(join(tmpdir(), "fuzz-series-")), anchors = join(dir, "anchors.jsonl");
+    let t = Date.parse("2026-01-01T00:00:00.000Z");
+    const log = new AuditLog(join(dir, "audit.jsonl"), () => new Date(t).toISOString(), g.pick([0, 400, 1200]));
+    const written: string[] = [], gone = new Set<string>(), trace: string[] = [];
+    let justRotated = false;
+    for (let step = 0; step < 30; step++) {
+      t += g.pick([0, 0, 1, 1000, 86_400_000, -1, -60_000, -86_400_000]);
+      const op = g.pick(["append", "append", "append", "append", "rotate", "anchor", "prune", "crash-before-segment", "crash-empty-segment", "leftover"] as const);
+      const afterRotation = justRotated;
+      justRotated = false;
+      trace.push(`${op}@${new Date(t).toISOString()}`);
+      if (op === "append") written.push(log.append({ kind: "refusal", id: `r${step}`, ts: new Date(t).toISOString() } as any).id);
+      else if (op === "rotate") justRotated = log.rotate() !== undefined;
+      else if (op === "anchor") anchor(log, anchors, new Date(t).toISOString());
+      else if (op === "prune") {
+        const ids = new Map(log.closedSegments().map((f) => [basename(f), log.files().includes(f) ? readFileSync(f, "utf8").trim().split("\n").map((l) => JSON.parse(l).id as string) : []]));
+        for (const s of prune(log, 1, new Date(t + g.pick([1, 2, 30]) * 86_400_000))) ids.get(s.file)?.forEach((id) => gone.add(id));
+      }
+      else if (op === "crash-before-segment" && afterRotation) unlinkSync(log.path);
+      else if (op === "crash-empty-segment" && afterRotation) writeFileSync(log.path, "");
+      else if (op === "leftover") writeFileSync(log.path + ".segment", g.chars(g.int(40), LOWER + "{}\":,\n"));
+      assert.deepEqual(log.verifyChain(), { ok: true }, trace.join(" "));
+    }
+    written.push(log.append({ kind: "refusal", id: "last", ts: new Date(t).toISOString() } as any).id);
+    const kept = new Set(log.read().map((r) => r.id));
+    assert.deepEqual(log.verifyChain(), { ok: true }, trace.join(" "));
+    if (existsSync(anchors)) assert.equal(verifyAnchors(log, anchors).ok, true, `${JSON.stringify(verifyAnchors(log, anchors))} ${trace.join(" ")}`);
+    assert.deepEqual(written.filter((id) => !kept.has(id) && !gone.has(id)), [], trace.join(" "));
+  }
 });
 
 const LEAK = "LEAK marker", HASH = "ql_" + "0123456789abcdef".repeat(4);

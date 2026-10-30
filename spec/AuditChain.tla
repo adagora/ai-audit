@@ -1,7 +1,7 @@
 ---- MODULE AuditChain ----
 EXTENDS Naturals, Sequences, FiniteSets
 CONSTANTS Writers, PerWriter, RotateAt, MaxCrashes, MaxAnchors, UseLock, Restart, RecordBeforeUnlink, ClockBack, SplitCreate
-CONSTANTS NameAfterNewest, AnchorBySegment
+CONSTANTS NameAfterNewest, AnchorBySegment, SkipEmptyCurrent
 VARIABLES cur, curExists, closed, holder, pc, seen, tries, rts, nseg, written, clock, backs, crashes, ppc, pold, gone, anchors, apc, aseen
 vars == <<cur, curExists, closed, holder, pc, seen, tries, rts, nseg, written, clock, backs, crashes, ppc, pold, gone, anchors, apc, aseen>>
 
@@ -18,10 +18,10 @@ LinkTo(n) == [file |-> n, count |-> Len(Seg(n).recs), head |-> Tip(Seg(n).recs)]
 PresentRecs == UNION {Recs(f.recs) : f \in closed} \cup Recs(cur)
 PrunedEntries == UNION {r.pruned : r \in PresentRecs}
 PrunedNames == {e.name : e \in PrunedEntries}
-PrunedFirsts == {e.first : e \in PrunedEntries}
-PresentFirsts == {f.recs[1].id : f \in closed} \cup (IF cur # <<>> THEN {cur[1].id} ELSE {})
 FirstFile == IF closed # {} THEN Seg(Min(Names)).recs ELSE cur
 PrunedBefore == IF FirstFile # <<>> /\ FirstFile[1].link # NoLink THEN FirstFile[1].ts ELSE 0
+After(s) == IF s # <<>> /\ s[1].link # NoLink THEN s[1].link.file ELSE 0
+PrunedThrough == After(FirstFile)
 Linked == IF cur # <<>> /\ cur[1].link # NoLink THEN {cur[1].link.file} ELSE {}
 RotationName == IF NameAfterNewest THEN Max({clock} \cup {n + 1 : n \in Names \cup Linked}) ELSE clock
 
@@ -29,7 +29,7 @@ Init == /\ cur = <<>> /\ curExists = FALSE /\ closed = {} /\ holder = "none"
         /\ pc = [w \in Writers |-> "idle"] /\ seen = [w \in Writers |-> G] /\ tries = [w \in Writers |-> 0]
         /\ rts = [w \in Writers |-> 0] /\ nseg = 0 /\ written = {} /\ clock = 1 /\ backs = 0 /\ crashes = 0
         /\ ppc = "read" /\ pold = {} /\ gone = {}
-        /\ anchors = <<>> /\ apc = "read" /\ aseen = [count |-> 0, head |-> G, ts |-> 0, first |-> G]
+        /\ anchors = <<>> /\ apc = "read" /\ aseen = [count |-> 0, head |-> G, ts |-> 0, after |-> 0]
 
 Go(w, to) == pc' = [pc EXCEPT ![w] = to]
 Fail(w) == /\ Go(w, "idle") /\ holder' = IF holder = w THEN "none" ELSE holder
@@ -85,7 +85,7 @@ Crash(w) == /\ crashes < MaxCrashes /\ pc[w] \in {"check", "segment", "fill", "t
 
 PruneRead == /\ ppc = "read" /\ closed # {}
              /\ \E k \in 1..Cardinality(closed) :
-                  pold' = {[name |-> n, first |-> Seg(n).recs[1].id] : n \in {n \in Names : Cardinality({m \in Names : m <= n}) <= k}}
+                  pold' = {[name |-> n] : n \in {n \in Names : Cardinality({m \in Names : m <= n}) <= k}}
              /\ ppc' = IF RecordBeforeUnlink THEN "record" ELSE "unlink"
              /\ UNCHANGED <<clock, written, backs, crashes, gone, anchors, apc, aseen>> /\ UNCHANGED WriterVars /\ UNCHANGED FileVars
 
@@ -110,7 +110,7 @@ PruneCrash == /\ crashes < MaxCrashes /\ ppc \in {"record", "unlink"}
               /\ UNCHANGED <<pold, clock, written, backs, gone, anchors, apc, aseen>> /\ UNCHANGED WriterVars /\ UNCHANGED FileVars
 
 AnchorRead == /\ apc = "read" /\ Len(anchors) < MaxAnchors
-              /\ aseen' = [count |-> Len(cur), head |-> Tip(cur), ts |-> clock, first |-> IF cur = <<>> THEN G ELSE cur[1].id]
+              /\ aseen' = [count |-> Len(cur), head |-> Tip(cur), ts |-> clock, after |-> After(cur)]
               /\ clock' = clock + 1 /\ apc' = "write"
               /\ UNCHANGED <<written, backs, crashes, ppc, pold, gone, anchors>> /\ UNCHANGED WriterVars /\ UNCHANGED FileVars
 AnchorWrite == /\ apc = "write" /\ anchors' = Append(anchors, aseen) /\ apc' = "read"
@@ -130,12 +130,12 @@ Continues(s, before) == IF before = {}
                         THEN (s # <<>> /\ s[1].link # NoLink) => s[1].link.file \in PrunedNames
                         ELSE s # <<>> /\ s[1].link = LinkTo(Max(before))
 ChainIntact == /\ \A f \in closed : Chain(f.recs) /\ Continues(f.recs, {m \in Names : m < f.name})
-               /\ curExists => Chain(cur) /\ Continues(cur, Names)
+               /\ (curExists /\ (cur # <<>> \/ ~SkipEmptyCurrent)) => Chain(cur) /\ Continues(cur, Names)
 NoLostEntries == written \subseteq {r.id : r \in PresentRecs} \cup gone
 AnchorsConsistent == \A j \in 1..Len(anchors) :
      LET a == anchors[j] IN
      \/ a.count = 0 /\ a.head = G
      \/ \E s \in {f.recs : f \in closed} \cup {cur} : a.count \in 1..Len(s) /\ s[a.count].id = a.head
-     \/ IF AnchorBySegment THEN a.first \notin PresentFirsts /\ a.first \in PrunedFirsts
+     \/ IF AnchorBySegment THEN a.after < PrunedThrough
         ELSE PrunedBefore # 0 /\ a.ts < PrunedBefore
 ====

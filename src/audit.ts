@@ -81,7 +81,7 @@ const segmentNameTime = (file: string, ext: string) => {
   const c = basename(file, ext).slice(-19);
   return Date.parse(`${c.slice(0, 4)}-${c.slice(4, 6)}-${c.slice(6, 8)}T${c.slice(9, 11)}:${c.slice(11, 13)}:${c.slice(13, 15)}.${c.slice(15, 18)}Z`);
 };
-export interface SeriesCheck { ok: boolean; badLine?: number; reason?: string; file?: string; files: number; records: number; prunedBefore?: string }
+export interface SeriesCheck { ok: boolean; badLine?: number; reason?: string; file?: string; files: number; records: number; prunedBefore?: string; prunedThrough?: string }
 export function checkSeries(files: Iterable<readonly [string, Iterable<string>]>): SeriesCheck {
   let previous: SegmentLink | undefined, missing: { file: string; at: string; ts: string } | undefined, records = 0, n = 0;
   const pruned = new Set<string>();
@@ -113,7 +113,7 @@ export function checkSeries(files: Iterable<readonly [string, Iterable<string>]>
     previous = { file: name, count, head: prev }; records += count;
   }
   if (missing && !pruned.has(missing.file)) return { ok: false, file: missing.at, badLine: 1, reason: `segment ${missing.file} is missing and no prune record lists it`, files: n, records };
-  return { ok: true, files: n, records, ...(missing && { prunedBefore: missing.ts }) };
+  return { ok: true, files: n, records, ...(missing && { prunedBefore: missing.ts, prunedThrough: missing.file }) };
 }
 
 export class AuditLog {
@@ -125,7 +125,7 @@ export class AuditLog {
     const name = new RegExp(`^${escapeRe(stem)}\\.\\d{8}T\\d{9}Z${escapeRe(ext)}$`);
     try { return readdirSync(dir).filter((f) => name.test(f)).sort().map((f) => join(dir, f)); } catch { return []; }
   }
-  files(): string[] { return [...this.closedSegments(), ...(existsSync(this.path) ? [this.path] : [])]; }
+  files(): string[] { return [...this.closedSegments(), ...(existsSync(this.path) && statSync(this.path).size > 0 ? [this.path] : [])]; }
   read(): Rec[] { return this.files().flatMap(recordsOf); }
   readCurrent(): Rec[] { return existsSync(this.path) ? recordsOf(this.path) : []; }
   readRecent(): Rec[] { return this.files().slice(-2).flatMap(recordsOf); }
@@ -248,18 +248,17 @@ export class AuditLog {
 export function prune(log: AuditLog, keepDays: number, now = new Date()) {
   if (!Number.isInteger(keepDays) || keepDays < 1) throw new Error("audit_invalid_keep_days");
   if (!log.verifySeries().ok) throw new Error("audit_chain_broken");
-  const cutoff = new Date(now.getTime() - keepDays * 86_400_000).toISOString(), old: (SegmentLink & { first: string; firstTs: string; lastTs: string })[] = [];
+  const cutoff = new Date(now.getTime() - keepDays * 86_400_000).toISOString(), old: (SegmentLink & { firstTs: string; lastTs: string })[] = [];
   for (const f of log.closedSegments()) {
-    let count = 0, head = GENESIS, first = GENESIS, firstTs = "~", lastTs = "";
+    let count = 0, head = GENESIS, firstTs = "~", lastTs = "";
     for (const line of fileLines(f)) {
       const r = JSON.parse(line) as Rec;
-      if (count++ === 0) first = r.hash;
-      head = r.hash;
+      count++; head = r.hash;
       if (r.ts < firstTs) firstTs = r.ts;
       if (r.ts > lastTs) lastTs = r.ts;
     }
     if (lastTs >= cutoff) break;
-    old.push({ file: basename(f), count, head, first, firstTs, lastTs });
+    old.push({ file: basename(f), count, head, firstTs, lastTs });
   }
   if (!old.length) return [];
   log.append({ kind: "prune", id: randomUUID(), ts: now.toISOString(), keepDays, segments: old });
@@ -452,29 +451,24 @@ function periodPolicies(all: Rec[], inRange: (ts: string) => boolean) {
 export function anchor(log: AuditLog, anchorsPath: string, now = new Date().toISOString()) {
   let count = 0, first = "", last = "";
   if (existsSync(log.path)) for (const line of fileLines(log.path)) { if (count++ === 0) first = line; last = line; }
-  const a = { ts: now, count, head: last ? JSON.parse(last).hash : GENESIS, ...(first && { first: JSON.parse(first).hash as string }) };
+  const after: unknown = first ? JSON.parse(first).previous?.file : undefined;
+  const a = { ts: now, count, head: last ? JSON.parse(last).hash : GENESIS, ...(first && { after: typeof after === "string" ? after : "" }) };
   appendFileSync(anchorsPath, JSON.stringify(a) + "\n"); return a;
 }
 export function verifyAnchors(log: AuditLog, anchorsPath: string): { ok: boolean; anchors: number; pruned?: number; reason?: string } {
   const chain = log.verifySeries();
   if (!chain.ok) return { ok: false, anchors: 0, reason: `chain broken at ${chain.file === basename(log.path) ? "" : `${chain.file} `}line ${chain.badLine}: ${chain.reason}` };
-  const as: { ts: string; count: number; head: string; first?: string }[] = Array.from(fileLines(anchorsPath), (l) => JSON.parse(l));
-  const wanted = new Set(as.map((a) => a.count)), found = new Set<string>(), present = new Set<string>(), prunedFirst = new Set<string>();
+  const as: { ts: string; count: number; head: string; after?: string }[] = Array.from(fileLines(anchorsPath), (l) => JSON.parse(l));
+  const wanted = new Set(as.map((a) => a.count)), found = new Set<string>();
   let longest = 0, pruned = 0;
   for (const f of log.files()) {
     let count = 0;
-    for (const line of fileLines(f)) {
-      if (++count !== 1 && !wanted.has(count) && !line.includes('"kind":"prune"')) continue;
-      const r = JSON.parse(line);
-      if (count === 1) present.add(r.hash);
-      if (wanted.has(count)) found.add(`${count}:${r.hash}`);
-      if (r.kind === "prune" && Array.isArray(r.segments)) for (const s of r.segments) if (typeof s?.first === "string") prunedFirst.add(s.first);
-    }
+    for (const line of fileLines(f)) if (wanted.has(++count)) found.add(`${count}:${JSON.parse(line).hash}`);
     longest = Math.max(longest, count);
   }
   for (const a of as) {
     if (a.count === 0 ? a.head === GENESIS : found.has(`${a.count}:${a.head}`)) continue;
-    if (a.first !== undefined ? !present.has(a.first) && prunedFirst.has(a.first) : chain.prunedBefore && a.ts < chain.prunedBefore) { pruned++; continue; }
+    if (typeof a.after === "string" ? chain.prunedThrough !== undefined && a.after < chain.prunedThrough : chain.prunedBefore && a.ts < chain.prunedBefore) { pruned++; continue; }
     if (longest < a.count) return { ok: false, anchors: as.length, reason: `truncated: anchor ${a.ts} saw ${a.count} records, log has ${longest}` };
     return { ok: false, anchors: as.length, reason: `swapped: record ${a.count} hash differs from anchor ${a.ts}` };
   }
