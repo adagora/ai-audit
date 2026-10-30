@@ -401,7 +401,7 @@ After `npm link`, the binary is `ai-audit`. The examples below use that name. `n
 |---|---|---|
 | `serve` | `ai-audit serve --mode redact --log audit.jsonl --port 8787` | Listens. Default host is `127.0.0.1`. |
 | `console` | `ai-audit console --log audit.jsonl --config gateway.json --reviewer ada` | Opens the operator console on `127.0.0.1:8793`. See [Operator console](#operator-console). |
-| `verify` | `ai-audit verify --log audit.jsonl` | Recomputes the chain. Exit 0 when it matches, 1 when it does not. |
+| `verify` | `ai-audit verify --log audit.jsonl` | Recomputes the chain, and accepts a line only byte for byte as ai-audit wrote it (ADR 0058). Exit 0 when it matches, 1 when it does not. |
 | `verify` | `ai-audit verify --log audit.jsonl --anchors anchors.jsonl` | Also catches a swapped or truncated file. |
 | `anchor` | `ai-audit anchor --log audit.jsonl --anchors anchors.jsonl` | Appends an anchor. Run it daily. Keep the anchor file somewhere else. |
 | `rotate` | `ai-audit rotate --log audit.jsonl` | Closes the log into a timestamped segment and starts a new file linked to it. |

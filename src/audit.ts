@@ -49,7 +49,13 @@ export const canon = (o: unknown): string => JSON.stringify(o, (_k, v) =>
   v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort()) : v);
 
 const READ_CHUNK = 1 << 20;
-export function* fileLines(path: string): Generator<string> {
+class NotUtf8 extends Error {}
+const decoded = (bytes: Buffer, exact: boolean) => {
+  const line = bytes.toString("utf8");
+  if (exact && !Buffer.from(line, "utf8").equals(bytes)) throw new NotUtf8();
+  return line;
+};
+export function* fileLines(path: string, exact = false): Generator<string> {
   const fd = openSync(path, "r"), buf = Buffer.alloc(READ_CHUNK);
   try {
     let rest: Buffer[] = [];
@@ -57,13 +63,13 @@ export function* fileLines(path: string): Generator<string> {
       const chunk = buf.subarray(0, n);
       let from = 0;
       for (let nl = chunk.indexOf(0x0a, from); nl >= 0; nl = chunk.indexOf(0x0a, from)) {
-        const line = Buffer.concat([...rest, chunk.subarray(from, nl)]).toString("utf8");
+        const line = decoded(Buffer.concat([...rest, chunk.subarray(from, nl)]), exact);
         rest = []; from = nl + 1;
         if (line) yield line;
       }
       if (from < n) rest.push(Buffer.from(chunk.subarray(from)));
     }
-    const last = Buffer.concat(rest).toString("utf8");
+    const last = decoded(Buffer.concat(rest), exact);
     if (last) yield last;
   } finally { closeSync(fd); }
 }
@@ -82,17 +88,23 @@ export function checkSeries(files: Iterable<readonly [string, Iterable<string>]>
   for (const [name, lines] of files) {
     let prev = GENESIS, count = 0, first: Rec | undefined;
     n++;
-    for (const line of lines) {
-      count++;
-      let r: Rec;
-      try { r = JSON.parse(line); } catch { return { ok: false, file: name, badLine: count, reason: "invalid JSON", files: n, records }; }
-      if (!r || typeof r !== "object" || Array.isArray(r)) return { ok: false, file: name, badLine: count, reason: "not a record", files: n, records };
-      const { hash, ...body } = r;
-      if (r.prevHash !== prev) return { ok: false, file: name, badLine: count, reason: "prevHash mismatch", files: n, records };
-      if (sha256(canon(body)) !== hash) return { ok: false, file: name, badLine: count, reason: "hash mismatch", files: n, records };
-      if (count === 1) first = r;
-      if (r.kind === "prune" && Array.isArray(r.segments)) for (const s of r.segments as { file?: unknown }[]) if (typeof s?.file === "string") pruned.add(s.file);
-      prev = hash;
+    try {
+      for (const line of lines) {
+        count++;
+        let r: Rec;
+        try { r = JSON.parse(line); } catch { return { ok: false, file: name, badLine: count, reason: "invalid JSON", files: n, records }; }
+        if (!r || typeof r !== "object" || Array.isArray(r)) return { ok: false, file: name, badLine: count, reason: "not a record", files: n, records };
+        const { hash, ...body } = r;
+        if (r.prevHash !== prev) return { ok: false, file: name, badLine: count, reason: "prevHash mismatch", files: n, records };
+        if (sha256(canon(body)) !== hash) return { ok: false, file: name, badLine: count, reason: "hash mismatch", files: n, records };
+        if (JSON.stringify(r) !== line) return { ok: false, file: name, badLine: count, reason: "not as written", files: n, records };
+        if (count === 1) first = r;
+        if (r.kind === "prune" && Array.isArray(r.segments)) for (const s of r.segments as { file?: unknown }[]) if (typeof s?.file === "string") pruned.add(s.file);
+        prev = hash;
+      }
+    } catch (e) {
+      if (e instanceof NotUtf8) return { ok: false, file: name, badLine: count + 1, reason: "not UTF-8", files: n, records };
+      throw e;
     }
     const link = first?.kind === "segment" ? first.previous as SegmentLink : undefined;
     if (previous && (link?.file !== previous.file || link.count !== previous.count || link.head !== previous.head))
@@ -226,7 +238,7 @@ export class AuditLog {
     return this.append({ kind: "effect", id: randomUUID(), ts: this.now(), refId, effect: { action, status, ...(review && { review }), ...(code && { code }) } });
   }
 
-  verifySeries(): SeriesCheck { return checkSeries(this.files().map((f) => [basename(f), fileLines(f)] as const)); }
+  verifySeries(): SeriesCheck { return checkSeries(this.files().map((f) => [basename(f), fileLines(f, true)] as const)); }
   verifyChain(): { ok: boolean; badLine?: number; reason?: string; file?: string } {
     const v = this.verifySeries();
     return v.ok ? { ok: true } : { ok: false, badLine: v.badLine, reason: v.reason, ...(v.file !== basename(this.path) && { file: v.file }) };

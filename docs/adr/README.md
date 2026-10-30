@@ -65,3 +65,4 @@ Format: Nygard (Status, Context, Decision, Consequences), at most ~40 lines, fil
 - [55. An application acts on a decision after its verdict, and the log records the action](0055-act-after-verdict.md)
 - [56. Segment order and pruned anchors do not depend on the wall clock](0056-segment-order-and-anchors-without-the-clock.md)
 - [57. A decision takes one verdict, and an approval that nothing acted on is shown](0057-one-verdict-per-decision.md)
+- [58. A log line verifies only byte for byte as the writer wrote it](0058-log-lines-verify-only-as-written.md)

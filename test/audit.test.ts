@@ -34,6 +34,24 @@ test("editing ANY line is detected at that line", () => {
   assert.equal(log.verifyChain().ok, false);
 });
 
+test("found by fuzzing: a line verifies only byte for byte as written; a duplicate key, another spelling of the same JSON or bytes that are not UTF-8 are detected at that line (ADR 0058)", () => {
+  const log = fresh(); seed(log);
+  log.append({ kind: "llm-call", id: "c�", ts: "t", usage: { input: 1, output: 2 } } as any);
+  const lines = readFileSync(log.path, "utf8").trim().split("\n"), last = lines.length - 1;
+  const verifyWith = (i: number, line: Buffer) => {
+    writeFileSync(log.path, Buffer.concat(lines.map((l, k) => Buffer.concat([k === i ? line : Buffer.from(l), Buffer.from("\n")]))));
+    return log.verifyChain();
+  };
+  const at = (i: number, reason: string) => ({ ok: false, badLine: i + 1, reason });
+  assert.deepEqual(verifyWith(1, Buffer.from(`{"kind":"decision",` + lines[1].slice(1))), at(1, "not as written"));
+  assert.deepEqual(verifyWith(2, Buffer.from(lines[2].replace('":', '": '))), at(2, "not as written"));
+  assert.deepEqual(verifyWith(last, Buffer.from(lines[last].replace('"input":1,', '"input":1.0,'))), at(last, "not as written"));
+  assert.deepEqual(verifyWith(last, Buffer.from(lines[last].replace('"llm-call"', '"llm\\u002dcall"'))), at(last, "not as written"));
+  const raw = Buffer.from(lines[last]), fffd = raw.indexOf(Buffer.from("�"));
+  assert.deepEqual(verifyWith(last, Buffer.concat([raw.subarray(0, fffd), Buffer.from([0xff]), raw.subarray(fffd + 3)])), at(last, "not UTF-8"));
+  assert.deepEqual(verifyWith(last, Buffer.from(lines[last])), { ok: true });
+});
+
 test("replay reproduces the same output; altered source is refused", () => {
   const log = fresh(); const { b } = seed(log);
   const r = replay(log, b.id); assert.equal(r.reproduced, true); assert.deepEqual(r.output, { s: 12 }); assert.equal(r.steps, 3);
