@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { tokenCount, type Usage } from "./extract.js";
 
 export interface TokenBudget { period: "day" | "month"; inputTokens: number; outputTokens: number; maxOutputTokens: number }
-interface Tokens { input: number; output: number }
+export interface Tokens { input: number; output: number }
 interface State { version: 1; spent: Tokens; pending: Record<string, Tokens>; blocked?: boolean }
 export interface Reservation { file: string; id: string; tokens: Tokens }
 export class BudgetError extends Error {
@@ -19,6 +19,20 @@ const sum = (a: number, b: number) => {
 export function validateBudget(value: TokenBudget) {
   if (!value || !["day", "month"].includes(value.period) || !valid(value.inputTokens) || !valid(value.outputTokens)
     || !valid(value.maxOutputTokens) || value.maxOutputTokens < 1) throw new Error("audit_budget_config_invalid");
+}
+export type Admission = "ok" | "blocked" | "exceeded";
+export function admission(state: { spent: Tokens; pending: Record<string, Tokens>; blocked?: boolean }, limits: Tokens, request: Tokens): Admission {
+  if (state.blocked) return "blocked";
+  const pending = Object.values(state.pending);
+  const usedInput = pending.reduce((n, v) => sum(n, v.input), state.spent.input);
+  const usedOutput = pending.reduce((n, v) => sum(n, v.output), state.spent.output);
+  return request.input > limits.input - usedInput || request.output > limits.output - usedOutput ? "exceeded" : "ok";
+}
+export function charge(reserved: Tokens, usage: Usage | undefined, anthropic: boolean) {
+  const input = tokenCount(usage?.input), output = tokenCount(usage?.output);
+  const completeInput = anthropic && input !== undefined ? sum(sum(input, tokenCount(usage?.cached) ?? 0), tokenCount(usage?.cacheWrite) ?? 0) : input;
+  const charged = { input: completeInput ?? reserved.input, output: output ?? reserved.output };
+  return { charged, inputKnown: completeInput !== undefined, outputKnown: output !== undefined, overrun: charged.input > reserved.input || charged.output > reserved.output };
 }
 export class BudgetStore {
   constructor(private directory: string, private now = () => new Date()) {}
@@ -56,11 +70,9 @@ export class BudgetStore {
     if (!valid(input) || !valid(output)) throw new BudgetError(503, "audit_budget_unavailable");
     const file = this.file(hash, budget), id = randomUUID();
     return this.transact(file, (state) => {
-      if (state.blocked) throw new BudgetError(503, "audit_budget_usage_overrun");
-      const pending = Object.values(state.pending);
-      const usedInput = pending.reduce((n, v) => sum(n, v.input), state.spent.input);
-      const usedOutput = pending.reduce((n, v) => sum(n, v.output), state.spent.output);
-      if (input > budget.inputTokens - usedInput || output > budget.outputTokens - usedOutput) throw new BudgetError(429, "audit_token_budget_exceeded");
+      const verdict = admission(state, { input: budget.inputTokens, output: budget.outputTokens }, { input, output });
+      if (verdict === "blocked") throw new BudgetError(503, "audit_budget_usage_overrun");
+      if (verdict === "exceeded") throw new BudgetError(429, "audit_token_budget_exceeded");
       state.pending[id] = { input, output };
       return { file, id, tokens: { input, output } };
     });
@@ -69,16 +81,12 @@ export class BudgetStore {
     return this.transact(reservation.file, (state) => {
       const reserved = state.pending[reservation.id];
       if (!reserved) throw new BudgetError(503, "audit_budget_unavailable");
-      const input = tokenCount(usage?.input), output = tokenCount(usage?.output);
-      const completeInput = anthropic && input !== undefined
-        ? sum(sum(input, tokenCount(usage?.cached) ?? 0), tokenCount(usage?.cacheWrite) ?? 0) : input;
-      const charged = { input: completeInput ?? reserved.input, output: output ?? reserved.output };
-      state.spent.input = sum(state.spent.input, charged.input);
-      state.spent.output = sum(state.spent.output, charged.output);
-      state.blocked ||= charged.input > reserved.input || charged.output > reserved.output;
+      const result = charge(reserved, usage, anthropic);
+      state.spent.input = sum(state.spent.input, result.charged.input);
+      state.spent.output = sum(state.spent.output, result.charged.output);
+      state.blocked ||= result.overrun;
       delete state.pending[reservation.id];
-      return { charged, inputKnown: completeInput !== undefined, outputKnown: output !== undefined,
-        overrun: charged.input > reserved.input || charged.output > reserved.output };
+      return result;
     });
   }
   cancel(reservation: Reservation) {
