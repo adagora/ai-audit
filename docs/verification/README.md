@@ -20,7 +20,7 @@ The questions were about the order of steps between processes and between a requ
 ## Results at the fix of findings 3 to 6
 | Config | Expected | Result |
 |---|---|---|
-| AuditChain.cfg (2 writers x 2, rotation after 2 records, one crash, one prune, 2 anchors, one clock step back) | pass | pass, 1,109,143 distinct states |
+| AuditChain.cfg (2 writers x 2, rotation after 2 records, one crash, one prune, 2 anchors, one clock step back) | pass | pass, 1,097,723 distinct states at d67ea7c (model unchanged since 56aa128) |
 | AuditChain_nolock.cfg | fail | ChainIntact violated |
 | AuditChain_norestart.cfg (no `startSegment` for a missing current file) | fail | ChainIntact violated |
 | AuditChain_unlinkfirst.cfg (prune deletes before it records) | fail | ChainIntact violated |

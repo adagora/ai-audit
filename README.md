@@ -173,7 +173,7 @@ sequenceDiagram
   App->>App: run or skip the action, effect record
 ```
 
-The request path, in the order the proxy checks it. The console's Request flow page counts each state:
+The request path, in the order the proxy checks it. The console's Request flow page counts each stage (`STAGES` in `src/consoleModel.ts`). This chart is simplified: it leaves out the log and the disk failing, which the [request lifecycle model](docs/verification/README.md#request-lifecycle-requestlifecycletla-request-lifecyclecfg-148-model-states) covers in 148 states:
 
 ```mermaid
 stateDiagram-v2
@@ -216,29 +216,72 @@ stateDiagram-v2
   note right of gate : enforce mode rewrites the answer when a call is held
 ```
 
-A decision after the answer. The console's Decisions page counts each state:
+A decision after the answer, drawn with `/statechart` from `spec/DecisionLoop.tla` (`docs/verification/decision-loop.cfg`, 52 model states). A decision takes one verdict, an application checks for a verdict before an action the rule allows, and a wait that times out records `skipped`. The two red states are the known windows of [ADR 0057](docs/adr/0057-one-verdict-per-decision.md): an approval that comes after the application skipped, and a verdict that comes after its check. The console's Decisions page shows each decision as `waiting`, `acted`, `approved`, `overridden` or `rejected`.
 
 ```mermaid
+---
+title: "A decision after the answer: rule, verdict, action"
+---
 stateDiagram-v2
-  recorded : Decision recorded
-  waiting : Waiting for a person
-  approved : Approved
-  overridden : Overridden
-  rejected : Rejected
-  done : Action done
-  skipped : Action skipped
-  [*] --> recorded: rule result
-  recorded --> done: the rule allows its own action
-  recorded --> waiting: the rule routes it to a person
-  waiting --> approved: review
-  waiting --> overridden: review
-  waiting --> rejected: review
-  approved --> done: application runs the action
-  overridden --> skipped: the person takes over
-  rejected --> skipped
-  done --> [*]
-  skipped --> [*]
-  note right of done : an action without the rule or an approval is recorded and flagged
+  state "Legend" as legend {
+    lg0: decide
+    lg1: act
+    lg2: end
+    lg3: Breaks ApprovalIsActedOn or NeverFlagged
+    lg4: Path to the ApprovalIsActedOn or NeverFlagged bug
+  }
+  class lg0 blue
+  class lg1 yellow
+  class lg2 teal
+  class lg3 breaks
+  class lg4 bugPath
+  s0: Decision recorded
+  s1: App about to act
+  s2: Waiting for a person
+  s3: Verdict recorded, app not told yet
+  s4: App about to skip
+  s5: Action done, not recorded yet
+  s6: Done and authorized
+  s7: Skipped
+  s8: Skipped, then approved
+  s9: Done, flagged as without approval
+  [*] --> s0
+  s0 --> s2: the rule asks for a person
+  s0 --> s1: the rule allows the action and no person said no
+  s0 --> s3: the rule asks for a person
+  s0 --> s4: the rule allows the action, but a person said no first
+  s1 --> s5: the app acts
+  s2 --> s3: a person records approved or a person records taken over or a person records rejected
+  s2 --> s4: the wait times out
+  s3 --> s1: the app reads approved
+  s3 --> s4: the app reads rejected or taken over
+  s4 --> s4: a person records approved
+  s4 --> s7: the app records skipped
+  s5 --> s6: the app records done
+  s5 --> s5: a person records taken over
+  s4 --> s8: the app records skipped
+  s5 --> s9: the app records done [a verdict came after its check]
+  s7 --> s8: a person records approved
+  classDef breaks fill:#ffecee,stroke:#e72e3b,stroke-width:2.5px,color:#cd2834
+  class s0 blue
+  class s0 bugPath
+  class s1 yellow
+  class s1 bugPath
+  class s2 blue
+  class s2 bugPath
+  class s3 blue
+  class s4 yellow
+  class s4 bugPath
+  class s5 yellow
+  class s5 bugPath
+  class s6 teal
+  class s7 teal
+  class s8 teal
+  class s8 breaks
+  class s8 bugPath
+  class s9 teal
+  class s9 breaks
+  class s9 bugPath
 ```
 
 The formal model of the request lifecycle, with log failures, is in [docs/verification](docs/verification/README.md).
@@ -892,41 +935,70 @@ Later, not on this path:
   check-quotes of one answer
 ```
 
-One request, in the order `src/proxy.ts` handles it:
+One request with the log, the disk, the client and the provider failing at any step, drawn with `/statechart` from `spec/RequestLifecycle.tla` (`docs/verification/request-lifecycle.cfg`, 148 model states). It starts after the key, route and body checks; requests stopped there are refused as in the chart above, and `GET /healthz`, `/readyz`, `/metrics`, `/audit/stats` with the admin key and `GET /v1/models` are answered without a record.
 
 ```mermaid
+---
+title: "One request through the proxy, with the log, the disk, the client and the provider failing at any step"
+---
 stateDiagram-v2
-  [*] --> Received
-  Received --> Answered: GET /healthz /readyz /metrics, or /audit/stats with the admin key
-  Received --> KeyCheck: everything else
-  KeyCheck --> Refused: unknown virtual key 401, provider not allowed 403
-  KeyCheck --> Refused: unsupported route 404
-  KeyCheck --> Answered: GET /v1/models, passed through
-  KeyCheck --> BodyCheck: POST chat/completions, responses, messages, count_tokens
-  BodyCheck --> Refused: over 32 MiB 413, bad JSON, duplicate keys or nested deeper than 256 400
-  BodyCheck --> LogCheck: parsed
-  LogCheck --> Refused: log torn or unwritable 503
-  LogCheck --> Refused: model not allowed for this key 403
-  LogCheck --> Inspecting: alias applied, every string, key and nested JSON scanned
-  Inspecting --> Rejected: file id or remote URL (enforcing modes), no sandbox, missing tools, attachment not inspectable 422
-  Inspecting --> Deciding: attachments OCR'd and scanned, injection signals noted
-  Deciding --> Blocked: no-go finding, or a finding that cannot be masked 409
-  Deciding --> LogRecheck: clean or advisory sends the original bytes, redact sends a masked copy
-  LogRecheck --> Refused: log broke in the meantime 503
-  LogRecheck --> Upstream: forwarded
-  Upstream --> Recorded: deadline 408 or unreachable 502
-  Upstream --> Streaming: response headers
-  Streaming --> Recorded: response delivered unchanged
-  Streaming --> Lost: append or any later step fails after delivery
-  Rejected --> Recorded
-  Blocked --> Recorded
-  Recorded --> [*]
-  Refused --> [*]
-  Answered --> [*]
-  Lost --> [*]
+  state "Legend" as legend {
+    lg0: decide
+    lg1: provider
+    lg2: end
+    lg3: Breaks NoForwardWithoutLog
+    lg4: Path to the NoForwardWithoutLog bug
+  }
+  class lg0 blue
+  class lg1 yellow
+  class lg2 teal
+  class lg3 breaks
+  class lg4 bugPath
+  s0: Request received
+  s1: Stopped, failure counted
+  s2: Inspected and decided
+  s3: Stopped and recorded
+  s4: Refused, refusal recorded
+  s5: Forwarded to the provider
+  s6: Answer streaming to the client
+  s7: Answer delivered, record not written yet
+  s8: Delivered, record lost and counted
+  s9: Delivered and recorded
+  [*] --> s0
+  s0 --> s1: the log is broken: 503
+  s0 --> s2: the log is writable
+  s2 --> s3: blocked or rejected, recorded
+  s2 --> s4: an internal error
+  s2 --> s5: the log is still writable, the proxy forwards
+  s5 --> s3: no answer from the provider, recorded
+  s5 --> s6: the provider answers
+  s2 --> s1: the log broke during inspection: 503 or blocked or rejected, but the record fails or an internal error
+  s5 --> s1: no answer from the provider, the record fails
+  s6 --> s1: an internal error
+  s6 --> s7: the answer is delivered
+  s7 --> s8: an internal error or the record fails
+  s7 --> s9: the record is written
+  classDef breaks fill:#ffecee,stroke:#e72e3b,stroke-width:2.5px,color:#cd2834
+  class s0 blue
+  class s0 bugPath
+  class s1 teal
+  class s2 blue
+  class s2 bugPath
+  class s3 teal
+  class s4 teal
+  class s5 yellow
+  class s5 bugPath
+  class s6 yellow
+  class s6 bugPath
+  class s7 yellow
+  class s7 bugPath
+  class s8 teal
+  class s8 breaks
+  class s8 bugPath
+  class s9 teal
 ```
 
-`Recorded` appends exactly one hash-chained `llm-call`. `Refused` forwards nothing and appends one content-free `refusal` record, except the 503 for an unavailable log. `Lost` is the window described in [ADR 0016](docs/adr/0016-fail-closed-when-log-unavailable.md). The client already has the body, so the failure is counted in `ai_audit_log_write_failures_total` and printed on stderr as `audit_log_write_failed`. The reason is an error code such as `ENOSPC`, or a class such as `TypeError`, never the message. The append lock and the anchor check are drawn in [docs/verification](docs/verification/README.md). TLA+ models live in `spec/`.
+`Delivered and recorded` appends exactly one hash-chained `llm-call`. `Refused, refusal recorded` forwards nothing and appends one content-free `refusal` record; a broken log is refused with 503 and no record. `Delivered, record lost and counted` is the window described in [ADR 0016](docs/adr/0016-fail-closed-when-log-unavailable.md), red in the chart. The client already has the body, so the failure is counted in `ai_audit_log_write_failures_total` and printed on stderr as `audit_log_write_failed`. The reason is an error code such as `ENOSPC`, or a class such as `TypeError`, never the message. The append lock and the anchor check are drawn in [docs/verification](docs/verification/README.md). TLA+ models live in `spec/`.
 
 Attachment workers run under bubblewrap with no network, no capabilities, and an empty environment. Read-only mounts are `/usr`, the Node install, and the worker script. A worker cannot read the log, the session key, the config, or your home directory. Limits, from the preflight: worker `RLIMIT_DATA` 4 GiB, CPU 90 s, files 64 MiB, 128 open files. Each native tool also gets `RLIMIT_AS` 1.5 GiB. Wall clock is 120 s. Output caps are 16 MiB for the worker and for each tool. Crossing one of those is 422.
 
