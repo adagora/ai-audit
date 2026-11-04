@@ -8,7 +8,7 @@ const { recordQdl } = await import(DIST + "qdl.js");
 const { createDecisionPackage, packageJson, parseDecisionPackage, renderDecisionSvg } = await import(DIST + "decisionPackage.js");
 const { parseAttestation } = await import(DIST + "attestation.js");
 
-const policy = JSON.parse(readFileSync(new URL("../../examples/quineling-quote/policy.json", import.meta.url), "utf8"));
+const policy = JSON.parse(readFileSync(new URL("../../examples/evaluation/machining-policy.json", import.meta.url), "utf8"));
 const log = new AuditLog(join(mkdtempSync(join(tmpdir(), "fuzz-receipt-")), "audit.jsonl"));
 const recorded = await recordQdl(log, { systemId: "fuzz", useCase: "quote", input: "x" }, { intent: policy }, { minutes: 42, rate: 4.5, setup: 120, material: 85, llmPrice: 274 });
 const BUNDLE = await createDecisionPackage(log, recorded.decision.id);

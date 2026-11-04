@@ -7,7 +7,7 @@ import { anchor, AuditLog, canon, sha256 } from "../src/audit.js";
 import { mockUpstream, startProxy } from "./helpers.js";
 
 const skip = Number(process.versions.node.split(".")[0]) < 22 ? "Quinelings SDK needs Node >= 22" : false;
-const policy = JSON.parse(readFileSync(new URL("../../examples/decision-receipt/policy.json", import.meta.url), "utf8"));
+const policy = JSON.parse(readFileSync(new URL("../../test/fixtures/floor-quote.json", import.meta.url), "utf8"));
 const inputs = { minutes: 42, rate: 4.5, proposed: 100 };
 const fresh = () => new AuditLog(join(mkdtempSync(join(tmpdir(), "receipt-")), "audit.jsonl"));
 

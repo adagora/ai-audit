@@ -1,7 +1,7 @@
 # Deterministic decisions (optional, Quinelings, Node ≥ 22)
 **TL;DR: where Quinelings helps this project**
 - **Reproduces how a decision was calculated, long after.** The log carries the decision program itself. `ai-audit replay` rebuilds it from the log alone and recomputes the result, and `ai-audit policies` shows which policy version decided and what changed since. This does not authenticate the input facts or establish that the rule was wise.
-- **Compares two rules on one recorded session.** `npm run example:lab` replays two session governors over the same proxy log, shows the first decision where they disagree, and reruns a changed threshold in a fresh process ([ADR 0035](adr/0035-read-only-session-policy-comparison.md)).
+- **Compares two rules on one recorded session.** `npm run build && node examples/evaluation/policy-lab/run.mjs` replays two session governors over the same proxy log, shows the first decision where they disagree, and reruns a changed threshold in a fresh process ([ADR 0035](adr/0035-read-only-session-policy-comparison.md)).
 - **Runs a fixed program, safely.** A program always stops, cannot read files or the network, and is refused if it invents an operation or mixes up units. The built-in `replay()` runs JavaScript in `node:vm`, which is only safe for trusted code.
 - **Keeps secrets out of the evidence.** Inputs and programs are checked with the proxy's rules before anything runs; a customer e-mail or an API key stops the decision instead of landing in the log.
 - **Keeps the hard cases and shows real use.** Refused and failed evaluations are recorded too, each decision links to the proxied LLM call (`llmCallId` is the proxy's `x-request-id`), and when agents run Quinelings on their own through MCP, the proxy logs which programs they compiled and ran, as hashes only.
@@ -36,7 +36,7 @@ console.log(new Session().recover({ source: program.source }).id === program.id)
 It prints `[ 189 ]`, then `true`: a fresh session rebuilt the same program from its source. Bad programs and inputs are refused with a `QdlError` before anything runs: mixed-up units (`unit-type`), a value outside its declared range such as `minutes: -5` (`refinement`), a missing input (`missing-input`) or an operation that does not exist, for example an LLM inventing a `fetch` step (`invalid-input`). Errors at run time, such as division by zero, give a `failed` run with a diagnostic.
 
 ## Policy lab
-`npm run example:lab` builds and runs a synthetic session through the proxy and a mock provider. Two governors evaluate every recorded call, including calls without usage. The demo compares thresholds, exports changed source, and reproduces the result in a fresh process. The inspection page checks that both decisions belong to the same call and inputs and that their records and replay agree. Selecting a creature region selects a calculation step.
+`npm run build && node examples/evaluation/policy-lab/run.mjs` builds and runs a synthetic session through the proxy and a mock provider. Two governors evaluate every recorded call, including calls without usage. The demo compares thresholds, exports changed source, and reproduces the result in a fresh process. The inspection page checks that both decisions belong to the same call and inputs and that their records and replay agree. Selecting a creature region selects a calculation step.
 
 To compare thresholds on an existing log:
 
@@ -82,13 +82,13 @@ sequenceDiagram
   A->>L: decision with llmCallId = x-request-id, plus its :qdl step
   A->>L: review from approve
 ```
-The policy file the commands below use is [`examples/quineling-quote/policy.json`](../examples/quineling-quote/policy.json): price from CAM minutes, shop rate, setup and material with a 150 PLN floor; auto-approve only quotes up to 1000 PLN where the LLM's own price is within 5%, otherwise route to human review. The agent writes to the same log file as the proxy; the append lock keeps one chain ([ADR 0016](adr/0016-fail-closed-when-log-unavailable.md)).
+The policy file the commands below use is [`examples/evaluation/machining-policy.json`](../examples/evaluation/machining-policy.json): price from CAM minutes, shop rate, setup and material with a 150 PLN floor; auto-approve only quotes up to 1000 PLN where the LLM's own price is within 5%, otherwise route to human review. The agent writes to the same log file as the proxy; the append lock keeps one chain ([ADR 0016](adr/0016-fail-closed-when-log-unavailable.md)).
 ```js
 import { readFileSync } from "node:fs";
 import { AuditLog } from "./dist/src/audit.js";
 import { recordQdl, replayQdl } from "./dist/src/qdl.js";
 
-const policy = JSON.parse(readFileSync("examples/quineling-quote/policy.json", "utf8"));
+const policy = JSON.parse(readFileSync("examples/evaluation/machining-policy.json", "utf8"));
 const res = await fetch("http://127.0.0.1:8787/v1/chat/completions", {
   method: "POST",
   headers: { "content-type": "application/json", authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
@@ -144,8 +144,8 @@ Review exact source, inputs and outputs before sharing. They may contain materia
 ## From the command line
 Any script or agent, in any language, can do the same without JavaScript ([ADR 0023](adr/0023-decision-records-cli-and-outcomes.md)). Take `REQUEST_ID` from the `x-request-id` header of the proxied call; `--llm-call` must name an `llm-call` record already in the log. The provider's own request id (OpenAI sends one) comes back as `x-upstream-request-id`.
 ```sh
-node dist/src/cli.js decide --log audit.jsonl --policy examples/quineling-quote/policy.json \
-  --inputs examples/quineling-quote/inputs.json --system-id cad-quote --use-case machining-quote --llm-call "$REQUEST_ID"
+node dist/src/cli.js decide --log audit.jsonl --policy examples/evaluation/machining-policy.json \
+  --inputs examples/evaluation/machining-inputs.json --system-id cad-quote --use-case machining-quote --llm-call "$REQUEST_ID"
 node dist/src/cli.js approve --log audit.jsonl --decision "$DECISION" --reviewer "A. Nowak" --verdict approved --note "policy price 394 PLN"
 node dist/src/cli.js replay --log audit.jsonl --decision "$DECISION"
 ```

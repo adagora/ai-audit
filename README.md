@@ -49,7 +49,7 @@ There is no install script. This repository is not published on npm. `npm instal
 | Your log | JSONL on disk. One record per inspected call. A daily anchor file kept somewhere else. |
 | Overhead | About 0.6 to 0.7 ms p50 and about 1.1 ms p95 on a loopback mock, redaction included. See [the 2026-10-20 run](docs/performance/2026-10-20/README.md). |
 
-TypeScript, Node's standard library, no runtime dependencies. [Quinelings](https://github.com/CharlesHoskinson/quinelings) is optional and is not on the request path. Decisions are in [docs/adr](docs/adr/).
+TypeScript, Node's standard library, no runtime dependencies. [Quinelings](https://github.com/CharlesHoskinson/quinelings) is optional and is not on the request path. Decisions are in [docs/adr](docs/adr).
 
 ## What it looks like
 
@@ -130,7 +130,7 @@ The OpenAI API key remains in the proxy process as `AI_AUDIT_UPSTREAM_OPENAI_KEY
 
 Optional request headers `x-audit-system-id` and `x-audit-use-case` are copied onto the log record as labels. With a [use-case table](#use-cases), the use case also selects limits.
 
-For a browser-driven integration test with your own OpenAI API key, run `npm run example:workflow:real` and follow the [workflow cockpit guide](examples/workflow/README.md). The same guide shows how to point UniiChat at the running proxy. Use `npm run example:workflow` for deterministic mock-provider scenarios.
+For a browser-driven integration test with your own OpenAI API key, run `npm run build && bash scripts/workflow-real.sh` and follow the [workflow cockpit guide](examples/workflow/README.md). The same guide shows how to point UniiChat at the running proxy. Use `npm run example:workflow` for deterministic mock-provider scenarios.
 
 ## Design
 
@@ -808,8 +808,8 @@ The model proposes. A fixed policy decides. A person approves. `replay` runs the
 
 ```bash
 ai-audit decide \
-  --policy examples/quineling-quote/policy.json \
-  --inputs examples/quineling-quote/inputs.json \
+  --policy examples/evaluation/machining-policy.json \
+  --inputs examples/evaluation/machining-inputs.json \
   --system-id shop \
   --use-case quote \
   --llm-call "$REQUEST_ID" \
@@ -838,11 +838,11 @@ ai-audit effect --decision "$DECISION_ID" --action send-quote-to-customer --stat
 
 `replay` exits 0 when the output matches and 1 when it does not. A refusal stored without its inputs cannot be rebuilt. That code is `audit_qdl_not_replayable`. `node:vm` replay of a plain JavaScript step is not a sandbox. Run only code you trust there.
 
-`npm run example:lab` loads a fake session through the proxy and a mock provider, then compares two policies on it. The walkthrough, including what Quinelings will and will not do, is [docs/decisions.md](docs/decisions.md).
+`npm run build && node examples/evaluation/policy-lab/run.mjs` loads a fake session through the proxy and a mock provider, then compares two policies on it. The walkthrough, including what Quinelings will and will not do, is [docs/decisions.md](docs/decisions.md).
 
-`npm run example:evaluate` checks a QDL machining quote policy on labeled cases. `npm run example:evaluate:openai -- --output /private/tmp/quote-evaluation.json` also evaluates the same facts with OpenAI Decisions, recording misses, false alerts, repeat changes, latency and usage. The evaluator runs offline from proxy traffic; see [the evaluation guide](examples/evaluation/README.md).
+`npm run example:evaluate` checks a QDL machining quote policy on labeled cases. `npm run example:evaluate -- --openai --output /private/tmp/quote-evaluation.json` also evaluates the same facts with OpenAI Decisions, recording misses, false alerts, repeat changes, latency and usage. The evaluator runs offline from proxy traffic; see [the evaluation guide](examples/evaluation/README.md).
 
-`npm run example:wycena -- --console` prices five toolroom parts with a 64-node QDL rule and fixed company rates, then opens the operator console so each quote waits for a review. See [the toolroom quote rule](examples/quineling-wycena/README.md). [examples/live-mail](examples/live-mail/README.md) runs the same rule on four synthetic customer mails with the real proxy, a real model, the console in a browser and the CLI, each as its own process.
+`npm run example:wycena -- --console` prices five toolroom parts with a 64-node QDL rule and fixed company rates, then opens the operator console so each quote waits for a review. See [the toolroom quote rule](examples/quineling-wycena/README.md). [examples/quineling-wycena/live-mail](examples/quineling-wycena/live-mail/README.md) runs the same rule on four synthetic customer mails with the real proxy, a real model, the console in a browser and the CLI, each as its own process.
 
 ## Configuration
 

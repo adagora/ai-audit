@@ -1,10 +1,10 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { AuditLog } from "../../dist/src/audit.js";
-import { effectAuthorized } from "../../dist/src/verdict.js";
+import { AuditLog } from "../../../dist/src/audit.js";
+import { effectAuthorized } from "../../../dist/src/verdict.js";
 
 const args = process.argv.slice(2), run = args[args.indexOf("--run") + 1];
-if (!args.includes("--run") || !run) { console.error("usage: node examples/live-mail/summary.mjs --run DIR"); process.exit(2); }
+if (!args.includes("--run") || !run) { console.error("usage: node examples/quineling-wycena/live-mail/summary.mjs --run DIR"); process.exit(2); }
 const log = new AuditLog(join(run, "audit.jsonl")), records = log.read(), raw = log.files().map((f) => readFileSync(f, "utf8")).join("");
 const kinds = {};
 for (const r of records) kinds[r.kind] = (kinds[r.kind] ?? 0) + 1;

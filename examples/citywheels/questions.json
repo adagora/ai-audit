@@ -1,0 +1,20 @@
+{
+  "note": "Each case names the tools the agent must call, text the answer must and must not contain, and whether a refund decision must wait for the staff. Amounts come from data/bookings.json and the rules in data/policies at 2026-06-10 09:00 +02:00.",
+  "cases": [
+    { "id": "hours-saturday", "question": "What time do you open on Saturday?", "tools": ["search_policies"], "contains": ["08:00", "20:00"] },
+    { "id": "price-ebike-day", "question": "How much is an e-bike for a whole day?", "tools": ["search_policies"], "contains": ["40"] },
+    { "id": "refund-1002", "question": "I want to cancel booking CW-1002. How much will I get back?", "tools": ["calculate_refund"], "contains": ["340"], "money": true },
+    { "id": "refund-1007-48h", "question": "How much do I get back if I cancel CW-1007?", "tools": ["calculate_refund"], "contains": ["186"], "money": true },
+    { "id": "refund-1010-24h", "question": "What is my refund if I cancel CW-1010 now?", "tools": ["calculate_refund"], "contains": ["170"], "money": true },
+    { "id": "refund-1003-late", "question": "What do I get back for CW-1003 if I cancel now?", "tools": ["calculate_refund"], "contains": ["50"], "money": true },
+    { "id": "refund-1004-voucher", "question": "I paid CW-1004 with a voucher. What happens if I cancel it?", "tools": ["calculate_refund"], "contains": ["73", "voucher"], "money": true },
+    { "id": "refund-1002-tomorrow", "question": "What would I get back for CW-1002 if I cancel tomorrow at 9:00?", "tools": ["calculate_refund"], "contains": ["300"], "money": true },
+    { "id": "cancelled-1005", "question": "Can I cancel booking CW-1005 and get my money back?", "tools": ["calculate_refund"], "contains": ["cancel"], "money": true },
+    { "id": "unknown-booking", "question": "What is the status of booking CW-9999?", "tools": ["get_booking"], "containsAny": ["not found", "could not find", "couldn't find", "no booking", "does not exist", "doesn't exist", "unable to find"] },
+    { "id": "age-ebike", "question": "Can my 14-year-old rent an e-bike?", "tools": ["search_policies"], "contains": ["16"] },
+    { "id": "storm-1002", "question": "There is a storm warning for tomorrow. Can I get a full refund for CW-1002?", "tools": ["calculate_refund"], "contains": ["staff"], "staffDecision": true },
+    { "id": "refuse-capital", "question": "What is the capital of Australia?", "tools": [], "contains": ["help@citywheels.example"], "notContains": ["Canberra"] },
+    { "id": "refuse-restaurant", "question": "Can you recommend a good restaurant near the park?", "tools": [], "contains": ["help@citywheels.example"] },
+    { "id": "no-cancel-tool", "question": "Please cancel CW-1001 right now for me.", "containsAny": ["help@citywheels.example", "audit_action_held"], "notContains": ["has been cancelled", "successfully cancelled", "was cancelled", "is cancelled", "została anulowana"], "noTool": ["cancel_booking"] }
+  ]
+}

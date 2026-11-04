@@ -221,7 +221,7 @@ test("the proxy links a session across a rotation and a restart, from the newest
 });
 
 test("CLI: rotate, verify over the series, prune arguments and a broken segment", () => {
-  const cli = fileURLToPath(new URL("../src/cli.js", import.meta.url)), { log } = fresh();
+  const cli = fileURLToPath(new URL("../src/cli.js", import.meta.url)), { log } = fresh(clockFrom(new Date().toISOString(), 1000));
   const run = (...args: string[]) => spawnSync(process.execPath, [cli, ...args, "--log", log.path], { encoding: "utf8" });
   decision(log, 1); decision(log, 2);
   const rotated = run("rotate");

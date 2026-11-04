@@ -9,7 +9,7 @@ import { AuditLog, report } from "../src/audit.js";
 
 const skip = Number(process.versions.node.split(".")[0]) < 22 ? "Quinelings SDK needs Node >= 22" : false;
 const cli = fileURLToPath(new URL("../src/cli.js", import.meta.url));
-const v1 = JSON.parse(readFileSync(new URL("../../examples/quineling-quote/policy.json", import.meta.url), "utf8"));
+const v1 = JSON.parse(readFileSync(new URL("../../examples/evaluation/machining-policy.json", import.meta.url), "utf8"));
 const v2 = structuredClone(v1);
 v2.name = "CAD machining quote policy v2";
 v2.inputs.find((i: any) => i.id === "floor").value = 160;

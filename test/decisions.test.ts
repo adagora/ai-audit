@@ -10,8 +10,8 @@ import { sha256 } from "../src/audit.js";
 
 const skip = Number(process.versions.node.split(".")[0]) < 22 ? "Quinelings SDK needs Node >= 22" : false;
 const cli = fileURLToPath(new URL("../src/cli.js", import.meta.url));
-const policy = fileURLToPath(new URL("../../examples/quineling-quote/policy.json", import.meta.url));
-const inputs = fileURLToPath(new URL("../../examples/quineling-quote/inputs.json", import.meta.url));
+const policy = fileURLToPath(new URL("../../examples/evaluation/machining-policy.json", import.meta.url));
+const inputs = fileURLToPath(new URL("../../examples/evaluation/machining-inputs.json", import.meta.url));
 const up = await mockUpstream(), px = await startProxy(up.url, "redact");
 after(() => { px.close(); up.close(); });
 const dir = mkdtempSync(join(tmpdir(), "decisions-"));

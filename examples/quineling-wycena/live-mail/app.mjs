@@ -5,9 +5,9 @@ import { fileURLToPath } from "node:url";
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => args.includes(name) ? args[args.indexOf(name) + 1] : fallback;
-const repo = fileURLToPath(new URL("../..", import.meta.url)), here = fileURLToPath(new URL(".", import.meta.url));
+const repo = fileURLToPath(new URL("../../..", import.meta.url)), here = fileURLToPath(new URL(".", import.meta.url));
 const run = option("--run"), proxy = option("--proxy", "http://127.0.0.1:8787"), model = option("--model", "gpt-4o-mini");
-if (!run) { console.error("usage: node examples/live-mail/app.mjs --run DIR [--proxy URL] [--model M] [--waits JSON] [--mails FILE...]"); process.exit(2); }
+if (!run) { console.error("usage: node examples/quineling-wycena/live-mail/app.mjs --run DIR [--proxy URL] [--model M] [--waits JSON] [--mails FILE...]"); process.exit(2); }
 const waits = { "mail-4": 15, ...JSON.parse(option("--waits", "{}")) };
 const mails = args.includes("--mails") ? args.slice(args.indexOf("--mails") + 1) : readdirSync(join(here, "mails")).sort().map((f) => join(here, "mails", f));
 const key = readFileSync(join(run, "client.key"), "utf8").trim(), logPath = join(run, "audit.jsonl"), outbox = join(run, "outbox");

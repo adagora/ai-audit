@@ -1,0 +1,183 @@
+{
+  "schemaVersion": 1,
+  "owner": "demo-operator",
+  "currency": "EUR",
+  "downstreamHarmExcludesClassification": true,
+  "trafficWeights": {
+    "refund": 1
+  },
+  "mistakeCosts": {
+    "refund": {
+      "helpdesk": 5000
+    }
+  },
+  "maxCriticalFailureRate": {
+    "refund": 0
+  },
+  "samples": [
+    {
+      "family": "demo-0",
+      "intent": "refund",
+      "truthReference": "synthetic-policy-fixture",
+      "sourceReference": "synthetic-example-only",
+      "kind": "synthetic",
+      "sampling": "development",
+      "human": {
+        "predictedIntent": "refund",
+        "outcome": "resolved",
+        "criticalFailure": false,
+        "costs": [
+          {
+            "kind": "model",
+            "amountMinor": 0,
+            "basis": "estimate",
+            "reference": "synthetic-example-only"
+          },
+          {
+            "kind": "review",
+            "amountMinor": 200,
+            "basis": "estimate",
+            "reference": "synthetic-example-only"
+          },
+          {
+            "kind": "execution",
+            "amountMinor": 0,
+            "basis": "estimate",
+            "reference": "synthetic-example-only"
+          },
+          {
+            "kind": "rework",
+            "amountMinor": 0,
+            "basis": "estimate",
+            "reference": "synthetic-example-only"
+          },
+          {
+            "kind": "harm",
+            "amountMinor": 0,
+            "basis": "estimate",
+            "reference": "synthetic-example-only"
+          }
+        ]
+      },
+      "candidate": {
+        "predictedIntent": "refund",
+        "outcome": "resolved",
+        "criticalFailure": false,
+        "costs": [
+          {
+            "kind": "model",
+            "amountMinor": 1,
+            "basis": "estimate",
+            "reference": "synthetic-example-only"
+          },
+          {
+            "kind": "review",
+            "amountMinor": 0,
+            "basis": "estimate",
+            "reference": "synthetic-example-only"
+          },
+          {
+            "kind": "execution",
+            "amountMinor": 0,
+            "basis": "estimate",
+            "reference": "synthetic-example-only"
+          },
+          {
+            "kind": "rework",
+            "amountMinor": 400,
+            "basis": "estimate",
+            "reference": "synthetic-example-only"
+          },
+          {
+            "kind": "harm",
+            "amountMinor": 0,
+            "basis": "estimate",
+            "reference": "synthetic-example-only"
+          }
+        ]
+      }
+    },
+    {
+      "family": "demo-1",
+      "intent": "refund",
+      "truthReference": "synthetic-policy-fixture",
+      "sourceReference": "synthetic-example-only",
+      "kind": "synthetic",
+      "sampling": "development",
+      "human": {
+        "predictedIntent": "refund",
+        "outcome": "resolved",
+        "criticalFailure": false,
+        "costs": [
+          {
+            "kind": "model",
+            "amountMinor": 0,
+            "basis": "estimate",
+            "reference": "synthetic-example-only"
+          },
+          {
+            "kind": "review",
+            "amountMinor": 200,
+            "basis": "estimate",
+            "reference": "synthetic-example-only"
+          },
+          {
+            "kind": "execution",
+            "amountMinor": 0,
+            "basis": "estimate",
+            "reference": "synthetic-example-only"
+          },
+          {
+            "kind": "rework",
+            "amountMinor": 0,
+            "basis": "estimate",
+            "reference": "synthetic-example-only"
+          },
+          {
+            "kind": "harm",
+            "amountMinor": 0,
+            "basis": "estimate",
+            "reference": "synthetic-example-only"
+          }
+        ]
+      },
+      "candidate": {
+        "predictedIntent": "refund",
+        "outcome": "resolved",
+        "criticalFailure": false,
+        "costs": [
+          {
+            "kind": "model",
+            "amountMinor": 1,
+            "basis": "estimate",
+            "reference": "synthetic-example-only"
+          },
+          {
+            "kind": "review",
+            "amountMinor": 0,
+            "basis": "estimate",
+            "reference": "synthetic-example-only"
+          },
+          {
+            "kind": "execution",
+            "amountMinor": 0,
+            "basis": "estimate",
+            "reference": "synthetic-example-only"
+          },
+          {
+            "kind": "rework",
+            "amountMinor": 400,
+            "basis": "estimate",
+            "reference": "synthetic-example-only"
+          },
+          {
+            "kind": "harm",
+            "amountMinor": 0,
+            "basis": "estimate",
+            "reference": "synthetic-example-only"
+          }
+        ]
+      }
+    }
+  ]
+}

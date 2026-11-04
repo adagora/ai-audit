@@ -61,7 +61,7 @@ export function scoreRows(rows: QuoteRow[], split: QuoteCase["split"]) {
 export async function evaluateQuotes(dataset: QuoteDataset, options: { repeats: number; apiKey?: string; fetcher?: typeof fetch; endpoint?: string }) {
   if (!Number.isInteger(options.repeats) || options.repeats < 0 || options.repeats > 10 || (options.repeats > 0 && !options.apiKey)) throw new Error("audit_eval_options_invalid");
   const m = await import("@quinelings/agent-sdk/v1").catch(() => { throw new Error("audit_qdl_unavailable"); });
-  const policy = JSON.parse(readFileSync(new URL("../../examples/quineling-quote/policy.json", import.meta.url), "utf8"));
+  const policy = JSON.parse(readFileSync(new URL("../../examples/evaluation/machining-policy.json", import.meta.url), "utf8"));
   const session = new m.Session();
   const artifact = session.compile(policy);
   const recovered = new m.Session();

@@ -30,7 +30,7 @@ test("example: the toolroom quote rule prices five parts with the company rates 
 });
 
 test("example: a policy lab replays two session governors, then a changed threshold in a fresh process", { skip }, () => {
-  const r = spawnSync(process.execPath, [fileURLToPath(new URL("../../examples/policy-lab/run.mjs", import.meta.url))], { encoding: "utf8" });
+  const r = spawnSync(process.execPath, [fileURLToPath(new URL("../../examples/evaluation/policy-lab/run.mjs", import.meta.url))], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
   const line = (name: string) => { const found = r.stdout.match(new RegExp(`^${name}: (.+)$`, "m")); assert.ok(found, name); return found[1]; };
   assert.equal(line("forwarding"), "llm-calls only");

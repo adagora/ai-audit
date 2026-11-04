@@ -1,0 +1,36 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
+import { caseworkFixture } from "./caseworkFixture.js";
+
+test("qualification CLI captures an explicit release, reopens it, reports missing authority and uses documented exits", () => {
+  const f = caseworkFixture(), cli = fileURLToPath(new URL("../../scripts/qualification.mjs", import.meta.url));
+  const run = (...args: string[]) => spawnSync(process.execPath, [cli, ...args], { encoding: "utf8" });
+  const p = f.qualifications.load(f.request.packageDigest);
+  const { digest, format, version, createdAt, components, suite, report, calibration, ...metadata } = p;
+  writeFileSync(join(f.root, "component.json"), "synthetic-component");
+  writeFileSync(join(f.root, "suite.json"), f.qualifications.read(suite));
+  writeFileSync(join(f.root, "report.json"), f.qualifications.read(report));
+  writeFileSync(join(f.root, "current.json"), JSON.stringify(f.current));
+  const selections = Object.fromEntries(Object.keys(components).map((name) => [name, { root: ".", files: ["component.json"] }]));
+  const spec = join(f.root, "spec.json"), store = join(f.root, "captured");
+  writeFileSync(spec, JSON.stringify({ ...metadata, components: selections, suiteFile: "suite.json", reportFile: "report.json" }));
+  const captured = run("capture", store, spec);
+  assert.equal(captured.status, 0, captured.stderr);
+  const value = JSON.parse(captured.stdout);
+  assert.equal(value.assessment.approval, "not-recorded");
+  assert.equal(value.assessment.readyForApproval, false);
+  const listed = run("list", store);
+  assert.equal(listed.status, 0);
+  assert.equal(JSON.parse(listed.stdout).length, 1);
+  const inspected = run("inspect", store, value.package.digest, join(f.root, "current.json"));
+  assert.equal(inspected.status, 0, inspected.stderr);
+  assert.equal(JSON.parse(inspected.stdout).assessment.applicable, true);
+  assert.equal(run("inspect", store, "unknown").status, 2);
+  assert.equal(run("list", store, "extra").status, 2);
+  writeFileSync(join(f.root, "report.json"), JSON.stringify({ passed: false }));
+  assert.equal(run("capture", store, spec).status, 1);
+});

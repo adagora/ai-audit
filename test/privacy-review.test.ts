@@ -11,7 +11,7 @@ import { mockUpstream, PESEL } from "./helpers.js";
 
 const skip = Number(process.versions.node.split(".")[0]) < 22 ? "Quinelings SDK needs Node >= 22" : false;
 const cli = fileURLToPath(new URL("../src/cli.js", import.meta.url));
-const policy = JSON.parse(readFileSync(new URL("../../examples/quineling-quote/policy.json", import.meta.url), "utf8"));
+const policy = JSON.parse(readFileSync(new URL("../../examples/evaluation/machining-policy.json", import.meta.url), "utf8"));
 const quote = { minutes: 42, rate: 4.5, setup: 120, material: 85, llmPrice: 274 };
 const fresh = () => new AuditLog(join(mkdtempSync(join(tmpdir(), "privacy-")), "audit.jsonl"));
 const call = (id: string, name: string) => ({ id, type: "function", function: { name, arguments: "{}" } });

@@ -11,7 +11,7 @@ import { metrics } from "../src/proxy.js";
 import { startProxy } from "./helpers.js";
 
 const skip = Number(process.versions.node.split(".")[0]) < 22 ? "Quinelings SDK needs Node >= 22" : false;
-const policy = JSON.parse(readFileSync(new URL("../../examples/quineling-quote/policy.json", import.meta.url), "utf8"));
+const policy = JSON.parse(readFileSync(new URL("../../examples/evaluation/machining-policy.json", import.meta.url), "utf8"));
 const quote = { minutes: 42, rate: 4.5, setup: 120, material: 85, llmPrice: 274 };
 const refusedText = JSON.stringify({ error: { code: "refinement", path: "$.bindings.minutes", message: "Number is below minimum" } });
 const mcpErrorText = "MCP error -32602: Input validation error: Invalid arguments for tool quineling_v1_compile: Invalid input at intent.steps[14]";

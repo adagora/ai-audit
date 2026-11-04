@@ -1,0 +1,17 @@
+# Paired human and candidate economics
+
+`src/caseworkEconomics.ts` analyzes an operator-attested dataset; it does not change routing or authority. The Outcomes view accepts JSON and can load `examples/citywheels/workbench/economics.sample.json`. The endpoint `POST /api/casework/economics/analyze` accepts `{dataset}` for an authenticated operator, returns analysis, and does not retain the supplied dataset. Use sanitized references without customer content.
+
+The synthetic example uses development estimates. It intentionally produces no representative ranking. Its per-sample diagnostics still show handling costs. No real human baseline has been collected or production advantage established.
+
+A version 1 dataset names `owner`, `currency`, `trafficWeights`, `mistakeCosts`, `maxCriticalFailureRate`, `samples`, and explicitly sets `downstreamHarmExcludesClassification:true`. Each sample has one unique source `family`, actual `intent`, independent `truthReference`, `sourceReference`, source `kind` (`representative` or `synthetic`), selection `sampling` (`random`, `risk-selected` or `development`) and paired `human`/`candidate` observations.
+
+Each handling observation names `predictedIntent` (or null), `outcome` (`resolved`, `failed`, `unresolved`, `reopened`, `disputed`, or null), `criticalFailure` (Boolean or null), and `costs`. A cost has `kind`, integer nonnegative `amountMinor`, `basis` (`measured` or `estimate`) and `reference`. The five components are model, review, execution, rework and downstream harm. Explicitly measured zero is valid; an absent component remains unknown. Terminal outcomes are resolved or failed; unfinished outcomes cannot establish final handling cost.
+
+The intent mistake-cost matrix separately prices classification errors. Correct classification costs zero; an unpriced error stays unknown. Downstream harm must exclude classification loss to avoid counting it twice. The analyzer cannot verify that accounting attestation.
+
+Representative mixture estimates use only random representative source families. Every weighted intent needs complete paired costs and terminal outcomes. Explicit external intent weights sum to one; sample frequencies do not substitute for traffic weights. Duplicate families are rejected so repeats cannot inflate population support. Risk-selected and synthetic records remain separate diagnostics. Sampling and actual independence are operator claims, not facts established by distinct identifiers.
+
+Outputs include per-intent means, complete/measured coverage, source counts, resolved counts, human/candidate observed critical rates, paired cost differences and descriptive standard errors when there are at least two independent pairs per weighted intent. Costs marked as estimates remain visible and cannot support a measured ranking. Missing evidence, unsafe integer totals, unknown critical outcomes or absent severe-outcome limits produce explicit reasons and no supported ranking. A breached severe-outcome limit blocks ranking even with low mean cost; a risk-selected critical incident also breaches an explicit zero-tolerance limit.
+
+A supported comparison means internally complete attested descriptive evidence. It is not a confidence bound, causal result, population safety guarantee or production qualification. Hard limits compare observed samples; zero observed failures does not prove zero population risk. No real customer data or paid provider calls are needed for the supplied tests.

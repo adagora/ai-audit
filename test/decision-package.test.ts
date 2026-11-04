@@ -9,7 +9,7 @@ import { AuditLog, canon, sha256 } from "../src/audit.js";
 import { recordQdl } from "../src/qdl.js";
 import { createDecisionPackage, packageJson, parseDecisionPackage, renderDecisionSvg, verifyPortableReceipt, type DecisionPackage } from "../src/decisionPackage.js";
 
-const policy = JSON.parse(readFileSync(new URL("../../examples/quineling-quote/policy.json", import.meta.url), "utf8"));
+const policy = JSON.parse(readFileSync(new URL("../../examples/evaluation/machining-policy.json", import.meta.url), "utf8"));
 const inputs = { minutes: 42, rate: 4.5, setup: 120, material: 85, llmPrice: 274 };
 const cliPath = fileURLToPath(new URL("../src/cli.js", import.meta.url));
 const cli = (...args: string[]) => spawnSync(process.execPath, [cliPath, ...args], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 });

@@ -4,10 +4,10 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { AuditLog } from "../../dist/src/audit.js";
-import { recordQdl, replayQdl } from "../../dist/src/qdl.js";
-import { firstDisagreement, governorIntent, governorSnapshots, labView, renderLab } from "../../dist/src/lab.js";
-import { createProxy } from "../../dist/src/proxy.js";
+import { AuditLog } from "../../../dist/src/audit.js";
+import { recordQdl, replayQdl } from "../../../dist/src/qdl.js";
+import { firstDisagreement, governorIntent, governorSnapshots, labView, renderLab } from "../../../dist/src/lab.js";
+import { createProxy } from "../../../dist/src/proxy.js";
 
 const script = [
   { user: "Job check A", status: 200, usage: [12, 4], assistant: "Noted." },

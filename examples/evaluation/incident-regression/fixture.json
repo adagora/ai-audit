@@ -1,0 +1,12 @@
+{
+  "sanitized": true,
+  "input": {
+    "question": "How much will I get back if I cancel CW-1002?",
+    "now": "2026-06-10T09:00:00+02:00",
+    "scenario": "synthetic-citywheels-refund"
+  },
+  "observation": {
+    "answer": "You will receive 342 EUR. Nothing was cancelled.",
+    "toolCalls": [{ "name": "calculate_refund", "arguments": { "booking_id": "CW-1002" } }]
+  }
+}

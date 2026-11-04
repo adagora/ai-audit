@@ -2,7 +2,7 @@
 
 `npm run example:wycena` runs the whole quote flow in one process, with scripted model answers. This example runs it the way a deployment does. `ai-audit serve`, `ai-audit console` and the application are separate processes. The model is real. A person records the verdicts in the console in a browser. The application uses only HTTP and the CLI (`decide`, `await`, `effect`), as an application in any language would.
 
-The four mails in [mails/](mails/) are synthetic. Each one has a fake contact email and phone number, and each one is written for a different path through the toolroom quote rule of [../quineling-wycena](../quineling-wycena/README.md):
+The four mails in [mails/](mails) are synthetic. Each one has a fake contact email and phone number, and each one is written for a different path through the toolroom quote rule of [../quineling-wycena](../README.md):
 
 | Mail | Part | Path it is written for |
 |---|---|---|
@@ -17,16 +17,16 @@ The model decides the numbers, so a run can take another path. Each run costs fo
 
 ```sh
 npm run build
-node examples/live-mail/setup.mjs /tmp/live-mail gpt-4o-mini
+node examples/quineling-wycena/live-mail/setup.mjs /tmp/live-mail gpt-4o-mini
 AI_AUDIT_UPSTREAM_OPENAI_KEY=sk-... node dist/src/cli.js serve --config /tmp/live-mail/gateway.json --log /tmp/live-mail/audit.jsonl --rotate-bytes 50000
 node dist/src/cli.js console --log /tmp/live-mail/audit.jsonl --config /tmp/live-mail/gateway.json --reviewer kierownik --overdue-minutes 1
-node examples/live-mail/app.mjs --run /tmp/live-mail
+node examples/quineling-wycena/live-mail/app.mjs --run /tmp/live-mail
 ```
 
 Run each command in its own terminal. `setup.mjs` writes a random client key and `gateway.json` with one virtual key and the use case `wycena`. Open the console URL that `console` prints and record the verdicts on Decisions while the application waits (up to 900 s; `--waits '{"mail-2":60}'` changes it). Approve mail-4 only after the application has logged its timeout; about a minute later Overview shows "1 approved decision has no action recorded". Then:
 
 ```sh
-node examples/live-mail/summary.mjs --run /tmp/live-mail
+node examples/quineling-wycena/live-mail/summary.mjs --run /tmp/live-mail
 node dist/src/cli.js anchor --log /tmp/live-mail/audit.jsonl --anchors /tmp/live-mail/anchors.jsonl
 node dist/src/cli.js verify --log /tmp/live-mail/audit.jsonl --anchors /tmp/live-mail/anchors.jsonl
 ```

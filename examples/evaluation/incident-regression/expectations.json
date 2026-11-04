@@ -1,0 +1,8 @@
+{
+  "intent": "refund",
+  "assertions": [
+    { "id": "refund-amount", "type": "contains", "value": "340 EUR", "severity": "critical" },
+    { "id": "no-cancellation-claim", "type": "notContains", "value": "successfully cancelled", "severity": "critical" },
+    { "id": "refund-tool", "type": "toolSequence", "value": ["calculate_refund"] }
+  ]
+}

@@ -5,7 +5,7 @@ The local console has two modes. The synthetic page runs fixed checks through th
 ## Real OpenAI workflow
 
 ```sh
-npm run example:workflow:real
+npm run build && bash scripts/workflow-real.sh
 ```
 
 The launcher reads `AI_AUDIT_UPSTREAM_OPENAI_KEY` or `OPENAI_API_KEY` from the environment, then `OPENAI_API_KEY` from the repository's untracked `.env`. If none is set, it prompts for the key in the terminal without echoing it. Open `http://127.0.0.1:8791`, choose an OpenAI model available to your API key, and send two prompts. The second request carries the previous turn so the proxy can link the session. Use **New conversation** to start another one. The page uses a generated virtual client key, so OpenAI sees the provider key only from the proxy. Actual API use can incur charges.
@@ -50,12 +50,12 @@ The server evaluates alert rules every 5 seconds, also when no page is open: aud
 
 To watch a running proxy, start with `WORKFLOW_WATCH_METRICS=http://127.0.0.1:8787/metrics` and choose **Real proxy (counters)**. The page then shows that proxy's counters and alerts, including an alert when `/metrics` stops answering. It does not read the real audit log ([ADR 0040](../../docs/adr/0040-real-workflow-client.md)); use `verify`, `report` and `workbench` on the log itself. For long-term alerting on a deployed proxy, use the Grafana stack in [examples/monitoring](../monitoring/README.md), which has the same rules.
 
-The fixed scenarios in the console cover routing and keys, policy actions, injection signals, attachments, OpenAI and Anthropic streams, sessions, unknown usage, Quinelings observation, QDL execution, signed review, telemetry, anchors and unavailable logging. The **Client input** and **After policy** tabs display the exact synthetic request and the body observed at the mock upstream. A blocked request has no forwarded body. **Run QDL** executes the example policy and exports a portable SVG and JSON receipt. **Observe Quineling** only identifies a tool result in traffic. **Run HTTP suite** starts the real-proxy verification driver. **Download synthetic workbench** exports metadata from the synthetic log. The coverage table names the verification path and any local limitation for each feature. For a longer QDL example, use `npm run example:lab` and the [decision workflow](../../docs/decisions.md).
+The fixed scenarios in the console cover routing and keys, policy actions, injection signals, attachments, OpenAI and Anthropic streams, sessions, unknown usage, Quinelings observation, QDL execution, signed review, telemetry, anchors and unavailable logging. The **Client input** and **After policy** tabs display the exact synthetic request and the body observed at the mock upstream. A blocked request has no forwarded body. **Run QDL** executes the example policy and exports a portable SVG and JSON receipt. **Observe Quineling** only identifies a tool result in traffic. **Run HTTP suite** starts the real-proxy verification driver. **Download synthetic workbench** exports metadata from the synthetic log. The coverage table names the verification path and any local limitation for each feature. For a longer QDL example, use `npm run build && node examples/evaluation/policy-lab/run.mjs` and the [decision workflow](../../docs/decisions.md).
 
 ## Public static showcase
 
 ```sh
-npm run example:workflow:export -- /private/tmp/ai-audit-showcase
+npm run build && node examples/workflow/export-showcase.mjs /private/tmp/ai-audit-showcase
 ```
 
 The command reruns every synthetic scenario and writes a standalone static site into the given directory. Open it through a static server to inspect the recorded results. Its controls replay recorded synthetic evidence; they do not send new requests. The export includes the synthetic workbench, generated QDL SVG, JSON and signature artifacts, and the Grafana dashboard and alert rules. It contains no provider key, live proxy endpoint or real audit log. Inspect the output before publishing it.
