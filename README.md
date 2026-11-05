@@ -1,4 +1,6 @@
-# ai-audit
+# Auditline
+
+**The audit line for AI agents.** It sits between your agent and the model provider, scans what goes out and redacts or refuses it, keeps a hash-chained log of what happened, and records each decision so that anyone can replay it later. It was called `ai-audit`, and the command, the `AI_AUDIT_*` variables, the `x-audit-*` headers and the metric names keep that name.
 
 <div align="center">
 <pre>

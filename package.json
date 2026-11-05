@@ -1,7 +1,7 @@
 {
   "name": "ai-audit",
   "version": "1.0.0",
-  "description": "Local audit proxy for OpenAI & Anthropic APIs: secret/PII redaction, hash-chained AI Act-style audit log",
+  "description": "Auditline: the audit line for AI agents. A local proxy for OpenAI and Anthropic that redacts secrets and PII, keeps a hash-chained log, and records decisions that can be replayed",
   "directories": {
     "test": "test"
   },
@@ -45,7 +45,8 @@
     "@quinelings/agent-sdk": "file:vendor/quinelings-agent-sdk-1.0.0.tgz"
   },
   "bin": {
-    "ai-audit": "dist/src/cli.js"
+    "ai-audit": "dist/src/cli.js",
+    "auditline": "dist/src/cli.js"
   },
   "repository": {
     "type": "git",
