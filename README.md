@@ -57,6 +57,10 @@ TypeScript, Node's standard library, no runtime dependencies. [Quinelings](https
 
 The [operator console](#operator-console) over the synthetic log of `npm run example:workflow` and `npm run example:wycena -- --console --wait`. No real traffic.
 
+![Operator console walkthrough: a reviewer replays a quote rule, approves it with a note, then opens the request flow, one request, the context of a session and the integrity of the log.](docs/images/console-walkthrough.gif)
+
+The recording runs `npm run example:wycena -- --console --wait`: a synthetic toolroom quote rule, a scripted model and no real traffic. Its data and its reviewer name are in Polish.
+
 **What needs attention now**, and what the log suggests changing:
 
 ![Console overview: key figures, items that need attention, suggestions](docs/images/console-overview.jpg)
