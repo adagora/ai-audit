@@ -670,7 +670,7 @@ ai-audit console --log audit.jsonl --config gateway.json --reviewer ada \
   --anchors anchors.jsonl --metrics http://127.0.0.1:8787/metrics
 ```
 
-It prints a URL with a token, for example `http://127.0.0.1:8793/#token=…`. Open that URL. The token is the only credential, so do not share it.
+It prints a URL with a token, for example `http://127.0.0.1:8793/#token=…`. Open that URL. The token is the only credential, so do not share it. A link may carry a page and the token, as `#/decisions/ID?token=…`; the console keeps the page and drops the token from the address bar.
 
 | Page | What it shows |
 |---|---|

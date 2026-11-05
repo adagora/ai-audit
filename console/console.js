@@ -582,7 +582,8 @@ function adoptToken() {
   if (!fromHash) return false;
   token = fromHash;
   try { sessionStorage.setItem("ai-audit-console", token); } catch { }
-  history.replaceState(null, "", `${location.pathname}#/overview`);
+  const route = location.hash.replace(/[?&]?token=[A-Za-z0-9_-]+/, "");
+  history.replaceState(null, "", `${location.pathname}${/^#\/\S+/.test(route) ? route : "#/overview"}`);
   return true;
 }
 
