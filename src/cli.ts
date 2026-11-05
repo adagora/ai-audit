@@ -9,6 +9,7 @@ import { policyHistories, withChanges } from "./policies.js";
 import { randomBytes } from "node:crypto";
 import { SANDBOX_AVAILABLE, TOOLS_OK, sandboxState } from "./attachments.js";
 import { createProxy } from "./proxy.js";
+import { withAuditlineNames } from "./environment.js";
 import { listSessions, renderSessionHtml } from "./contextView.js";
 import type { Mode } from "./scan.js";
 import { scrubHistory } from "./history.js";
@@ -167,7 +168,7 @@ if (cmd === "attest-keygen") {
   log.rotateBytes = Number(a["rotate-bytes"]);
   if (!/^[1-9]\d{0,6}$/.test(a["inspect-timeout-ms"]!)) { console.error("--inspect-timeout-ms must be a whole number of milliseconds above 0"); process.exit(2); }
   const carnet = a["allow-hashes"] ? new Set<string>(JSON.parse(readFileSync(a["allow-hashes"], "utf8"))) : undefined;
-  const env = process.env, cfg = a.config ? JSON.parse(readFileSync(a.config, "utf8")) : {};
+  const env = withAuditlineNames(process.env), cfg = a.config ? JSON.parse(readFileSync(a.config, "utf8")) : {};
   const unsafeNoSandbox = a["unsafe-no-sandbox"] === true || env.AI_AUDIT_UNSAFE_NO_SANDBOX === "1";
   const keys = [...(cfg.keys ?? []), ...(env.AI_AUDIT_CLIENT_KEY ? [{ name: "default", sha256: sha256(env.AI_AUDIT_CLIENT_KEY), logContent: env.AI_AUDIT_CLIENT_LOG_CONTENT === "1" }] : [])];
   const injectionJudge = a["injection-model"] ? { model: a["injection-model"], task: a["injection-task"] ?? "", url: a["injection-url"],

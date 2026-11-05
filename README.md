@@ -1,6 +1,6 @@
 # Auditline
 
-**The audit line for AI agents.** It sits between your agent and the model provider, scans what goes out and redacts or refuses it, keeps a hash-chained log of what happened, and records each decision so that anyone can replay it later. It was called `ai-audit`, and the command, the `AI_AUDIT_*` variables, the `x-audit-*` headers and the metric names keep that name.
+**The audit line for AI agents.** It sits between your agent and the model provider, scans what goes out and redacts or refuses it, keeps a hash-chained log of what happened, and records each decision so that anyone can replay it later. It was called `ai-audit`. The command is installed under both names, `AUDITLINE_*` variables work wherever `AI_AUDIT_*` ones do, and the `x-audit-*` headers and metric names keep their names ([ADR 0069](docs/adr/0069-auditline-name-and-compatibility.md)).
 
 <div align="center">
 <pre>
@@ -15,9 +15,9 @@ client  --->  ai-audit  --->  api.openai.com
 
 <div align="center">
 
-[![CI](https://github.com/adagora/ai-audit/actions/workflows/ci.yml/badge.svg)](https://github.com/adagora/ai-audit/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/adagora/ai-audit/blob/main/LICENSE)
-[![Node](https://img.shields.io/badge/node-22.23%20%7C%2024.22%20%7C%2026.12%2B-339933)](https://github.com/adagora/ai-audit/blob/main/package.json)
+[![CI](https://github.com/adagora/auditline/actions/workflows/ci.yml/badge.svg)](https://github.com/adagora/auditline/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/adagora/auditline/blob/main/LICENSE)
+[![Node](https://img.shields.io/badge/node-22.23%20%7C%2024.22%20%7C%2026.12%2B-339933)](https://github.com/adagora/auditline/blob/main/package.json)
 
 </div>
 
@@ -26,7 +26,7 @@ Local proxy for the OpenAI and Anthropic HTTP APIs. It scans each request for se
 <div align="center">
 
 ```bash
-git clone https://github.com/adagora/ai-audit.git && cd ai-audit && npm ci && npm run build && node dist/src/cli.js serve --mode redact --log audit.jsonl
+git clone https://github.com/adagora/auditline.git && cd auditline && npm ci && npm run build && node dist/src/cli.js serve --mode redact --log audit.jsonl
 ```
 
 </div>
@@ -78,7 +78,7 @@ The [operator console](#operator-console) over the synthetic log of `npm run exa
 For one local Codex session, run `npm run codex:proxy` from the repo root. It builds the proxy, asks for your OpenAI API key if `AI_AUDIT_UPSTREAM_OPENAI_KEY` is unset, generates a temporary `aia-` client key, starts the proxy on `127.0.0.1:8788`, and launches Codex through it. The provider key stays out of Codex's environment; the proxy stops when Codex exits. The audit log and proxy diagnostics stay in ignored `live/`. Set `AI_AUDIT_PORT=8787` if you have stopped the existing demo proxy and want the native Grafana scrape to follow this session. This launcher starts the proxy and Codex, not Grafana.
 
 ```bash
-git clone https://github.com/adagora/ai-audit.git
+git clone https://github.com/adagora/auditline.git
 cd ai-audit
 npm ci && npm run build
 
@@ -315,7 +315,7 @@ Node `22.23.4` or later on the 22 line, `24.22.1` or later on the 24 line, or `2
 ### From source
 
 ```bash
-git clone https://github.com/adagora/ai-audit.git
+git clone https://github.com/adagora/auditline.git
 cd ai-audit
 npm ci
 npm run build

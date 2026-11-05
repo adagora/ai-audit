@@ -76,3 +76,4 @@ Format: Nygard (Status, Context, Decision, Consequences), at most ~40 lines, fil
 - [66. The help desk is its own repository, Temporal runs its write intents, and domain code stays out of `src/`](0066-help-desk-repository-and-temporal-write-intents.md)
 - [67. ai-audit holds no help-desk application, and IntentGauge evaluates the Python one](0067-no-help-desk-application-in-ai-audit.md)
 - [68. Records carry an optional correlation id, and the operator cockpit lives in the application](0068-correlation-and-the-application-cockpit.md)
+- [69. The project is called Auditline, and the old names keep working](0069-auditline-name-and-compatibility.md)

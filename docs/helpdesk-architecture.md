@@ -1,6 +1,6 @@
 # Where the help desk belongs
 
-The help desk is the separate [help-desk-agent](https://github.com/adagora/help-desk-agent) repository. Its `docs/architecture.md` holds the application design: the agent, the Temporal workflow, the executor rules and the order of work. [ADR 0066](adr/0066-help-desk-repository-and-temporal-write-intents.md) records the decision.
+The help desk is the separate [help-desk-agent](https://github.com/adagora/deskhand) repository. Its `docs/architecture.md` holds the application design: the agent, the Temporal workflow, the executor rules and the order of work. [ADR 0066](adr/0066-help-desk-repository-and-temporal-write-intents.md) records the decision.
 
 | Component | Owns |
 |---|---|
