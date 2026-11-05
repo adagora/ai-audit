@@ -1,5 +1,5 @@
 # 57. A decision takes one verdict, and an approval that nothing acted on is shown
-Status: Proposed (2026-10-29). Supersedes the "latest review" of [0055](0055-act-after-verdict.md) for new verdicts.
+Status: Accepted (2026-11-05). Proposed 2026-10-29. Supersedes the "latest review" of [0055](0055-act-after-verdict.md) for new verdicts.
 ## Context
 ADR 0055 lets a decision take any number of reviews and counts the latest one. The TLA+ model of the loop (`spec/DecisionLoop.tla`) found two paths that a person who reads the console does not expect:
 - An application waits, reads `approved` and sends the quote. A second reviewer records `rejected` or `overridden` before the application records its effect. The console reports "ran without approval", and after a take-over the action ran, although ADR 0055 says that it does not.

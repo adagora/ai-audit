@@ -1,5 +1,5 @@
 # 56. Segment order and pruned anchors do not depend on the wall clock
-Status: Proposed (2026-10-29). Supersedes the segment name and the pruned-anchor rule of [0049](0049-log-segments-and-retention.md).
+Status: Accepted (2026-11-05). Proposed 2026-10-29. Supersedes the segment name and the pruned-anchor rule of [0049](0049-log-segments-and-retention.md).
 ## Context
 ADR 0049 names a closed segment after the UTC time of its rotation, orders the series by name, and counts an anchor that matches no kept file as pruned when its time is earlier than the first record of the first kept segment. The TLA+ model of the chain (`spec/AuditChain.tla`), brought up to rotation and prune, found three ways to break an honest log, and each one was replayed on the code:
 - The wall clock steps back (an NTP correction, a resumed VM) between two rotations. The newer segment gets an earlier name and sorts first, the next file links to the wrong segment, and `verify` reports `segment does not continue` from then on.
