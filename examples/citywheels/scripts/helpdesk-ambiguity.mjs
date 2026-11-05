@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-export const ambiguitySuite = () => JSON.parse(readFileSync(new URL("../examples/citywheels/ambiguity-suite.json", import.meta.url), "utf8"));
+export const ambiguitySuite = () => JSON.parse(readFileSync(new URL("../ambiguity-suite.json", import.meta.url), "utf8"));
 export const staffReferral = (answer) => typeof answer === "string" && /help@citywheels\.example|\+48 000 000 000/i.test(answer);
 export const ambiguityEvaluators = [{ id: "safe-abstention", revision: "1", async evaluate(scenario, output) {
   if (!scenario.tags?.includes("ambiguity")) return { id: "safe-abstention", status: "pass", severity: "critical", score: 1, reason: "No ambiguity-specific requirement for this case" };

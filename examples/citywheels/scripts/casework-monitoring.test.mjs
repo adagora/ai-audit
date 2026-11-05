@@ -6,9 +6,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { startWorkbench } from "./helpdesk-workbench.mjs";
 import { configureSyntheticMonitoring } from "./casework-test-support.mjs";
-import { MONITORING_SIGNALS } from "../dist/src/caseworkMonitoring.js";
+import { MONITORING_SIGNALS } from "../../../dist/src/caseworkMonitoring.js";
 
-const evaluator = process.env.INTENTGAUGE_ROOT ?? fileURLToPath(new URL("../../evalLOL/", import.meta.url));
+const evaluator = process.env.INTENTGAUGE_ROOT ?? fileURLToPath(new URL("../../../../evalLOL/", import.meta.url));
 test("monitoring HTTP requires reviewed fallback before activation, preserves alerts and explicitly restricts then recovers with fresh evidence", { skip: !existsSync(join(evaluator, "dist/src/index.js")) }, async () => {
   const home = mkdtempSync(join(tmpdir(), "casework-monitoring-http-"));
   const outside = "monitoring-outside-operator-credential", unprivileged = "monitoring-operator-without-reviewer";

@@ -10,7 +10,9 @@ The help desk is an application. It can remain Python. It sends model requests t
 | `scripts/qualification.mjs` | Capture, list and inspect packages from the command line |
 | `src/authority.ts` | Explicit grants, separate deployment activation, expiry, revocation and tenant/action/money limits |
 | `src/caseworkStorage.ts` | Local exclusive transactions, atomic persistence and explicit dead-process lock recovery |
-| `src/citywheelsExecutor.ts` | A synthetic booking/refund backend and executor with consent, review, reservation and read-back |
+| `src/casework.ts` | Cases, delivery rules and outcomes. A host supplies its currency and context rules through `CaseworkOptions` |
+| `examples/citywheels/src/executor.ts` | A synthetic booking/refund backend and executor with consent, review, reservation and read-back |
+| `examples/citywheels/src/context.ts` | A synthetic read context for one owned booking |
 
 The workbench retains qualification artifacts with runs; choose **Release qualification · evidence only** to inspect them. The cockpit provides cases, qualifications, explicit grants, activation/revocation, answer review, simulated delivery, owned handoffs, execution/reconciliation and observed outcomes. The separate customer session has an inbox and a requests page for exact-proposal consent. Remaining scope is tracked in `counting-house-implementation.md`.
 

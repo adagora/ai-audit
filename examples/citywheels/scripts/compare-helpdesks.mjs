@@ -18,7 +18,7 @@ if (!Number.isInteger(repetitions) || repetitions < 1 || repetitions > 10) throw
 if (live && !process.env.OPENAI_API_KEY?.trim()) throw new Error("Live comparison requires OPENAI_API_KEY; use node --env-file=.env scripts/compare-helpdesks.mjs --live");
 if (parsed.model && !live) throw new Error("--model requires --live");
 
-const root = fileURLToPath(new URL("../", import.meta.url));
+const root = fileURLToPath(new URL("../../../", import.meta.url));
 const evaluatorRoot = resolve(process.env.INTENTGAUGE_ROOT ?? join(root, "../evalLOL"));
 const pythonRoot = resolve(process.env.CITYWHEELS_PYTHON_ROOT ?? join(root, "../EternalChat copy/help-desk-agent/help-desk-agent"));
 const api = await import(pathToFileURL(join(evaluatorRoot, "dist/src/index.js")));

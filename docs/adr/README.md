@@ -73,3 +73,4 @@ Format: Nygard (Status, Context, Decision, Consequences), at most ~40 lines, fil
 - [63. A separate executor authorizes effects and reconciles uncertain outcomes](0063-synthetic-execution-and-reconciliation.md)
 - [64. Independent labels and reviewed regressions remain separate from operational approval](0064-independent-labels-and-regressions.md)
 - [65. Monitoring proposes restrictions and requires reviewed recovery](0065-reviewed-monitoring-and-recovery.md)
+- [66. The help desk is its own repository, Temporal runs its write intents, and domain code stays out of `src/`](0066-help-desk-repository-and-temporal-write-intents.md)

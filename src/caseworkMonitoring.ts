@@ -2,9 +2,9 @@ import { CaseworkStorage } from "./caseworkStorage.js";
 import { AuthorityStore, type AuthorityGrant, type CaseworkPrincipal, type CurrentRelease } from "./authority.js";
 import { evidenceDigest } from "./qualification.js";
 import type { WorkCase } from "./casework.js";
-import type { CancellationOperation } from "./citywheelsExecutor.js";
 import type { ReviewedRegression } from "./caseworkRegression.js";
 
+export interface MonitoredOperation { proposal: { id: string; caseId: string; tenant: string; intent: string; createdAt: string }; status: string; exception: { openedAt: string } | null; events: { at: string }[] }
 export const MONITORING_SIGNALS = ["evaluation-failure", "human-regression", "complaint", "reopened", "answer-rejected", "delivery-held", "execution-exception", "grant-expired", "release-changed", "plan-expired", "fallback-overload"] as const;
 export type MonitoringSignal = typeof MONITORING_SIGNALS[number];
 export interface MonitoringPlanInput {
@@ -25,7 +25,7 @@ export interface MonitoringIncident {
 }
 interface State { plans: MonitoringPlan[]; active: Record<string, string>; incidents: MonitoringIncident[]; clockFloor: number; lastScan: Record<string, string> }
 export interface MonitoringSources {
-  cases: WorkCase[]; operations: CancellationOperation[];
+  cases: WorkCase[]; operations: MonitoredOperation[];
   failures: { caseId: string; intent: string; at: string; digest: string }[];
 }
 const named = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(v);

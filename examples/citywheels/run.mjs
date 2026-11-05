@@ -9,7 +9,7 @@ for (let i = 0; i < options.length; i++) {
   else throw new Error("Usage: run.mjs ask QUESTION [--live --model NAME]");
 }
 if (command !== "ask" || !question?.trim() || model && !live) throw new Error("Usage: run.mjs ask QUESTION [--live --model NAME]. For evaluation use npm run example:helpdesk.");
-const child = spawn(process.execPath, [fileURLToPath(new URL("../../scripts/citywheels-intentgauge.mjs", import.meta.url)), ...(live ? ["--live", ...(model ? ["--model", model] : [])] : [])], {
+const child = spawn(process.execPath, [fileURLToPath(new URL("./scripts/citywheels-intentgauge.mjs", import.meta.url)), ...(live ? ["--live", ...(model ? ["--model", model] : [])] : [])], {
   stdio: ["pipe", "pipe", "inherit"], env: { PATH: process.env.PATH, ...(live && process.env.OPENAI_API_KEY ? { OPENAI_API_KEY: process.env.OPENAI_API_KEY } : {}) },
 });
 let out = "";

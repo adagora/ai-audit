@@ -1,6 +1,6 @@
-import { CaseworkStorage } from "./caseworkStorage.js";
-import { AuthorityStore, type CaseworkPrincipal, type CurrentRelease } from "./authority.js";
-import { evidenceDigest } from "./qualification.js";
+import { CaseworkStorage } from "../../../src/caseworkStorage.js";
+import { AuthorityStore, type CaseworkPrincipal, type CurrentRelease } from "../../../src/authority.js";
+import { evidenceDigest } from "../../../src/qualification.js";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 

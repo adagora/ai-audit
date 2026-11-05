@@ -28,7 +28,7 @@ test("isolated policy fixtures cannot escape their allowlisted documents or repl
   for (const file of ["cancellations.md", "faq.md", "prices.md"]) writeFileSync(join(data, "policies", file), "original");
   for (const policyPatch of [null, { file: "../bookings.json", text: "changed" }, { file: "cancellations.md", text: "x".repeat(64001) }]) assert.throws(() => applyFixturePolicy(data, { policyPatch }), /Invalid isolated policy/);
   assert.equal(readFileSync(join(data, "bookings.json"), "utf8"), "unchanged");
-  const pythonRoot = process.env.CITYWHEELS_PYTHON_ROOT ?? fileURLToPath(new URL("../../EternalChat copy/help-desk-agent/help-desk-agent/", import.meta.url));
+  const pythonRoot = process.env.CITYWHEELS_PYTHON_ROOT ?? fileURLToPath(new URL("../../../../EternalChat copy/help-desk-agent/help-desk-agent/", import.meta.url));
   if (!existsSync(join(pythonRoot, "citywheels/agent.py"))) return;
   const child = spawnSync(process.env.CITYWHEELS_PYTHON ?? "python3", ["-B", fileURLToPath(new URL("./citywheels-python.py", import.meta.url)), pythonRoot], { input: JSON.stringify({ question: "Refund?", policyPatch: { file: "../bookings.json", text: "changed" } }), encoding: "utf8", timeout: 30000, env: { PATH: process.env.PATH, CITYWHEELS_EVIDENCE_ROOT: data } });
   assert.notEqual(child.status, 0);
@@ -36,9 +36,9 @@ test("isolated policy fixtures cannot escape their allowlisted documents or repl
   assert.equal(child.stdout, "");
 });
 
-const evaluatorRoot = process.env.INTENTGAUGE_ROOT ?? fileURLToPath(new URL("../../evalLOL/", import.meta.url));
+const evaluatorRoot = process.env.INTENTGAUGE_ROOT ?? fileURLToPath(new URL("../../../../evalLOL/", import.meta.url));
 test("the workbench runs adversarial cases honestly, retains actual conflicting documents and makes abstention an owned handoff", { skip: !existsSync(join(evaluatorRoot, "dist/src/index.js")) }, async () => {
-  const original = readFileSync(new URL("../examples/citywheels/data/policies/cancellations.md", import.meta.url), "utf8");
+  const original = readFileSync(new URL("../data/policies/cancellations.md", import.meta.url), "utf8");
   const app = await startWorkbench({ port: 0, home: mkdtempSync(join(tmpdir(), "ambiguity-workbench-")) });
   const base = app.url.split("/#")[0], headers = { "x-workbench-token": app.token, "content-type": "application/json" };
   const request = (path, body) => fetch(base + path, { method: body === undefined ? "GET" : "POST", headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
@@ -62,7 +62,7 @@ test("the workbench runs adversarial cases honestly, retains actual conflicting 
     const conflict = report.results.find((r) => r.caseId === "conflicting-current-policies");
     const patch = ambiguitySuite().cases.find((c) => c.id === conflict.caseId).input.policyPatch;
     assert.equal(readFileSync(join(conflict.output.data.audit.evidenceDirectory, "data/policies/cancellations.md"), "utf8"), patch.text);
-    assert.equal(readFileSync(new URL("../examples/citywheels/data/policies/cancellations.md", import.meta.url), "utf8"), original);
+    assert.equal(readFileSync(new URL("../data/policies/cancellations.md", import.meta.url), "utf8"), original);
     const cases = await (await request("/api/casework/cases")).json();
     const conflictCase = cases.find((c) => c.origin.runId === all.manifest.id && c.origin.scenarioId === conflict.caseId);
     const taskResponse = await request(`/api/casework/cases/${conflictCase.id}/learning`, { rubric: { id: "conflict", revision: "1", text: "Do not choose between contradictory current policies without staff review." }, assigned: ["demo-labeler-a", "demo-labeler-b"], adjudicator: "demo-adjudicator", context: {} });

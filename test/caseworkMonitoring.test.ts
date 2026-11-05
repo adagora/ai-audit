@@ -16,7 +16,7 @@ function fixture() {
   const qualified = base.qualifications.create({ ...packageInput, targetRevision, report: base.qualifications.put(JSON.stringify(originalReport)) }, base.now);
   const f = { ...base, current: { ...base.current, targetRevision }, request: { ...base.request, packageDigest: qualified.digest } };
   const scope = { tenant: f.actor.tenant, customer: "customer-a" };
-  const monitor = new CaseworkMonitoring(join(f.root, "monitoring"), f.authority), cases = new CaseworkStore(join(f.root, "cases"), f.authority);
+  const monitor = new CaseworkMonitoring(join(f.root, "monitoring"), f.authority), cases = new CaseworkStore(join(f.root, "cases"), f.authority, { currency: "EUR" });
   const p = f.qualifications.load(f.request.packageDigest);
   const input = { scope, intent: "refund", qualificationDigest: p.digest, question: "What refund can I get?", answer: "340 EUR, calculation only.", origin: { runId: "run-1", scenarioId: "one", repetition: 0, target: "ai-audit" as const, targetRevision: p.targetRevision, evaluation: "pass" as const, reportDigest: p.report.digest, audit: { available: true, chainVerified: true, records: [] } } };
   const c = cases.ingest(input, f.now);

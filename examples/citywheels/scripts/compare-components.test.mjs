@@ -5,11 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assessControlledPair, compareComponents } from "./compare-components.mjs";
-import { evidenceDigest } from "../dist/src/qualification.js";
-import { AuditLog } from "../dist/src/audit.js";
+import { evidenceDigest } from "../../../dist/src/qualification.js";
+import { AuditLog } from "../../../dist/src/audit.js";
 
-const evaluatorRoot = process.env.INTENTGAUGE_ROOT ?? fileURLToPath(new URL("../../evalLOL/", import.meta.url));
-const pythonRoot = process.env.CITYWHEELS_PYTHON_ROOT ?? fileURLToPath(new URL("../../EternalChat copy/help-desk-agent/help-desk-agent/", import.meta.url));
+const evaluatorRoot = process.env.INTENTGAUGE_ROOT ?? fileURLToPath(new URL("../../../../evalLOL/", import.meta.url));
+const pythonRoot = process.env.CITYWHEELS_PYTHON_ROOT ?? fileURLToPath(new URL("../../../../EternalChat copy/help-desk-agent/help-desk-agent/", import.meta.url));
 test("controlled pair validation refuses changed models, prompts, schemas, fixtures, missing trials and reversed arms", () => {
   const suite = { cases: [{ id: "one" }] }, options = { repetitions: 1 };
   const output = { answer: "Quote", data: { bookingFixtureHash: evidenceDigest("bookings"), knowledgeFixtureHash: evidenceDigest("knowledge"), initialModelInputHash: evidenceDigest("messages"), toolContractHash: evidenceDigest("tools"), clock: "2026-06-10T07:00:00Z", model: "fixed", evidenceDirectory: "/synthetic/evidence", audit: { chainVerified: true }, refundTool: "native" } };

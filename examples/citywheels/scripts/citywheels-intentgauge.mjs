@@ -4,8 +4,8 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { once } from "node:events";
 import { randomBytes } from "node:crypto";
-import { AuditLog, sha256 } from "../dist/src/audit.js";
-import { createProxy } from "../dist/src/proxy.js";
+import { AuditLog, sha256 } from "../../../dist/src/audit.js";
+import { createProxy } from "../../../dist/src/proxy.js";
 
 const live = process.argv.includes("--live");
 const modelIndex = process.argv.indexOf("--model");
@@ -17,7 +17,7 @@ const chunks = [];
 for await (const chunk of process.stdin) chunks.push(chunk);
 const input = JSON.parse(Buffer.concat(chunks).toString());
 if (typeof input.question !== "string" || !input.question.trim()) throw new Error("A question is required");
-const evidenceRoot = resolve(process.env.CITYWHEELS_EVIDENCE_ROOT ?? fileURLToPath(new URL("../live/evaluations/", import.meta.url)));
+const evidenceRoot = resolve(process.env.CITYWHEELS_EVIDENCE_ROOT ?? fileURLToPath(new URL("../../../live/evaluations/", import.meta.url)));
 mkdirSync(evidenceRoot, { recursive: true, mode: 0o700 });
 const directory = mkdtempSync(join(evidenceRoot, "citywheels-"));
 const logPath = join(directory, "audit.jsonl");
@@ -27,7 +27,7 @@ save("manifest.json", manifest);
 save("input.json", input);
 let upstream, proxy;
 try {
-  const source = new URL("../examples/citywheels/data/", import.meta.url);
+  const source = new URL("../data/", import.meta.url);
   const original = readFileSync(new URL("bookings.json", source), "utf8");
   const data = join(directory, "data");
   cpSync(source, data, { recursive: true });
@@ -46,7 +46,7 @@ try {
   process.env.CITYWHEELS_DATA_DIR = data;
   if (input.now) process.env.CITYWHEELS_NOW = input.now;
   else delete process.env.CITYWHEELS_NOW;
-  const { ask, fakeModel, STAFF_VALUES, TOOL_NAMES, NOW, REFUND_RULE } = await import("../examples/citywheels/helpdesk.mjs");
+  const { ask, fakeModel, STAFF_VALUES, TOOL_NAMES, NOW, REFUND_RULE } = await import("../helpdesk.mjs");
   save("policy.json", REFUND_RULE);
   const log = new AuditLog(logPath);
   const key = "aia-" + randomBytes(18).toString("hex");
@@ -65,7 +65,7 @@ try {
   save("observation.json", observation);
   manifest.status = "completed";
   manifest.clock = NOW;
-  manifest.agentHash = sha256(readFileSync(new URL("../examples/citywheels/helpdesk.mjs", import.meta.url), "utf8"));
+  manifest.agentHash = sha256(readFileSync(new URL("../helpdesk.mjs", import.meta.url), "utf8"));
   manifest.ruleHash = sha256(JSON.stringify(REFUND_RULE));
   console.log(JSON.stringify(observation));
 } finally {

@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { SyntheticCancellationExecutor, SyntheticCitywheelsBackend, type SyntheticBooking, type ExecutorFault } from "../src/citywheelsExecutor.js";
-import { caseworkFixture } from "./caseworkFixture.js";
+import { SyntheticCancellationExecutor, SyntheticCitywheelsBackend, type SyntheticBooking, type ExecutorFault } from "../src/executor.js";
+import { caseworkFixture } from "../../../test/caseworkFixture.js";
 import { writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
@@ -205,9 +205,9 @@ test("three real executor processes cannot cancel or refund the same operation t
   const f = setup(), id = prepare(f);
   const context = join(f.root, "context.json"); writeFileSync(context, JSON.stringify({ current: f.current, scope: f.scope, options: f.options, now: f.now.toISOString(), id }));
   const code = `import {readFileSync} from 'node:fs'; import {join} from 'node:path';
-    import {SyntheticCancellationExecutor,SyntheticCitywheelsBackend} from ${JSON.stringify(new URL("../src/citywheelsExecutor.js", import.meta.url).href)};
-    import {AuthorityStore} from ${JSON.stringify(new URL("../src/authority.js", import.meta.url).href)};
-    import {QualificationStore} from ${JSON.stringify(new URL("../src/qualification.js", import.meta.url).href)};
+    import {SyntheticCancellationExecutor,SyntheticCitywheelsBackend} from ${JSON.stringify(new URL("../src/executor.js", import.meta.url).href)};
+    import {AuthorityStore} from ${JSON.stringify(new URL("../../../src/authority.js", import.meta.url).href)};
+    import {QualificationStore} from ${JSON.stringify(new URL("../../../src/qualification.js", import.meta.url).href)};
     const root=process.argv[1], c=JSON.parse(readFileSync(join(root,'context.json'),'utf8'));
     const executor=new SyntheticCancellationExecutor(join(root,'executor'),new SyntheticCitywheelsBackend(join(root,'backend')),new AuthorityStore(join(root,'authority'),new QualificationStore(join(root,'qualifications'))),()=>c.current,c.options);
     process.send('ready'); process.once('message',()=>{try{process.stdout.write(JSON.stringify({status:executor.execute(c.scope,c.id,new Date(c.now)).status}));}catch(e){process.stdout.write(JSON.stringify({error:e.message}));}process.disconnect();});`;

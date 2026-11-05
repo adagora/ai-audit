@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { evidenceDigest } from "../dist/src/qualification.js";
+import { evidenceDigest } from "../../../dist/src/qualification.js";
 
 export function applyOperationalContext(data, input) {
   const path = process.env.CITYWHEELS_BOOKING_CONTEXT;

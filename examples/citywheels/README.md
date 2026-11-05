@@ -1,6 +1,8 @@
 # CityWheels: one case from question to evidence
 
-CityWheels is a synthetic bike-rental integration example. It demonstrates scoped reads, deterministic refund quotes, independent evaluation, reviewed authority and fake execution/reconciliation. It is not the production home of a help-desk service; see [the architecture proposal](../../docs/helpdesk-architecture.md).
+CityWheels is a synthetic bike-rental integration example. It demonstrates scoped reads, deterministic refund quotes, independent evaluation, reviewed authority and fake execution/reconciliation. It is not the production home of a help-desk service; see [where the help desk belongs](../../docs/helpdesk-architecture.md).
+
+Everything for this example is in this folder: the application (`helpdesk.mjs`), the executor and read context (`src/`), the workbench (`workbench/`), the server and comparison scripts (`scripts/`) and their tests (`test/`, `scripts/*.test.mjs`).
 
 For one offline question, build ai-audit and run:
 
@@ -22,7 +24,7 @@ The server prints separate operator, customer and independent-reviewer URLs. [Th
 
 The business set and separate ambiguity/abstention set retain actual failures. Synthetic agent failures are not relabeled as green qualifications. Conflicting document fixtures remain isolated and are shown to independent reviewers. Customer delivery, staff handoff, transaction consent, execution and settlement are separate states.
 
-Compare the existing applications with `node scripts/compare-helpdesks.mjs`. To hold the Python application, prompt, model path, tool schema, proxy and fixtures fixed while changing its refund tool implementation, use `node scripts/compare-components.mjs`. Both default to scripted providers and retained development evidence. The changed component includes the refund implementation and result adapter. Missing or mismatched telemetry invalidates the comparison; a requested model name cannot prove an immutable provider deployment. These experiments do not activate production authority.
+Compare the existing applications with `node examples/citywheels/scripts/compare-helpdesks.mjs`. To hold the Python application, prompt, model path, tool schema, proxy and fixtures fixed while changing its refund tool implementation, use `node examples/citywheels/scripts/compare-components.mjs`. Both default to scripted providers and retained development evidence. The changed component includes the refund implementation and result adapter. Missing or mismatched telemetry invalidates the comparison; a requested model name cannot prove an immutable provider deployment. These experiments do not activate production authority.
 
 Explicit live calls require `--live` and a server environment key. For the single-question wrapper, use `node --env-file=.env examples/citywheels/run.mjs ask "QUESTION" --live --model MODEL`. Customer fixtures and answers are retained under ignored `live/`; do not supply real customer content without a defined privacy/retention policy.
 

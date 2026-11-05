@@ -1,22 +1,22 @@
 import { ambiguitySuite, ambiguityEvaluators, staffReferral } from "./helpdesk-ambiguity.mjs";
 import { runCitywheelsQuestion } from "./citywheels-questions.mjs";
 import http from "node:http";
-import { experimentInventory } from "./experiment-inventory.mjs";
+import { experimentInventory } from "../../../scripts/experiment-inventory.mjs";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { randomUUID, randomBytes, createHash, timingSafeEqual } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { AuditLog } from "../dist/src/audit.js";
-import { decisionReceipt, renderReceipt } from "../dist/src/receipt.js";
+import { AuditLog } from "../../../dist/src/audit.js";
+import { decisionReceipt, renderReceipt } from "../../../dist/src/receipt.js";
 import { businessSuite, businessEvaluators } from "./helpdesk-comparison-policy.mjs";
 import { prepareHelpdeskRelease, retainHelpdeskQualification, qualificationStore } from "./helpdesk-qualification.mjs";
 import { createCaseworkApi } from "./casework-api.mjs";
-import { evidenceDigest } from "../dist/src/qualification.js";
+import { evidenceDigest } from "../../../dist/src/qualification.js";
 
 export async function startWorkbench({ port = Number(process.env.HELPDESK_PORT ?? 8799), home, caseworkIdentities = [] } = {}) {
-  const root = fileURLToPath(new URL("../", import.meta.url));
+  const root = fileURLToPath(new URL("../../../", import.meta.url));
   const directory = resolve(home ?? join(root, "live/helpdesk-workbench"));
   for (const name of ["runs", "policies"]) mkdirSync(join(directory, name), { recursive: true, mode: 0o700 });
   const evaluatorRoot = resolve(process.env.INTENTGAUGE_ROOT ?? join(root, "../evalLOL"));
@@ -28,7 +28,7 @@ export async function startWorkbench({ port = Number(process.env.HELPDESK_PORT ?
   const baselinePolicy = JSON.parse(readFileSync(join(root, "examples/citywheels/refund.json"), "utf8"));
   const hostFingerprint = () => {
     const store = qualificationStore(directory);
-    return evidenceDigest({ application: store.capture(root, ["dist/src", "scripts/helpdesk-workbench.mjs", "scripts/experiment-inventory.mjs", "scripts/citywheels-questions.mjs", "scripts/citywheels-operational-context.mjs", "scripts/helpdesk-qualification.mjs", "scripts/casework-api.mjs", "scripts/helpdesk-ambiguity.mjs"]).digest,
+    return evidenceDigest({ application: store.capture(root, ["dist/src", "dist/examples/citywheels/src", "examples/citywheels/scripts/helpdesk-workbench.mjs", "scripts/experiment-inventory.mjs", "examples/citywheels/scripts/citywheels-questions.mjs", "examples/citywheels/scripts/citywheels-operational-context.mjs", "examples/citywheels/scripts/helpdesk-qualification.mjs", "examples/citywheels/scripts/casework-api.mjs", "examples/citywheels/scripts/helpdesk-ambiguity.mjs"]).digest,
       evaluator: store.capture(evaluatorRoot, ["dist/src", "integrations/citywheels/target.mjs"]).digest });
   };
   const loadedHost = hostFingerprint();
@@ -160,7 +160,7 @@ export async function startWorkbench({ port = Number(process.env.HELPDESK_PORT ?
           return new Promise((resolveOutput, reject) => {
             const pythonRoot = resolve(process.env.CITYWHEELS_PYTHON_ROOT ?? join(root, "../EternalChat copy/help-desk-agent/help-desk-agent"));
             const command = body.target !== "python" ? process.execPath : process.env.CITYWHEELS_PYTHON ?? "python3";
-            const workerArgs = body.target === "ai-audit" ? [join(root, "scripts/citywheels-intentgauge.mjs")] : body.target === "python-audit" ? [join(root, "scripts/citywheels-python-audited.mjs"), pythonRoot] : ["-B", join(root, "scripts/citywheels-python.py"), pythonRoot];
+            const workerArgs = body.target === "ai-audit" ? [join(root, "examples/citywheels/scripts/citywheels-intentgauge.mjs")] : body.target === "python-audit" ? [join(root, "examples/citywheels/scripts/citywheels-python-audited.mjs"), pythonRoot] : ["-B", join(root, "examples/citywheels/scripts/citywheels-python.py"), pythonRoot];
             const child = spawn(command, [...workerArgs, "--events", ...(body.mode === "live" ? ["--live", "--model", model] : [])], { signal: AbortSignal.any([context.signal, disconnected.signal]), stdio: ["pipe", "pipe", "pipe"], env: { PATH: process.env.PATH, PYTHONDONTWRITEBYTECODE: "1", ...(body.mode === "live" ? { OPENAI_API_KEY: process.env.OPENAI_API_KEY } : {}), ...(policyPath ? { CITYWHEELS_REFUND_RULE: policyPath } : {}) } });
             let out = "", stderr = "", pending = "";
             child.stdout.on("data", (chunk) => { out += chunk; if (out.length > 2000000) child.kill(); });

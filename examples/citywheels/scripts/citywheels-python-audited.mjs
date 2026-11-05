@@ -6,10 +6,10 @@ import { randomBytes, timingSafeEqual, createHash } from "node:crypto";
 import { mkdtempSync, mkdirSync, cpSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { AuditLog, sha256 } from "../dist/src/audit.js";
-import { createProxy } from "../dist/src/proxy.js";
+import { AuditLog, sha256 } from "../../../dist/src/audit.js";
+import { createProxy } from "../../../dist/src/proxy.js";
 
-const root = fileURLToPath(new URL("../", import.meta.url)), pythonRoot = resolve(process.argv[2]);
+const root = fileURLToPath(new URL("../../../", import.meta.url)), pythonRoot = resolve(process.argv[2]);
 const nativeRefund = process.argv.includes("--native-refund");
 if (nativeRefund && process.env.CITYWHEELS_REFUND_RULE) throw new Error("Native refund comparisons do not accept a QDL policy override");
 const live = process.argv.includes("--live"), modelAt = process.argv.indexOf("--model");
@@ -32,7 +32,7 @@ applyFixturePolicy(data, input);
 const operationalContext = applyOperationalContext(data, input);
 process.env.CITYWHEELS_DATA_DIR = data;
 if (input.now) process.env.CITYWHEELS_NOW = input.now;
-const { calculateRefund, getBooking, TOOL_NAMES, STAFF_VALUES, REFUND_RULE } = await import("../examples/citywheels/helpdesk.mjs");
+const { calculateRefund, getBooking, TOOL_NAMES, STAFF_VALUES, REFUND_RULE } = await import("../helpdesk.mjs");
 const logPath = join(directory, "audit.jsonl"), log = new AuditLog(logPath), token = "aia-" + randomBytes(24).toString("hex");
 const digest = (s) => createHash("sha256").update(s).digest();
 const python = process.env.CITYWHEELS_PYTHON ?? "python3";
@@ -42,7 +42,7 @@ process.once("SIGINT", () => stopping.abort());
 const scrub = (value) => [token, ...(live ? [process.env.OPENAI_API_KEY] : [])].filter(Boolean).reduce((text, key) => text.replaceAll(key, "[KEY]"), String(value));
 function childJson(script, request, args = [], env = {}) {
   return new Promise((resolveResult, reject) => {
-    const child = spawn(python, ["-B", join(root, "scripts", script), pythonRoot, ...args], { signal: AbortSignal.any([stopping.signal, AbortSignal.timeout(180000)]), stdio: ["pipe", "pipe", "pipe"], env: { PATH: process.env.PATH, PYTHONDONTWRITEBYTECODE: "1", ...(process.env.CITYWHEELS_BOOKING_CONTEXT ? { CITYWHEELS_BOOKING_CONTEXT: process.env.CITYWHEELS_BOOKING_CONTEXT } : {}), ...env } });
+    const child = spawn(python, ["-B", join(root, "examples/citywheels/scripts", script), pythonRoot, ...args], { signal: AbortSignal.any([stopping.signal, AbortSignal.timeout(180000)]), stdio: ["pipe", "pipe", "pipe"], env: { PATH: process.env.PATH, PYTHONDONTWRITEBYTECODE: "1", ...(process.env.CITYWHEELS_BOOKING_CONTEXT ? { CITYWHEELS_BOOKING_CONTEXT: process.env.CITYWHEELS_BOOKING_CONTEXT } : {}), ...env } });
     let out = "", error = "";
     child.stdout.on("data", (c) => { out += c; if (out.length > 2000000) child.kill(); });
     child.stderr.on("data", (c) => { error = (error + c).slice(-8000); if (process.argv.includes("--events")) process.stderr.write(scrub(c)); });

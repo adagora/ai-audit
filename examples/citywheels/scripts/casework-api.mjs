@@ -1,15 +1,15 @@
-import { CaseworkMonitoring } from "../dist/src/caseworkMonitoring.js";
-import { readCitywheelsContext, verifyCitywheelsContext } from "../dist/src/citywheelsContext.js";
+import { CaseworkMonitoring } from "../../../dist/src/caseworkMonitoring.js";
+import { readCitywheelsContext, validCitywheelsContext, verifyCitywheelsContext } from "../../../dist/examples/citywheels/src/context.js";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { join } from "node:path";
-import { QualificationStore, evidenceDigest } from "../dist/src/qualification.js";
-import { AuthorityStore } from "../dist/src/authority.js";
-import { CaseworkStore } from "../dist/src/casework.js";
-import { analyzeCaseworkEconomics } from "../dist/src/caseworkEconomics.js";
-import { CaseworkRegression } from "../dist/src/caseworkRegression.js";
-import { CaseworkLearning } from "../dist/src/caseworkLearning.js";
-import { hasDuplicateKeys } from "../dist/src/scan.js";
-import { SyntheticCitywheelsBackend, SyntheticCancellationExecutor } from "../dist/src/citywheelsExecutor.js";
+import { QualificationStore, evidenceDigest } from "../../../dist/src/qualification.js";
+import { AuthorityStore } from "../../../dist/src/authority.js";
+import { CaseworkStore } from "../../../dist/src/casework.js";
+import { analyzeCaseworkEconomics } from "../../../dist/src/caseworkEconomics.js";
+import { CaseworkRegression } from "../../../dist/src/caseworkRegression.js";
+import { CaseworkLearning } from "../../../dist/src/caseworkLearning.js";
+import { hasDuplicateKeys } from "../../../dist/src/scan.js";
+import { SyntheticCitywheelsBackend, SyntheticCancellationExecutor } from "../../../dist/examples/citywheels/src/executor.js";
 
 const digest = (token) => createHash("sha256").update(token).digest("hex");
 const sameCredential = (a, b) => timingSafeEqual(Buffer.from(digest(a), "hex"), Buffer.from(digest(b), "hex"));
@@ -22,7 +22,7 @@ export function createCaseworkApi({ directory, identities, resolveRelease, clock
   const qualifications = new QualificationStore(join(directory, "qualifications"));
   const authority = new AuthorityStore(join(directory, "casework-authority"), qualifications);
   const monitoring = new CaseworkMonitoring(join(directory, "casework-monitoring"), authority);
-  const cases = new CaseworkStore(join(directory, "casework"), authority);
+  const cases = new CaseworkStore(join(directory, "casework"), authority, { currency: "EUR", context: { source: "synthetic-citywheels-backend", valid: validCitywheelsContext } });
   const backend = new SyntheticCitywheelsBackend(join(directory, "casework-backend"), bookings);
   const executorFor = (c) => new SyntheticCancellationExecutor(join(directory, "casework-operations", c.id), backend, authority,
     () => resolveRelease(c.qualificationDigest), { intent: c.intent, autoApproveMinor: 10000, exceptionOwner: "refund-ops", ...(businessClock ? { businessClock } : {}) });

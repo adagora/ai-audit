@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import { AuditLog } from "../dist/src/audit.js";
+import { AuditLog } from "../../../dist/src/audit.js";
 
 const execute = (input) => {
   const child = spawnSync(process.execPath, [new URL("./citywheels-intentgauge.mjs", import.meta.url).pathname], { input: JSON.stringify(input), encoding: "utf8", timeout: 30000, env: { PATH: process.env.PATH } });
@@ -46,8 +46,9 @@ test("real CityWheels QDL respects second-level boundaries and isolates fixture 
   assert.notEqual(changed.data.bookingFixtureHash, original.data.bookingFixtureHash);
 });
 
-test("separate Python application uses the proxy and shared QDL without changing the native baseline", () => {
-  const pythonRoot = process.env.CITYWHEELS_PYTHON_ROOT ?? fileURLToPath(new URL("../../EternalChat copy/help-desk-agent/help-desk-agent/", import.meta.url));
+const pythonRoot = process.env.CITYWHEELS_PYTHON_ROOT ?? fileURLToPath(new URL("../../../../EternalChat copy/help-desk-agent/help-desk-agent/", import.meta.url));
+
+test("separate Python application uses the proxy and shared QDL without changing the native baseline", { skip: !existsSync(join(pythonRoot, "citywheels/agent.py")) && "Check out help-desk-agent or set CITYWHEELS_PYTHON_ROOT" }, () => {
   const run = (input) => {
     const child = spawnSync(process.execPath, [new URL("./citywheels-python-audited.mjs", import.meta.url).pathname, pythonRoot], { input: JSON.stringify(input), encoding: "utf8", timeout: 30000, env: { PATH: process.env.PATH } });
     assert.equal(child.status, 0, child.stderr); return JSON.parse(child.stdout);

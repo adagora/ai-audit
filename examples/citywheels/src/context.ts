@@ -1,5 +1,5 @@
-import { evidenceDigest, type Snapshot } from "./qualification.js";
-import { SyntheticCitywheelsBackend, type CustomerScope } from "./citywheelsExecutor.js";
+import { evidenceDigest, type Snapshot } from "../../../src/qualification.js";
+import { SyntheticCitywheelsBackend, type CustomerScope } from "./executor.js";
 
 export interface CitywheelsKnowledge {
   snapshot: Snapshot;

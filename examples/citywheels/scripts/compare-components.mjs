@@ -3,10 +3,10 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { join, resolve, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { QualificationStore, evidenceDigest } from "../dist/src/qualification.js";
+import { QualificationStore, evidenceDigest } from "../../../dist/src/qualification.js";
 import { businessSuite, businessEvaluators } from "./helpdesk-comparison-policy.mjs";
 
-const root = fileURLToPath(new URL("../", import.meta.url));
+const root = fileURLToPath(new URL("../../../", import.meta.url));
 const escape = (value) => String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 export function assessControlledPair(suite, native, qdl) {
   const issues = [], pairs = [];
@@ -42,7 +42,7 @@ export async function compareComponents({ evaluatorRoot = process.env.INTENTGAUG
   const store = new QualificationStore(join(directory, "identities"));
   const pythonFiles = readdirSync(join(pythonRoot, "citywheels")).filter((name) => name.endsWith(".py")).map((name) => `citywheels/${name}`);
   const capture = () => ({
-    host: store.capture(root, ["dist/src", "scripts/compare-components.mjs", "scripts/helpdesk-comparison-policy.mjs", "scripts/helpdesk-ambiguity.mjs", "scripts/citywheels-python-audited.mjs", "scripts/citywheels-python.py", "scripts/citywheels-python-model.py", "scripts/citywheels-operational-context.mjs", "examples/citywheels/helpdesk.mjs", "examples/citywheels/refund.json", "package-lock.json", "vendor", "node_modules/@quinelings/agent-sdk/dist", "node_modules/@quinelings/agent-sdk/package.json"]),
+    host: store.capture(root, ["dist/src", "dist/examples/citywheels/src", "examples/citywheels/scripts/compare-components.mjs", "examples/citywheels/scripts/helpdesk-comparison-policy.mjs", "examples/citywheels/scripts/helpdesk-ambiguity.mjs", "examples/citywheels/scripts/citywheels-python-audited.mjs", "examples/citywheels/scripts/citywheels-python.py", "examples/citywheels/scripts/citywheels-python-model.py", "examples/citywheels/scripts/citywheels-operational-context.mjs", "examples/citywheels/helpdesk.mjs", "examples/citywheels/refund.json", "package-lock.json", "vendor", "node_modules/@quinelings/agent-sdk/dist", "node_modules/@quinelings/agent-sdk/package.json"]),
     application: store.capture(pythonRoot, pythonFiles), fixtures: store.capture(pythonRoot, ["data"]), prompt: store.capture(pythonRoot, ["citywheels/prompts.py"]), tools: store.capture(pythonRoot, ["citywheels/tools.py"]), loop: store.capture(pythonRoot, ["citywheels/agent.py"]),
     evaluator: store.capture(evaluatorRoot, ["dist/src", "integrations/citywheels/target.mjs", "package-lock.json"]),
   });
@@ -64,7 +64,7 @@ export async function compareComponents({ evaluatorRoot = process.env.INTENTGAUG
       const evidenceRoot = join(directory, arm, "cases"); mkdirSync(evidenceRoot, { recursive: true, mode: 0o700 });
       const target = { name: `Python / same proxy and model / ${arm} refund tool`, revision: evidenceDigest({ fixedDigest, arm, model: manifest.model, live }), execute({ input }, context) {
         return new Promise((resolveOutput, reject) => {
-          const child = spawn(process.execPath, [join(root, "scripts/citywheels-python-audited.mjs"), pythonRoot, ...(arm === "native" ? ["--native-refund"] : []), ...(live ? ["--live", "--model", model] : [])], {
+          const child = spawn(process.execPath, [join(root, "examples/citywheels/scripts/citywheels-python-audited.mjs"), pythonRoot, ...(arm === "native" ? ["--native-refund"] : []), ...(live ? ["--live", "--model", model] : [])], {
             signal: signal ? AbortSignal.any([signal, context.signal]) : context.signal, stdio: ["pipe", "pipe", "pipe"], env: { PATH: process.env.PATH, PYTHONDONTWRITEBYTECODE: "1", CITYWHEELS_EVIDENCE_ROOT: evidenceRoot, ...(live ? { OPENAI_API_KEY: process.env.OPENAI_API_KEY } : {}) },
           });
           let out = "";

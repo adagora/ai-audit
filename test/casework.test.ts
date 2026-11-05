@@ -5,7 +5,7 @@ import { caseworkFixture } from "./caseworkFixture.js";
 import { CaseworkStore, COST_KINDS } from "../src/casework.js";
 
 function fixture() {
-  const f = caseworkFixture(), store = new CaseworkStore(join(f.root, "cases"), f.authority);
+  const f = caseworkFixture(), store = new CaseworkStore(join(f.root, "cases"), f.authority, { currency: "EUR" });
   const p = f.qualifications.load(f.request.packageDigest), scope = { tenant: f.actor.tenant, customer: "customer-a" };
   const input = { scope, intent: "refund", qualificationDigest: p.digest, question: "What refund can I get?", answer: "340 EUR, calculation only.", origin: { runId: "run-1", scenarioId: "one", repetition: 0, target: "ai-audit" as const, targetRevision: p.targetRevision, evaluation: "pass" as const, reportDigest: p.report.digest, audit: { available: true, chainVerified: true, records: [] } } };
   const c = store.ingest(input, f.now);
@@ -20,7 +20,7 @@ test("case import is idempotent, binds the actual observation and survives resta
   const f = fixture();
   assert.equal(f.store.ingest(f.input, f.now).id, f.c.id);
   assert.throws(() => f.store.ingest({ ...f.input, answer: "different" }, f.now), /observation_mismatch/);
-  const reopened = new CaseworkStore(join(f.root, "cases"), f.authority);
+  const reopened = new CaseworkStore(join(f.root, "cases"), f.authority, { currency: "EUR" });
   assert.equal(reopened.get(f.actor, f.c.id).answer, f.input.answer);
   assert.throws(() => f.store.ingest({ ...f.input, origin: { ...f.input.origin, target: "python" } }, f.now), /fabricated_audit_evidence/);
 });

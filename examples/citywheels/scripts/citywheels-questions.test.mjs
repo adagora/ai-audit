@@ -7,8 +7,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { startWorkbench } from "./helpdesk-workbench.mjs";
 
-const evaluator = process.env.INTENTGAUGE_ROOT ?? fileURLToPath(new URL("../../evalLOL/", import.meta.url));
-const pythonRoot = process.env.CITYWHEELS_PYTHON_ROOT ?? fileURLToPath(new URL("../../EternalChat copy/help-desk-agent/help-desk-agent/", import.meta.url));
+const evaluator = process.env.INTENTGAUGE_ROOT ?? fileURLToPath(new URL("../../../../evalLOL/", import.meta.url));
+const pythonRoot = process.env.CITYWHEELS_PYTHON_ROOT ?? fileURLToPath(new URL("../../../../EternalChat copy/help-desk-agent/help-desk-agent/", import.meta.url));
 const available = existsSync(join(evaluator, "dist/src/index.js")) && existsSync(join(pythonRoot, "citywheels/agent.py"));
 
 test("authenticated customer questions run both applications against owned live facts, preserve unevaluated evidence and block stale delivery", { skip: !available && "Build the separate IntentGauge and Python application checkouts" }, async () => {

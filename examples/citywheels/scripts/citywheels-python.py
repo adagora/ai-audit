@@ -86,7 +86,7 @@ elif live:
 request = json.load(sys.stdin)
 source = root / 'data'
 original = (source / 'bookings.json').read_bytes()
-evidence_root = Path(os.environ['CITYWHEELS_EVIDENCE_ROOT']) if os.environ.get('CITYWHEELS_EVIDENCE_ROOT') else Path(__file__).resolve().parents[1] / 'live' / 'evaluations'
+evidence_root = Path(os.environ['CITYWHEELS_EVIDENCE_ROOT']) if os.environ.get('CITYWHEELS_EVIDENCE_ROOT') else Path(__file__).resolve().parents[3] / 'live' / 'evaluations'
 evidence_root.mkdir(parents=True, exist_ok=True)
 with nullcontext(tempfile.mkdtemp(prefix='python-', dir=evidence_root)) as folder:
     data = Path(folder) / 'data'

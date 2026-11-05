@@ -14,3 +14,4 @@ fuzz/artifacts/
 fuzz/seeds/
 fuzz/logs/
 fuzz/dict.txt
+.DS_Store

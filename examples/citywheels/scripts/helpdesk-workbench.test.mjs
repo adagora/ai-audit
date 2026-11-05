@@ -6,9 +6,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { startWorkbench } from "./helpdesk-workbench.mjs";
-import { QualificationStore } from "../dist/src/qualification.js";
+import { QualificationStore } from "../../../dist/src/qualification.js";
 
-test("interactive workbench streams actual tools, compiles drafts, retains receipts and catches changed refund rules", { skip: !existsSync(join(process.env.INTENTGAUGE_ROOT ?? fileURLToPath(new URL("../../evalLOL/", import.meta.url)), "dist/src/index.js")) && "Build the separate IntentGauge checkout to run this integration" }, async () => {
+test("interactive workbench streams actual tools, compiles drafts, retains receipts and catches changed refund rules", { skip: !existsSync(join(process.env.INTENTGAUGE_ROOT ?? fileURLToPath(new URL("../../../../evalLOL/", import.meta.url)), "dist/src/index.js")) && "Build the separate IntentGauge checkout to run this integration" }, async () => {
   const app = await startWorkbench({ port: 0, home: mkdtempSync(join(tmpdir(), "helpdesk-workbench-")) });
   const base = app.url.split("/#")[0];
   const headers = { "x-workbench-token": app.token, "content-type": "application/json" };
@@ -136,8 +136,8 @@ test("interactive workbench streams actual tools, compiles drafts, retains recei
   } finally { app.server.closeAllConnections(); await new Promise((resolve) => app.server.close(resolve)); }
 });
 
-test("a changed evaluator artifact stops new experiments until the server is restarted", { skip: !existsSync(join(process.env.INTENTGAUGE_ROOT ?? fileURLToPath(new URL("../../evalLOL/", import.meta.url)), "dist/src/index.js")) }, async () => {
-  const source = process.env.INTENTGAUGE_ROOT ?? fileURLToPath(new URL("../../evalLOL/", import.meta.url));
+test("a changed evaluator artifact stops new experiments until the server is restarted", { skip: !existsSync(join(process.env.INTENTGAUGE_ROOT ?? fileURLToPath(new URL("../../../../evalLOL/", import.meta.url)), "dist/src/index.js")) }, async () => {
+  const source = process.env.INTENTGAUGE_ROOT ?? fileURLToPath(new URL("../../../../evalLOL/", import.meta.url));
   const root = mkdtempSync(join(tmpdir(), "casework-host-")), evaluator = join(root, "evaluator");
   mkdirSync(evaluator);
   cpSync(join(source, "dist"), join(evaluator, "dist"), { recursive: true });
@@ -145,7 +145,7 @@ test("a changed evaluator artifact stops new experiments until the server is res
   const previous = process.env.INTENTGAUGE_ROOT;
   const previousCitywheels = process.env.CITYWHEELS_ROOT;
   process.env.INTENTGAUGE_ROOT = evaluator;
-  process.env.CITYWHEELS_ROOT = fileURLToPath(new URL("../", import.meta.url));
+  process.env.CITYWHEELS_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
   let app;
   try {
     app = await startWorkbench({ port: 0, home: join(root, "workspace") });
@@ -160,7 +160,7 @@ test("a changed evaluator artifact stops new experiments until the server is res
   }
 });
 
-test("casework HTTP enforces separate customer/operator sessions, exact-answer review, delivery limits and restart persistence", { skip: !existsSync(join(process.env.INTENTGAUGE_ROOT ?? fileURLToPath(new URL("../../evalLOL/", import.meta.url)), "dist/src/index.js")) }, async () => {
+test("casework HTTP enforces separate customer/operator sessions, exact-answer review, delivery limits and restart persistence", { skip: !existsSync(join(process.env.INTENTGAUGE_ROOT ?? fileURLToPath(new URL("../../../../evalLOL/", import.meta.url)), "dist/src/index.js")) }, async () => {
   const home = mkdtempSync(join(tmpdir(), "casework-http-"));
   const outsiderToken = "outside-operator-credential-000000", otherCustomerToken = "other-customer-credential-00000000";
   const caseworkIdentities = [{ token: outsiderToken, operator: { tenant: "another-shop", id: "operator-b", roles: ["operator", "reviewer", "deployer"] } }, { token: otherCustomerToken, customer: { tenant: "citywheels", customer: "another-customer" } }];
@@ -220,7 +220,7 @@ test("casework HTTP enforces separate customer/operator sessions, exact-answer r
   } finally { await close(); }
 });
 
-test("executor HTTP requires the owning customer's consent and recovers card/voucher settlement across restart", { skip: !existsSync(join(process.env.INTENTGAUGE_ROOT ?? fileURLToPath(new URL("../../evalLOL/", import.meta.url)), "dist/src/index.js")) }, async () => {
+test("executor HTTP requires the owning customer's consent and recovers card/voucher settlement across restart", { skip: !existsSync(join(process.env.INTENTGAUGE_ROOT ?? fileURLToPath(new URL("../../../../evalLOL/", import.meta.url)), "dist/src/index.js")) }, async () => {
   const home = mkdtempSync(join(tmpdir(), "executor-http-"));
   const otherCustomer = "executor-other-customer-credential", operatorOnly = "executor-operator-only-credential";
   const caseworkIdentities = [{ token: otherCustomer, customer: { tenant: "citywheels", customer: "another-customer" } }, { token: operatorOnly, operator: { tenant: "citywheels", id: "operator-only", roles: ["operator"] } }];
@@ -298,7 +298,7 @@ test("executor HTTP requires the owning customer's consent and recovers card/vou
   } finally { await close(); }
 });
 
-test("learning API keeps assigned labels blind and isolates review-only sessions", async () => {
+test("learning API keeps assigned labels blind and isolates review-only sessions", { skip: !existsSync(join(process.env.INTENTGAUGE_ROOT ?? fileURLToPath(new URL("../../../../evalLOL/", import.meta.url)), "dist/src/index.js")) && "Build IntentGauge first" }, async () => {
   const tokenA = "a".repeat(32), tokenB = "b".repeat(32), tokenC = "c".repeat(32);
   const caseworkIdentities = [
     { token: tokenA, operator: { tenant: "citywheels", id: "first", roles: ["labeler"] } },
@@ -319,7 +319,7 @@ test("learning API keeps assigned labels blind and isolates review-only sessions
     const { id } = await created.json();
     assert.equal((await request("cases", tokenA)).status, 403);
     assert.equal((await request("operations", tokenA)).status, 403);
-    const economicsDataset = JSON.parse(readFileSync(new URL("../examples/citywheels/workbench/economics.sample.json", import.meta.url), "utf8"));
+    const economicsDataset = JSON.parse(readFileSync(new URL("../workbench/economics.sample.json", import.meta.url), "utf8"));
     assert.equal((await request("economics/analyze", tokenA, { dataset: economicsDataset })).status, 403);
     const economicResponse = await request("economics/analyze", app.token, { dataset: economicsDataset });
     assert.equal(economicResponse.status, 200);
@@ -343,11 +343,11 @@ test("learning API keeps assigned labels blind and isolates review-only sessions
   } finally { await new Promise((resolve) => app.server.close(resolve)); }
 });
 
-test("learning export is consumed by the separate IntentGauge calibration engine", { skip: !existsSync(join(process.env.INTENTGAUGE_ROOT ?? fileURLToPath(new URL("../../evalLOL/", import.meta.url)), "dist/src/index.js")) && "Build IntentGauge first" }, async () => {
-  const { CaseworkLearning } = await import("../dist/src/caseworkLearning.js");
-  const { evidenceDigest } = await import("../dist/src/qualification.js");
+test("learning export is consumed by the separate IntentGauge calibration engine", { skip: !existsSync(join(process.env.INTENTGAUGE_ROOT ?? fileURLToPath(new URL("../../../../evalLOL/", import.meta.url)), "dist/src/index.js")) && "Build IntentGauge first" }, async () => {
+  const { CaseworkLearning } = await import("../../../dist/src/caseworkLearning.js");
+  const { evidenceDigest } = await import("../../../dist/src/qualification.js");
   const { pathToFileURL } = await import("node:url");
-  const { calibrate } = await import(pathToFileURL(join(process.env.INTENTGAUGE_ROOT ?? fileURLToPath(new URL("../../evalLOL/", import.meta.url)), "dist/src/index.js")).href);
+  const { calibrate } = await import(pathToFileURL(join(process.env.INTENTGAUGE_ROOT ?? fileURLToPath(new URL("../../../../evalLOL/", import.meta.url)), "dist/src/index.js")).href);
   const store = new CaseworkLearning(mkdtempSync(join(tmpdir(), "learning-calibration-")));
   const principal = (id, role) => ({ tenant: "shop", id, roles: [role] });
   const operator = principal("operator", "operator"), rubric = { id: "correct", revision: "v1", text: "Matches verified policy" }, ids = [];

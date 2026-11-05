@@ -9,7 +9,7 @@ export async function runCitywheelsQuestion({ root, pythonRoot, directory, targe
   mkdirSync(evidence, { recursive: true, mode: 0o700 });
   const contextPath = join(evidence, "context.json");
   writeFileSync(contextPath, JSON.stringify(context), { mode: 0o600 });
-  const args = target === "ai-audit" ? [join(root, "scripts/citywheels-intentgauge.mjs")] : target === "python-audit" ? [join(root, "scripts/citywheels-python-audited.mjs"), pythonRoot] : ["-B", join(root, "scripts/citywheels-python.py"), pythonRoot];
+  const args = target === "ai-audit" ? [join(root, "examples/citywheels/scripts/citywheels-intentgauge.mjs")] : target === "python-audit" ? [join(root, "examples/citywheels/scripts/citywheels-python-audited.mjs"), pythonRoot] : ["-B", join(root, "examples/citywheels/scripts/citywheels-python.py"), pythonRoot];
   const command = target === "python" ? process.env.CITYWHEELS_PYTHON ?? "python3" : process.execPath;
   return new Promise((resolveResult, reject) => {
     const child = spawn(command, args, { signal: AbortSignal.timeout(25000), stdio: ["pipe", "pipe", "pipe"], env: { PATH: process.env.PATH, PYTHONDONTWRITEBYTECODE: "1", CITYWHEELS_BOOKING_CONTEXT: contextPath, CITYWHEELS_EVIDENCE_ROOT: evidence, ...(policyPath ? { CITYWHEELS_REFUND_RULE: policyPath } : {}) } });

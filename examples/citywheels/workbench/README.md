@@ -33,7 +33,7 @@ Stopping a request aborts its active worker. Partial evidence may remain and is 
 ## Verification
 
 ```sh
-node --test scripts/helpdesk-workbench.test.mjs
+node --test examples/citywheels/scripts/helpdesk-workbench.test.mjs
 ```
 
 This drives the HTTP API with real offline worker processes: streamed model/tool events, authenticated access, QDL draft compilation, retained audit chain, replay receipt, a changed-policy regression, history reload and the Python target. It makes no paid calls. The test is skipped when the separate IntentGauge build is unavailable.

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { MONITORING_SIGNALS } from "../dist/src/caseworkMonitoring.js";
+import { MONITORING_SIGNALS } from "../../../dist/src/caseworkMonitoring.js";
 
 export async function configureSyntheticMonitoring(app, overrides = {}) {
   const response = await fetch(app.url.split("/#")[0] + "/api/casework/monitoring/plans", { method: "POST", headers: { "content-type": "application/json", "x-workbench-token": app.token }, body: JSON.stringify({

@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { caseworkFixture } from "./caseworkFixture.js";
-import { readCitywheelsContext, verifyCitywheelsContext } from "../src/citywheelsContext.js";
-import { SyntheticCitywheelsBackend } from "../src/citywheelsExecutor.js";
-import { CaseworkStore } from "../src/casework.js";
+import { caseworkFixture } from "../../../test/caseworkFixture.js";
+import { readCitywheelsContext, validCitywheelsContext, verifyCitywheelsContext, type CitywheelsReadContext } from "../src/context.js";
+import { SyntheticCitywheelsBackend } from "../src/executor.js";
+import { CaseworkStore } from "../../../src/casework.js";
 
 function fixture() {
   const f = caseworkFixture(), scope = { tenant: f.actor.tenant, customer: "customer-a" };
@@ -42,7 +42,7 @@ test("knowledge validity, quote expiry, policy identity and time-band changes in
 
 test("operational observations retain their own evidence, cannot impersonate evaluation and require context checks at delivery", () => {
   const f = fixture(), context = readCitywheelsContext(f.backend, f.scope, "CW-1002", f.knowledge, f.now);
-  const p = f.qualifications.load(f.request.packageDigest), store = new CaseworkStore(join(f.root, "cases"), f.authority);
+  const p = f.qualifications.load(f.request.packageDigest), store = new CaseworkStore(join(f.root, "cases"), f.authority, { currency: "EUR", context: { source: "synthetic-citywheels-backend", valid: validCitywheelsContext } });
   const audit = { available: false, chainVerified: null, records: [] };
   const evidence = { scope: f.scope, question: "Can I cancel now?", answer: "Quote only.", intent: "refund", target: "python" as const, targetRevision: p.targetRevision, context, audit };
   const observation = f.qualifications.put(JSON.stringify(evidence));
@@ -57,7 +57,7 @@ test("operational observations retain their own evidence, cannot impersonate eva
   const g = f.authority.approve(f.actor, { ...f.request, tier: "contain", limits: { ...f.request.limits, actions: ["deliver-answer"] } }, f.current, f.now);
   f.authority.activate(f.actor, g.id, f.current, f.now);
   assert.equal(store.deliver(f.actor, c.id, f.current, f.now).delivery.reason, "context_verification_required");
-  const check = () => verifyCitywheelsContext(f.backend, f.scope, c.context!, f.knowledge.snapshot.digest, f.now);
+  const check = () => verifyCitywheelsContext(f.backend, f.scope, c.context as CitywheelsReadContext, f.knowledge.snapshot.digest, f.now);
   assert.equal(store.deliver(f.actor, c.id, f.current, f.now, check).delivery.state, "delivered");
   assert.equal(store.inbox(f.scope).length, 1);
 });

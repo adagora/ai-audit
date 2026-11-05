@@ -8,8 +8,8 @@
   "scripts": {
     "build": "tsc",
     "build:fast": "tsrs --skipLibCheck",
-    "test": "npm run build && node --test dist/test/*.test.js scripts/incident-regression.test.mjs scripts/citywheels-intentgauge.test.mjs scripts/helpdesk-comparison-policy.test.mjs scripts/helpdesk-workbench.test.mjs scripts/experiment-inventory.test.mjs scripts/citywheels-questions.test.mjs scripts/casework-monitoring.test.mjs scripts/compare-components.test.mjs scripts/helpdesk-ambiguity.test.mjs",
-    "example:helpdesk": "npm run build && node --env-file-if-exists=.env scripts/helpdesk-workbench.mjs",
+    "test": "npm run build && node --test dist/test/*.test.js dist/examples/citywheels/test/*.test.js scripts/*.test.mjs examples/citywheels/scripts/*.test.mjs",
+    "example:helpdesk": "npm run build && node --env-file-if-exists=.env examples/citywheels/scripts/helpdesk-workbench.mjs",
     "fuzz": "npm run build && FUZZ_SCALE=${FUZZ_SCALE:-50} node --test dist/test/fuzz.test.js",
     "fuzz:coverage": "npm run build && bash fuzz/run.sh",
     "example:wycena": "npm run build && node examples/quineling-wycena/run.mjs",
