@@ -64,11 +64,12 @@ test("comparison evaluates unknown usage, recovers both policies, and marks obse
   assert.equal(report.evidence.replay, "reproduced");
   assert.equal(report.evidence.anchors, "not-checked");
   assert.notEqual(report.policies.baseline.sourceHash, report.policies.candidate.sourceHash);
-  const { Session } = await import("@quinelings/agent-sdk/v1");
+  const { policyRuntime } = await import("../src/policyAdapter.js");
+  const { Session } = await policyRuntime({ source: report.policies.baseline.source });
   const session = new Session();
   const artifact = session.recover({ source: report.policies.baseline.source });
   assert.equal(artifact.id, report.policies.baseline.sourceHash);
-  assert.deepEqual(session.run({ artifactId: artifact.id, requestId: "exported", inputs: report.rows[0].inputs }).result.occurrences[0].outputs, report.rows[0].baseline.output);
+  assert.deepEqual(session.run({ artifactId: artifact.id, requestId: "exported", inputs: report.rows[0].inputs }).result.outputs, report.rows[0].baseline.output);
   assert.equal(report.rows[0].recordHash, log.read()[0].hash);
   const same = await compareSession(log, { baselineLimit: 2, candidateLimit: 2 });
   assert.equal(same.summary.disagreements, 0);

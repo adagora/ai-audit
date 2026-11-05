@@ -1,9 +1,10 @@
+import { policyRuntime } from "./policyAdapter.js";
 import { existsSync, statSync } from "node:fs";
 import { AuditLog, canon, decisionConsistency, sha256, verifyAnchors, type Entry, type Rec } from "./audit.js";
 import { inspect, type Allowlist } from "./scan.js";
 
 export type QdlStatus = "completed" | "refused" | "failed";
-export interface QdlFault { code: string; path: string; nodeId?: string; occurrence?: number }
+export interface QdlFault { code: string; path: string; nodeId?: string }
 export interface QdlTraceStep { nodeId: string; op: string; value: unknown }
 export interface QdlStep {
   status?: QdlStatus; inputs?: Record<string, unknown>;
@@ -17,12 +18,10 @@ interface Outcome { status: QdlStatus; outputs?: unknown[]; inputHash?: string; 
 const fault = (e: any): QdlFault => ({
   code: String(e?.code ?? "failed"), path: String(e?.path ?? "$"),
   ...(e?.nodeId != null && { nodeId: String(e.nodeId) }),
-  ...(Number.isInteger(e?.occurrence) && { occurrence: e.occurrence }),
 });
 const sameFault = (logged?: QdlFault, fresh?: QdlFault) => logged?.code === fresh?.code && logged?.path === fresh?.path
-  && (logged?.nodeId === undefined || logged.nodeId === fresh?.nodeId)
-  && (logged?.occurrence === undefined || logged.occurrence === fresh?.occurrence);
-const traceOf = (occurrence: any): QdlTraceStep[] => (Array.isArray(occurrence?.trace) ? occurrence.trace : [])
+  && logged?.nodeId === fresh?.nodeId;
+const traceOf = (run: any): QdlTraceStep[] => (Array.isArray(run?.trace) ? run.trace : [])
   .filter((t: any) => t && typeof t.nodeId === "string")
   .map((t: any) => ({ nodeId: t.nodeId, op: String(t.op ?? ""), value: t.value }));
 
@@ -41,22 +40,17 @@ function storeProgram(log: AuditLog, artifact: { id: string; source: string; pay
   else known.ids.add(artifact.id);
 }
 
-async function session() {
-  const m = await import("@quinelings/agent-sdk/v1").catch(() => { throw new Error("audit_qdl_unavailable"); });
-  return { s: new m.Session(), refusal: (e: unknown) => e instanceof m.QdlError };
+async function session(program: Program) {
+  const m = await policyRuntime(program);
+  return { s: new m.Session(), refusal: (e: unknown) => e instanceof m.PolicyError };
 }
 
 function evaluate(s: any, refusal: (e: unknown) => boolean, artifact: any, inputs: Record<string, unknown>, requestId: string): Outcome {
   let r: any;
   try { r = s.run({ artifactId: artifact.id, requestId, inputs }); }
   catch (e) { if (!refusal(e)) throw e; return { status: "refused", error: fault(e) }; }
-  const occurrences: any[] = r.result.occurrences ?? [];
-  if (r.result.status === "completed") {
-    const occurrence = occurrences[0];
-    return { status: "completed", outputs: occurrence?.outputs, inputHash: r.result.inputHash, trace: traceOf(occurrence) };
-  }
-  const failed = occurrences.find((o) => o?.status === "failed") ?? occurrences[0];
-  return { status: "failed", inputHash: r.result.inputHash, error: fault(failed?.diagnostic), trace: traceOf(failed) };
+  return { status: r.result.status, outputs: r.result.outputs, inputHash: r.result.inputHash,
+    ...(r.result.error && { error: fault(r.result.error) }), trace: traceOf(r.result) };
 }
 
 function retainedEntry(e: Omit<Entry, "output" | "step">, carnet?: Allowlist): Omit<Entry, "output" | "step"> {
@@ -66,7 +60,7 @@ function retainedEntry(e: Omit<Entry, "output" | "step">, carnet?: Allowlist): O
 
 export async function recordQdl(log: AuditLog, e: Omit<Entry, "output" | "step">, prog: Program, inputs: Record<string, unknown>, carnet?: Allowlist): Promise<{ decision: Rec; step: QdlRec }> {
   const entry = retainedEntry(e, carnet);
-  const { s, refusal } = await session();
+  const { s, refusal } = await session(prog);
   const findings = inspect({ inputs, program: prog.source ?? prog.intent, params: entry.params, sources: entry.sources, model: entry.model, prompt: entry.prompt?.templateId }, carnet).findings;
   if (findings.length) {
     const decision = log.record({ systemId: entry.systemId, useCase: entry.useCase, llmCallId: entry.llmCallId, correlation: entry.correlation, input: entry.input, output: undefined, qdlDecision: true });
@@ -93,7 +87,9 @@ export async function replayQdl(log: AuditLog, id: string, recs: Rec[] = log.rea
   if (!r) throw new Error("audit_no_qdl_step");
   const q = r.qdl, logged = q.status ?? "completed";
   if (q.inputs === undefined) throw new Error("audit_qdl_not_replayable");
-  const { s, refusal } = await session();
+  const source = q.source ?? recs.find((x) => x.kind === "program" && x.id === q.sourceHash)?.source;
+  if (q.sourceHash !== undefined && typeof source !== "string") throw new Error("audit_qdl_source_missing");
+  const { s, refusal } = await session({ ...(typeof source === "string" && { source }), intent: q.intent });
   let artifact: any, outcome: Outcome | undefined;
   if (q.sourceHash !== undefined) {
     const source = q.source ?? recs.find((x) => x.kind === "program" && x.id === q.sourceHash)?.source;

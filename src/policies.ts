@@ -1,3 +1,4 @@
+import { policyRuntime } from "./policyAdapter.js";
 import BendPolicies from "./bend/policies.mjs";
 import { bendList, bendListOf, fromBendList, type BendList } from "./context.js";
 
@@ -62,7 +63,7 @@ function leaves(a: unknown, b: unknown, path: string, out: PolicyChange[]) {
 export function programChanges(before: any, after: any): PolicyChange[] {
   const out: PolicyChange[] = [];
   leaves(before?.name, after?.name, "name", out);
-  leaves(before?.thought, after?.thought, "thought", out);
+  leaves(before?.rationale, after?.rationale, "rationale", out);
   leaves(before?.task?.outputs, after?.task?.outputs, "outputs", out);
   const nodes = (p: any) => new Map<string, unknown>((p?.task?.nodes ?? []).map((n: any) => [String(n.id), n]));
   const a = nodes(before), b = nodes(after);
@@ -71,18 +72,20 @@ export function programChanges(before: any, after: any): PolicyChange[] {
 }
 
 export async function programPayloads(records: any[]): Promise<(hash: string) => any> {
-  const m = await import("@quinelings/agent-sdk/v1").catch(() => { throw new Error("audit_qdl_unavailable"); });
   const sources = new Map<string, string>();
   for (const r of records) {
     if (r?.kind === "program" && typeof r.source === "string" && !sources.has(r.id)) sources.set(r.id, r.source);
     if (typeof r?.qdl?.sourceHash === "string" && typeof r.qdl.source === "string" && !sources.has(r.qdl.sourceHash)) sources.set(r.qdl.sourceHash, r.qdl.source);
   }
   const payloads = new Map<string, unknown>();
+  const runtimes = new Map<string, Awaited<ReturnType<typeof policyRuntime>> | null>();
+  for (const [hash, source] of sources) runtimes.set(hash, await policyRuntime({ source }).catch(() => null));
   return (hash: string) => {
     if (!payloads.has(hash)) {
       let p: unknown = null;
       const source = sources.get(hash);
-      if (source !== undefined) try { const artifact = new m.Session().recover({ source }); if (artifact.id === hash) p = artifact.payload; } catch { }
+      const runtime = runtimes.get(hash);
+      if (source !== undefined && runtime) try { const artifact = new runtime.Session().recover({ source }); if (artifact.id === hash) p = artifact.payload; } catch { }
       payloads.set(hash, p);
     }
     return payloads.get(hash);

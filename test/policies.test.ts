@@ -7,14 +7,14 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AuditLog, report } from "../src/audit.js";
 
-const skip = Number(process.versions.node.split(".")[0]) < 22 ? "Quinelings SDK needs Node >= 22" : false;
+const skip = Number(process.versions.node.split(".")[0]) < 22 ? "Node >= 22 required" : false;
 const cli = fileURLToPath(new URL("../src/cli.js", import.meta.url));
 const v1 = JSON.parse(readFileSync(new URL("../../examples/evaluation/machining-policy.json", import.meta.url), "utf8"));
 const v2 = structuredClone(v1);
 v2.name = "CAD machining quote policy v2";
 v2.inputs.find((i: any) => i.id === "floor").value = 160;
 v2.inputs.find((i: any) => i.id === "tolerance").value = 0.03;
-const unitPrice = { format: "qdl-intent", version: 1, name: "Unit price", thought: "unit price = total / pieces",
+const unitPrice = { format: "auditline-policy", version: 1, name: "Unit price", rationale: "unit price = total / pieces",
   inputs: [{ id: "total", name: "total", type: { kind: "number", unit: "PLN", min: 0 } }, { id: "pieces", name: "pieces", type: { kind: "number", unit: "one", min: 0 } }],
   steps: [{ id: "unit", op: "arithmetic", inputs: ["total", "pieces"], params: { kind: "div" } }], outputs: ["unit"] };
 const inputs = { minutes: 42, rate: 4.5, setup: 120, material: 85, llmPrice: 274 };
@@ -49,7 +49,7 @@ test("versions per use case in order of first use; a rollback is the current ver
   const [noPrograms] = await withChanges([machining], records.filter((r) => r.kind !== "program"));
   assert.equal(noPrograms.versions[1].changes, null);
   const { md, policies } = report(log, "2000", "2100");
-  assert.equal(policies.length, 2); assert.match(md, /## Wersje polityk QDL/); assert.match(md, /- v1 \(aktualna\) ql_[0-9a-f]{12}… „CAD machining quote policy v1”: decyzje 3/);
+  assert.equal(policies.length, 2); assert.match(md, /## Wersje polityk/); assert.match(md, /- v1 \(aktualna\) ap_[0-9a-f]{12}… „CAD machining quote policy v1”: decyzje 3/);
 });
 
 test("ai-audit policies prints one JSON line per use case with versions and changes", { skip }, async () => {

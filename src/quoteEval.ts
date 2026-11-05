@@ -1,3 +1,4 @@
+import { policyRuntime } from "./policyAdapter.js";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { canon } from "./audit.js";
@@ -60,8 +61,8 @@ export function scoreRows(rows: QuoteRow[], split: QuoteCase["split"]) {
 
 export async function evaluateQuotes(dataset: QuoteDataset, options: { repeats: number; apiKey?: string; fetcher?: typeof fetch; endpoint?: string }) {
   if (!Number.isInteger(options.repeats) || options.repeats < 0 || options.repeats > 10 || (options.repeats > 0 && !options.apiKey)) throw new Error("audit_eval_options_invalid");
-  const m = await import("@quinelings/agent-sdk/v1").catch(() => { throw new Error("audit_qdl_unavailable"); });
   const policy = JSON.parse(readFileSync(new URL("../../examples/evaluation/machining-policy.json", import.meta.url), "utf8"));
+  const m = await policyRuntime({ intent: policy });
   const session = new m.Session();
   const artifact = session.compile(policy);
   const recovered = new m.Session();
@@ -74,8 +75,8 @@ export async function evaluateQuotes(dataset: QuoteDataset, options: { repeats: 
     const replayStart = performance.now();
     const again = recovered.run({ artifactId: artifact.id, requestId: item.id, inputs: item.facts });
     const qdlReplayMs = Math.round((performance.now() - replayStart) * 1000) / 1000;
-    const output = run.result.occurrences?.[0]?.outputs;
-    const other = again.result.occurrences?.[0]?.outputs;
+    const output = run.result.outputs;
+    const other = again.result.outputs;
     if (run.result.status !== "completed" || !Array.isArray(output) || typeof output[0] !== "number" || typeof output[2] !== "boolean") throw new Error("audit_eval_qdl_failed");
     const row: QuoteRow = { id: item.id, split: item.split, expectedReview: item.expectedReview, price: output[0], qdlReview: !output[2], qdlReproduced: JSON.stringify(output) === JSON.stringify(other), qdlEvaluateMs, qdlReplayMs, samples: [] };
     for (let i = 0; i < options.repeats; i++) {

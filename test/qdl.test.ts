@@ -6,11 +6,11 @@ import { join } from "node:path";
 import { AuditLog, report, sha256 } from "../src/audit.js";
 
 const major = Number(process.versions.node.split(".")[0]);
-const skip = major < 22 ? "Quinelings SDK needs Node >= 22" : false;
+const skip = major < 22 ? "Node >= 22 required" : false;
 const n = (unit: string, x = {}) => ({ kind: "number", unit, min: 0, ...x });
 export const quoteIntent = {
-  format: "qdl-intent", version: 1, name: "CAD quote with floor",
-  thought: "price = max(machining minutes x rate, floor); propose approval only if price <= budget",
+  format: "auditline-policy", version: 1, name: "CAD quote with floor",
+  rationale: "price = max(machining minutes x rate, floor); propose approval only if price <= budget",
   inputs: [{ id: "minutes", name: "minutes", type: n("min") }, { id: "rate", name: "rate", type: n("PLN*min^-1") },
     { id: "budget", name: "budget", type: n("PLN") }, { id: "floor", value: 150, type: n("PLN") }],
   steps: [{ id: "raw", op: "arithmetic", inputs: ["minutes", "rate"], params: { kind: "mul" } },
@@ -19,7 +19,7 @@ export const quoteIntent = {
     { id: "approve", op: "action", inputs: ["ok", "price"], params: { allowed: true, action: "approve-quote" } }],
   outputs: ["price", "ok", "approve"],
 };
-const perPiece = { format: "qdl-intent", version: 1, name: "Unit price", thought: "unit price = total / pieces",
+const perPiece = { format: "auditline-policy", version: 1, name: "Unit price", rationale: "unit price = total / pieces",
   inputs: [{ id: "total", name: "total", type: n("PLN") }, { id: "pieces", name: "pieces", type: n("one") }],
   steps: [{ id: "unit", op: "arithmetic", inputs: ["total", "pieces"], params: { kind: "div" } }], outputs: ["unit"] };
 const quote = { minutes: 42, rate: 4.5, budget: 200 };
@@ -37,7 +37,7 @@ test("QDL step: logged, replayed in a fresh session, tamper refused", { skip }, 
   const lines = readFileSync(log.path, "utf8").trim().split("\n"); const p = JSON.parse(lines[0]);
   assert.equal(p.kind, "program"); p.source = p.source.replace("150", "1"); lines[0] = JSON.stringify(p); writeFileSync(log.path, lines.join("\n") + "\n");
   assert.equal(log.verifyChain().ok, false);
-  await assert.rejects(replayQdl(log, step.id), (e: any) => e.message === "audit_qdl_source_invalid" && e.code === "identity");
+  await assert.rejects(replayQdl(log, step.id), /audit_qdl_source_mismatch/);
 });
 
 test("refused, failed and invalid programs are recorded and replay as the same outcome", { skip }, async () => {
@@ -45,12 +45,12 @@ test("refused, failed and invalid programs are recorded and replay as the same o
   const log = fresh();
   const refused = await recordQdl(log, entry, { intent: quoteIntent }, { ...quote, minutes: -5 });
   assert.equal(refused.decision.output, undefined);
-  assert.equal(refused.step.qdl.status, "refused"); assert.deepEqual(refused.step.qdl.error, { code: "refinement", path: "$.bindings.minutes" });
+  assert.equal(refused.step.qdl.status, "refused"); assert.deepEqual(refused.step.qdl.error, { code: "policy_refinement", path: "$.bindings.minutes" });
   const failed = await recordQdl(log, entry, { intent: perPiece }, { total: 100, pieces: 0 });
-  assert.equal(failed.step.qdl.status, "failed"); assert.equal(failed.step.qdl.error!.code, "division-zero"); assert.match(failed.step.qdl.inputHash!, /^qi_/);
+  assert.equal(failed.step.qdl.status, "failed"); assert.equal(failed.step.qdl.error!.code, "policy_division_by_zero"); assert.match(failed.step.qdl.inputHash!, /^ai_/);
   const invented = { ...quoteIntent, steps: [...quoteIntent.steps, { id: "leak", op: "fetch", inputs: [], params: { url: "https://example.invalid" } }] };
   const invalid = await recordQdl(log, entry, { intent: invented }, quote);
-  assert.equal(invalid.step.qdl.status, "refused"); assert.equal(invalid.step.qdl.error!.code, "invalid-input");
+  assert.equal(invalid.step.qdl.status, "refused"); assert.equal(invalid.step.qdl.error!.code, "policy_operation");
   assert.equal(invalid.step.qdl.sourceHash, undefined); assert.deepEqual(invalid.step.qdl.intent, invented); assert.match(invalid.step.qdl.intentHash!, /^[0-9a-f]{64}$/);
   for (const x of [refused, failed, invalid]) {
     const r = await replayQdl(log, x.decision.id);
@@ -59,24 +59,14 @@ test("refused, failed and invalid programs are recorded and replay as the same o
   assert.deepEqual(log.verifyChain(), { ok: true });
 });
 
-test("a pre-change failure record with only code and path still replays", { skip }, async () => {
+test("a changed failure diagnostic does not reproduce", { skip }, async () => {
   const { recordQdl, replayQdl } = await import("../src/qdl.js");
   const log = fresh();
   const failed = await recordQdl(log, entry, { intent: perPiece }, { total: 100, pieces: 0 });
-  assert.equal(Number.isInteger(failed.step.qdl.error?.occurrence), true);
   const lines = readFileSync(log.path, "utf8").trim().split("\n");
-  const i = lines.findIndex((l) => JSON.parse(l).id === failed.step.id);
+  const i = lines.findIndex((line) => JSON.parse(line).id === failed.step.id);
   const rec = JSON.parse(lines[i]);
-  rec.qdl.error = { code: rec.qdl.error.code, path: rec.qdl.error.path };
-  lines[i] = JSON.stringify(rec);
-  writeFileSync(log.path, lines.join("\n") + "\n");
-  const again = await replayQdl(log, failed.decision.id);
-  assert.equal(again.reproduced, true);
-  assert.equal(again.error?.code, rec.qdl.error.code);
-  assert.equal(again.error?.path, rec.qdl.error.path);
-  const freshOccurrence = again.error?.occurrence;
-  assert.equal(Number.isInteger(freshOccurrence), true);
-  rec.qdl.error = { code: rec.qdl.error.code, path: rec.qdl.error.path, occurrence: Number(freshOccurrence) + 1 };
+  rec.qdl.error.nodeId = "different";
   lines[i] = JSON.stringify(rec);
   writeFileSync(log.path, lines.join("\n") + "\n");
   assert.equal((await replayQdl(log, failed.decision.id)).reproduced, false);
@@ -92,7 +82,7 @@ test("llmCallId links the decision; approve and report treat the :qdl companion 
   await recordQdl(log, entry, { intent: quoteIntent }, { ...quote, minutes: -5 });
   const { stats, qdl, md } = report(log, "2000", "2100");
   assert.deepEqual([stats.decisions, stats.reviewed, stats.unreviewed, stats.withReplayableStep], [2, 1, 1, 2]);
-  assert.deepEqual(qdl, { completed: 1, refused: 1, failed: 0 }); assert.match(md, /## Kroki QDL/);
+  assert.deepEqual(qdl, { completed: 1, refused: 1, failed: 0 }); assert.match(md, /## Kroki polityk/);
   const lines = readFileSync(log.path, "utf8").trim().split("\n"), i = lines.findIndex((l) => l.includes('"qdl"'));
   const edited = JSON.parse(lines[i]); edited.qdl.inputs.rate = 3.5; lines[i] = JSON.stringify(edited);
   const copy = new AuditLog(log.path + ".edited"); writeFileSync(copy.path, lines.join("\n") + "\n");
@@ -104,14 +94,14 @@ test("secrets and personal data in inputs, program or params are refused before 
   const { recordQdl, replayQdl } = await import("../src/qdl.js");
   const log = fresh();
   const email = "jan.kowalski@example.com", key = "AKIA" + "IOSFODNN7EXAMPLQ";
-  const echo = { format: "qdl-intent", version: 1, name: "Echo contact", thought: "returns the routing contact",
+  const echo = { format: "auditline-policy", version: 1, name: "Echo contact", rationale: "returns the routing contact",
     inputs: [{ id: "contact", name: "contact", type: { kind: "string" } }], steps: [], outputs: ["contact"] };
   const inInputs = await recordQdl(log, { ...entry, llmCallId: "llm-call-7" }, { intent: echo }, { contact: email });
   assert.equal(inInputs.step.qdl.status, "refused"); assert.deepEqual(inInputs.step.qdl.error, { code: "audit-sensitive-input", path: "$.inputs.contact" });
   assert.deepEqual(inInputs.step.qdl.findings, [{ rule: "pii-email", path: "$.inputs.contact" }]);
   assert.deepEqual([inInputs.step.qdl.inputs, inInputs.step.qdl.intent, inInputs.decision.output, inInputs.decision.llmCallId], [undefined, undefined, undefined, "llm-call-7"]);
-  const inProgram = await recordQdl(log, entry, { intent: { ...quoteIntent, thought: `use ${key} to fetch rates` } }, quote);
-  assert.deepEqual(inProgram.step.qdl.findings, [{ rule: "aws-access-token", path: "$.program.thought" }]);
+  const inProgram = await recordQdl(log, entry, { intent: { ...quoteIntent, rationale: `use ${key} to fetch rates` } }, quote);
+  assert.deepEqual(inProgram.step.qdl.findings, [{ rule: "aws-access-token", path: "$.program.rationale" }]);
   const inParams = await recordQdl(log, { ...entry, params: { customer: "PESEL 44051401359" } }, { intent: quoteIntent }, quote);
   assert.deepEqual(inParams.step.qdl.findings, [{ rule: "pii-pesel", path: "$.params.customer" }]); assert.equal(inParams.decision.params, undefined);
   const raw = readFileSync(log.path, "utf8");

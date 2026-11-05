@@ -7,7 +7,7 @@ import { AuditLog, type Rec } from "../src/audit.js";
 import { labView, renderLab, stepForRegion } from "../src/lab.js";
 import { replayQdl } from "../src/qdl.js";
 
-const skip = Number(process.versions.node.split(".")[0]) < 22 ? "Quinelings SDK needs Node >= 22" : false;
+const skip = Number(process.versions.node.split(".")[0]) < 22 ? "Node >= 22 required" : false;
 const demoPath = fileURLToPath(new URL("../../examples/evaluation/policy-lab/run.mjs", import.meta.url));
 const freshPath = fileURLToPath(new URL("../../examples/evaluation/policy-lab/fresh.mjs", import.meta.url));
 

@@ -1,0 +1,20 @@
+{
+  "node": "v26.8.1",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "policy": "machining-policy",
+  "input": "synthetic-fixed-394",
+  "scope": "in-process evaluation, 10 warmups, 100 unique requests; excludes log writes and LLM calls; selectionMs is not a cold-process startup measurement",
+  "results": [
+    {
+      "runtime": "auditline-policy-1",
+      "sourceBytes": 2340,
+      "selectionMs": 0.011375000000001023,
+      "compileMs": 1.4717079999999996,
+      "recoveryMs": 0.5977499999999978,
+      "samples": 100,
+      "p50Ms": 0.18204199999999915,
+      "p95Ms": 0.3219999999999992
+    }
+  ]
+}

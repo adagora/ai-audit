@@ -51,7 +51,7 @@ There is no install script. This repository is not published on npm. `npm instal
 | Your log | JSONL on disk. One record per inspected call. A daily anchor file kept somewhere else. |
 | Overhead | About 0.6 to 0.7 ms p50 and about 1.1 ms p95 on a loopback mock, redaction included. See [the 2026-10-20 run](docs/performance/2026-10-20/README.md). |
 
-TypeScript, Node's standard library, no runtime dependencies. [Quinelings](https://github.com/CharlesHoskinson/quinelings) is optional and is not on the request path. Decisions are in [docs/adr](docs/adr).
+TypeScript, Node's standard library, no runtime dependencies. The native policy interpreter uses the standard library. No Quinelings SDK is installed or required. Decisions are in [docs/adr](docs/adr).
 
 ## What it looks like
 
@@ -154,7 +154,7 @@ For a browser-driven integration test with your own OpenAI API key, run `npm run
 
 **Provider keys stay in the proxy environment.** `keygen` prints an `aia-` key. Config stores its SHA-256. The upstream call uses `AI_AUDIT_UPSTREAM_OPENAI_KEY` or `AI_AUDIT_UPSTREAM_ANTHROPIC_KEY`. [ADR 0008](docs/adr/0008-virtual-keys.md).
 
-**A decision is a later record.** `ai-audit decide` links a policy result to `x-request-id`. Replay reads the log. The proxy still serves when the Quinelings package is absent. [ADR 0004](docs/adr/0004-quinelings-optional.md).
+**A decision is a later record.** `ai-audit decide` links a policy result to `x-request-id`. Replay reads the log. The proxy and policy interpreter have no runtime package dependencies. [ADR 0004](docs/adr/0004-quinelings-optional.md).
 
 ## Requests and decisions
 
@@ -170,7 +170,7 @@ sequenceDiagram
   participant App as Application
   participant Proxy as ai-audit proxy
   participant LLM as Provider
-  participant Rule as QDL rule
+  participant Rule as Policy rule
   participant You as Reviewer in the console
   App->>Proxy: request, with key and use case
   Note over Proxy: may refuse or block here, then nothing is forwarded
@@ -332,7 +332,7 @@ npm run build
 node dist/src/cli.js serve --mode redact --log audit.jsonl
 ```
 
-`npm ci` installs the vendored Quinelings SDK from `vendor/`. The proxy starts without that package. `decide`, `replay` and `policies` then fail with `audit_qdl_unavailable`.
+`npm ci` installs development tools only; the Quinelings SDK has been removed. A built deployment using `npm ci --omit=dev` installs zero packages. Native policies, decisions, replay, policy history and receipts use Node’s standard library. Old development QDL policies and version 1 receipts are unsupported; create new native decisions rather than rewriting old evidence.
 
 ### On your PATH
 
@@ -476,14 +476,14 @@ After `npm link`, the binary is `ai-audit`. The examples below use that name. `n
 | `await` | `ai-audit await --decision ID --timeout-s 600` | Waits for a review of that decision. Exit 0 approved, 1 rejected or overridden, 3 timeout. With `--timeout-s 0` it only checks; run it before an action the rule allows, and record `skipped` with code `timeout` when you stop waiting. |
 | `effect` | `ai-audit effect --decision ID --action send-quote-to-customer --status done --review REVIEW_ID` | Records that the application ran, skipped or failed an action of that decision. |
 | `lab` | `ai-audit lab --log audit.jsonl --session ID --baseline-limit 2 --candidate-limit 3 --output comparison.html` | Compares failure thresholds on recorded observations; never stops an agent. |
-| `receipt` | `ai-audit receipt --decision ID --output receipt.html` | HTML page with downloads for a completed QDL decision. `--format svg` or `--format json` exports a portable receipt. |
+| `receipt` | `ai-audit receipt --decision ID --output receipt.html` | HTML page with downloads for a completed policy decision. `--format svg` or `--format json` exports a portable receipt. |
 | `verify-receipt` | `ai-audit verify-receipt --input receipt.svg` | Replays a portable JSON or SVG receipt without the original log. Either form verifies only exactly as ai-audit wrote it (ADR 0059). |
 | `attest-keygen` | `ai-audit attest-keygen --private-key reviewer.pem --public-key reviewer.pub.pem` | Creates an Ed25519 signing key pair in new files. |
 | `attest` | `ai-audit attest --log audit.jsonl --decision ID --verdict approved --private-key reviewer.pem --output decision.attestation.json` | Signs the replayable decision, latest matching review record and log checkpoint. |
 | `verify-attestation` | `ai-audit verify-attestation --input decision.svg --attestation decision.attestation.json --public-key reviewer.pub.pem` | Replays the receipt and verifies the detached signature with the supplied key. |
 | `policies` | `ai-audit policies --system-id shop --use-case quote` | One JSON object per policy version on that use case. |
 
-### Share a QDL decision
+### Share a policy decision
 
 ```sh
 ai-audit receipt --log audit.jsonl --decision ID --output receipt.html
@@ -492,7 +492,7 @@ ai-audit receipt --log audit.jsonl --decision ID --format json --output decision
 ai-audit verify-receipt --input decision.svg
 ```
 
-The HTML page includes SVG and JSON downloads for a completed, consistent QDL decision. The SVG shows the Quinelings body beside its calculation steps and embeds the exact program and inputs in XML metadata. You can place it in a report or send it to someone who has the compatible Quinelings SDK. The SVG, JSON and HTML output paths must be new files; they never replace the source log.
+The HTML page includes SVG and JSON downloads for a completed, consistent decision. The SVG shows a named policy step index beside its calculation steps and embeds the exact program and inputs in XML metadata. You can place it in a report or send it to someone who has Auditline. Version 2 receipts need no external SDK. Old version 1 receipts are unsupported. The SVG, JSON and HTML output paths must be new files; they never replace the source log.
 
 `verify-receipt` checks that the program can be recovered and that the recorded calculation runs again. For SVG, it also checks that the visible drawing matches the embedded data. It returns `origin: "not-verified"` and `humanApproval: "not-verified"`: a recipient cannot authenticate the log, its external anchor, the author or a human review from this file alone. Keep the original log and an independently stored anchor for those checks. A PNG or screenshot loses the replay metadata. [ADR 0036](docs/adr/0036-portable-qdl-decision-receipts.md).
 
@@ -719,9 +719,9 @@ ai-audit workbench --log audit.jsonl --output workbench.html \
   --from 2026-10-27T00:00:00Z --to 2026-10-28T00:00:00Z
 ```
 
-The command verifies one hash-chained snapshot before it writes a new file. The HTML starts with expandable request investigations: a metadata fact sheet and a path through inspection, forwarding, provider result, tool observations and linked QDL decisions. Each stage labels observed, derived or unknown evidence. The rest of the page shows linked sessions, context sizes, usage, scan rule paths, Quinelings operations and reviews. It has local search and links between calls and sessions. Tables and investigations show the latest 500 calls; totals count the full interval. Narrow the interval to inspect older rows. Run the command again with a new output filename after new traffic.
+The command verifies one hash-chained snapshot before it writes a new file. The HTML starts with expandable request investigations: a metadata fact sheet and a path through inspection, forwarding, provider result, tool observations and linked policy decisions. Each stage labels observed, derived or unknown evidence. The rest of the page shows linked sessions, context sizes, usage, scan rule paths, Quinelings operations and reviews. It has local search and links between calls and sessions. Tables and investigations show the latest 500 calls; totals count the full interval. Narrow the interval to inspect older rows. Run the command again with a new output filename after new traffic.
 
-The workbench omits retained output text, QDL source and inputs, reviewer names and notes. It cannot recover prompt text or a detected value because the proxy never stored them. The workbench is a private investigation file, not a shareable proof of origin. For one completed QDL decision, use `receipt --format svg` or `--format json`, inspect its exact contents, then give the recipient the artifact and `verify-receipt`. [ADR 0037](docs/adr/0037-offline-evidence-workbench.md), [ADR 0042](docs/adr/0042-request-investigation-from-metadata.md).
+The workbench omits retained output text, policy source and inputs, reviewer names and notes. It cannot recover prompt text or a detected value because the proxy never stored them. The workbench is a private investigation file, not a shareable proof of origin. For one completed policy decision, use `receipt --format svg` or `--format json`, inspect its exact contents, then give the recipient the artifact and `verify-receipt`. [ADR 0037](docs/adr/0037-offline-evidence-workbench.md), [ADR 0042](docs/adr/0042-request-investigation-from-metadata.md).
 
 #### Rotation and retention
 
@@ -835,7 +835,7 @@ ai-audit policies --system-id shop --use-case quote
 
 `--llm-call` must already be an `llm-call` id in the same log. The response header can arrive before that row is appended, and `decide` in that window returns `audit_unknown_llm_call`.
 
-A policy file is either a QDL intent, `"format": "qdl-intent"`, or `{"source": "<program source>"}`. Inputs are a JSON object. Both are scanned before compile. Any finding refuses the decision and does not store the value.
+A policy file is a native `"format": "auditline-policy"` version 1 policy or `{"source": "<program source>"}`. Native examples are in `examples/evaluation/machining-policy.json` and `examples/quineling-wycena/policy.json`. Native operations are arithmetic, comparisons, conditional choices, reports and simulated actions; unsupported operations refuse explicitly. See [native policies](docs/native-policies.md) for the format and limits. Inputs are a JSON object. Both are scanned before compile. Any finding refuses the decision and does not store the value.
 
 #### Act on a decision after its verdict
 
@@ -852,9 +852,9 @@ ai-audit effect --decision "$DECISION_ID" --action send-quote-to-customer --stat
 
 `npm run build && node examples/evaluation/policy-lab/run.mjs` loads a fake session through the proxy and a mock provider, then compares two policies on it. The walkthrough, including what Quinelings will and will not do, is [docs/decisions.md](docs/decisions.md).
 
-`npm run example:evaluate` checks a QDL machining quote policy on labeled cases. `npm run example:evaluate -- --openai --output /private/tmp/quote-evaluation.json` also evaluates the same facts with OpenAI Decisions, recording misses, false alerts, repeat changes, latency and usage. The evaluator runs offline from proxy traffic; see [the evaluation guide](examples/evaluation/README.md).
+`npm run example:evaluate` checks a native machining quote policy on labeled cases. `npm run example:evaluate -- --openai --output /private/tmp/quote-evaluation.json` also evaluates the same facts with OpenAI Decisions, recording misses, false alerts, repeat changes, latency and usage. The evaluator runs offline from proxy traffic; see [the evaluation guide](examples/evaluation/README.md).
 
-`npm run example:wycena -- --console` prices five toolroom parts with a 64-node QDL rule and fixed company rates, then opens the operator console so each quote waits for a review. See [the toolroom quote rule](examples/quineling-wycena/README.md). [examples/quineling-wycena/live-mail](examples/quineling-wycena/live-mail/README.md) runs the same rule on four synthetic customer mails with the real proxy, a real model, the console in a browser and the CLI, each as its own process.
+`npm run example:wycena -- --console` prices five toolroom parts with a 64-node native rule and fixed company rates, then opens the operator console so each quote waits for a review. See [the toolroom quote rule](examples/quineling-wycena/README.md). [examples/quineling-wycena/live-mail](examples/quineling-wycena/live-mail/README.md) runs the same rule on four synthetic customer mails with the real proxy, a real model, the console in a browser and the CLI, each as its own process.
 
 ## Configuration
 
@@ -1091,16 +1091,9 @@ OpenAI's streaming chat API omits `usage` unless the client asks for it. The pro
 
 Rows with `tokensComplete: false` are a lower bound. Do not add the missing calls in as zero.
 
-### `decide` prints `audit_qdl_unavailable`
+### An old development policy or receipt does not load
 
-The optional package did not install. From the repo:
-
-```bash
-npm ci
-node -e 'import("@quinelings/agent-sdk/v1").then(() => console.log("ok"))'
-```
-
-The proxy's `serve` command does not need this import.
+Only `auditline-policy` version 1 and portable receipt version 2 are supported. The legacy QDL interpreter and SDK were removed during development. Create a new native policy and decision; do not edit or rehash an old receipt to make it look verified.
 
 ## Limitations
 
@@ -1176,4 +1169,4 @@ The license is MIT, copyright Adrian Góra.
 
 ## License
 
-[MIT](LICENSE). Detection rules adapted from Gitleaks. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The vendored Quinelings SDK is Apache-2.0. See [vendor/QUINELINGS-LICENSE](vendor/QUINELINGS-LICENSE).
+[MIT](LICENSE). Detection rules adapted from Gitleaks. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The removed Quinelings dependency is acknowledged there as design inspiration.

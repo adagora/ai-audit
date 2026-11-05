@@ -77,3 +77,5 @@ Format: Nygard (Status, Context, Decision, Consequences), at most ~40 lines, fil
 - [67. ai-audit holds no help-desk application, and IntentGauge evaluates the Python one](0067-no-help-desk-application-in-ai-audit.md)
 - [68. Records carry an optional correlation id, and the operator cockpit lives in the application](0068-correlation-and-the-application-cockpit.md)
 - [69. The project is called Auditline, and the old names keep working](0069-auditline-name-and-compatibility.md)
+- [70. Auditline owns a bounded, versioned policy interpreter](0070-native-policy-runtime.md)
+- [71. Remove the legacy policy runtime during development](0071-native-only-development-reset.md)

@@ -225,7 +225,7 @@ if (cmd === "attest-keygen") {
   try {
     if (cmd === "decide") {
       const policy = json(a.policy, "audit_invalid_policy"), inputs = json(a.inputs, "audit_invalid_inputs");
-      const program = policy?.format === "qdl-intent" ? { intent: policy } : typeof policy?.source === "string" ? { source: policy.source } : undefined;
+      const program = policy?.format === "auditline-policy" ? { intent: policy } : typeof policy?.source === "string" ? { source: policy.source } : undefined;
       if (!program) throw new Error("audit_invalid_policy");
       if (!inputs || typeof inputs !== "object" || Array.isArray(inputs)) throw new Error("audit_invalid_inputs");
       if (!a["system-id"] || !a["use-case"]) throw new Error("audit_missing_argument");

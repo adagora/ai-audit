@@ -9,7 +9,7 @@ import { AuditLog, canon, sha256 } from "../src/audit.js";
 import { quinelingCalls, quinelingResults } from "../src/quinelings.js";
 import { mockUpstream, PESEL } from "./helpers.js";
 
-const skip = Number(process.versions.node.split(".")[0]) < 22 ? "Quinelings SDK needs Node >= 22" : false;
+const skip = Number(process.versions.node.split(".")[0]) < 22 ? "Node >= 22 required" : false;
 const cli = fileURLToPath(new URL("../src/cli.js", import.meta.url));
 const policy = JSON.parse(readFileSync(new URL("../../examples/evaluation/machining-policy.json", import.meta.url), "utf8"));
 const quote = { minutes: 42, rate: 4.5, setup: 120, material: 85, llmPrice: 274 };
@@ -80,14 +80,16 @@ test("a served tool error masks a PESEL path, and an ordinary completion stays a
 
 test("diagnostic codes are a fixed set and a sensitive path is dropped without changing the program identity", { skip }, async () => {
   const { recordQdl } = await import("../src/qdl.js");
-  const { Session } = await import("@quinelings/agent-sdk/v1");
+  const { policyRuntime } = await import("../src/policyAdapter.js");
+  const { Session } = await policyRuntime();
   const artifact = new Session().compile(policy);
   const log = fresh();
   const { step } = await recordQdl(log, { systemId: "cad-quote", useCase: "machining-quote", input: "part" }, { intent: policy }, quote);
   assert.equal(step.qdl.sourceHash, artifact.id);
-  const [named] = quinelingCalls([{ name: "quineling_v1_run", args: JSON.stringify({ artifactId: artifact.id }) }]);
+  const externalId = "ql_" + "a".repeat(64);
+  const [named] = quinelingCalls([{ name: "quineling_v1_run", args: JSON.stringify({ artifactId: externalId }) }]);
   const [compiled] = quinelingCalls([{ name: "quineling_v1_compile", args: JSON.stringify({ intent: policy }) }]);
-  assert.equal(named.sourceHash, artifact.id);
+  assert.equal(named.sourceHash, externalId);
   assert.equal(compiled.intentHash, sha256(canon(policy)));
   const hostile = quinelingResults("openai-chat", { messages: [
     { role: "assistant", content: null, tool_calls: [call("c1", "quineling_v1_run")] },

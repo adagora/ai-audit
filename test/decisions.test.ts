@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { mockUpstream, startProxy } from "./helpers.js";
 import { sha256 } from "../src/audit.js";
 
-const skip = Number(process.versions.node.split(".")[0]) < 22 ? "Quinelings SDK needs Node >= 22" : false;
+const skip = Number(process.versions.node.split(".")[0]) < 22 ? "Node >= 22 required" : false;
 const cli = fileURLToPath(new URL("../src/cli.js", import.meta.url));
 const policy = fileURLToPath(new URL("../../examples/evaluation/machining-policy.json", import.meta.url));
 const inputs = fileURLToPath(new URL("../../examples/evaluation/machining-inputs.json", import.meta.url));
@@ -46,7 +46,7 @@ test("a refusal is recorded and replays as a refusal; usage errors write nothing
   const before = px.log.read().length;
   const refused = decide(negative);
   assert.equal(refused.code, 1); assert.equal(refused.out.status, "refused");
-  assert.deepEqual(refused.out.error, { code: "refinement", path: "$.bindings.minutes" }); assert.equal(refused.out.outputs, undefined);
+  assert.deepEqual(refused.out.error, { code: "policy_refinement", path: "$.bindings.minutes" }); assert.equal(refused.out.outputs, undefined);
   assert.equal(px.log.read().length, before + 2);
   const replay = run("replay", "--decision", refused.out.decision);
   assert.equal(replay.code, 0, replay.err); assert.deepEqual([replay.out.reproduced, replay.out.status], [true, "refused"]);
@@ -74,7 +74,7 @@ test("a refusal is recorded and replays as a refusal; usage errors write nothing
   program.source = program.source.replace("150", "1"); lines[p] = JSON.stringify(program);
   writeFileSync(tampered, lines.join("\n") + "\n");
   const s = cliRun(tampered, "replay", "--decision", edited.refId);
-  assert.equal(s.code, 1); assert.equal(s.err, "audit_qdl_source_invalid");
+  assert.equal(s.code, 1); assert.equal(s.err, "audit_qdl_source_mismatch");
 });
 
 test("decide refuses inputs with personal data before running them, keeps only rule and path, and replay says not replayable", { skip }, async () => {
@@ -91,7 +91,7 @@ test("decide refuses inputs with personal data before running them, keeps only r
   const allow = join(dir, "allow.json"), bad = join(dir, "bad-allow.json");
   writeFileSync(allow, JSON.stringify([sha256(email)])); writeFileSync(bad, JSON.stringify(["not-a-hash"]));
   const allowed = decide(sensitive, "--allow-hashes", allow);
-  assert.deepEqual(allowed.out.error, { code: "unknown-field", path: "$.customer" }); assert.equal(allowed.out.findings, undefined);
+  assert.deepEqual(allowed.out.error, { code: "policy_shape", path: "$" }); assert.equal(allowed.out.findings, undefined);
   const invalid = decide(sensitive, "--allow-hashes", bad);
   assert.equal(invalid.code, 2); assert.equal(invalid.err, "audit_invalid_allowlist");
 });

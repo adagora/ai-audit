@@ -1,4 +1,5 @@
-import { renderQuinelingBody } from "./quinelingSvg.js";
+import { policyRuntime } from "./policyAdapter.js";
+import { renderPolicyIndex } from "./policySvg.js";
 import { AuditLog, type Rec } from "./audit.js";
 import { policyHistories, withChanges, type PolicyChange } from "./policies.js";
 import { verifyDecision, type AnchorStatus, type QdlTraceStep } from "./qdl.js";
@@ -52,23 +53,23 @@ function mainRecord(recs: Rec[], id: string): Rec | undefined {
 
 async function programView(recs: Rec[], sourceHash?: string) {
   const empty = { payload: undefined as any, body: undefined as string | undefined, nodeIds: [] as string[], registry: undefined as string | undefined, registryDigest: undefined as string | undefined };
-  const m = await import("@quinelings/agent-sdk/v1").catch(() => null);
+  const source = recs.find((r) => r.kind === "program" && r.id === sourceHash)?.source
+    ?? recs.map((r) => r.qdl as any).find((q) => q && q.sourceHash === sourceHash && typeof q.source === "string")?.source;
+  if (typeof source !== "string" || !sourceHash) return empty;
+  const m = await policyRuntime({ source }).catch(() => null);
   if (!m) return empty;
   const s = new m.Session();
   const described = s.describe();
-  const view = { ...empty, registry: described.registry as string, registryDigest: described.registryDigest as string };
-  const source = recs.find((r) => r.kind === "program" && r.id === sourceHash)?.source
-    ?? recs.map((r) => r.qdl as any).find((q) => q && q.sourceHash === sourceHash && typeof q.source === "string")?.source;
-  if (typeof source !== "string" || !sourceHash) return view;
+  const view = { ...empty, registry: described.registry, registryDigest: described.registryDigest };
   try {
     const artifact = s.recover({ source });
     if (artifact.id !== sourceHash) return view;
     view.payload = artifact.payload;
     if (artifact.payload?.registry) view.registry = artifact.payload.registry;
     if (artifact.payload?.registryDigest) view.registryDigest = artifact.payload.registryDigest;
-    const frame = s.frame(artifact.id, 0.25);
-    view.nodeIds = [...frame.nodeIds];
-    view.body = renderQuinelingBody(frame);
+    const index = s.index(artifact.id);
+    view.nodeIds = [...index.nodeIds];
+    view.body = renderPolicyIndex(index);
   } catch { return view; }
   return view;
 }
@@ -76,7 +77,7 @@ async function programView(recs: Rec[], sourceHash?: string) {
 function changeNote(version: number | undefined, changes: PolicyChange[] | null | undefined): string {
   if (version === 1 || version === undefined && changes == null) return version === 1 ? "First version in this use case." : "No version was derived.";
   if (changes == null) return "Changes from the previous version are unknown because a program record is missing.";
-  if (!changes.length) return "No difference in name, thought, outputs, or nodes.";
+  if (!changes.length) return "No difference in name, rationale, outputs, or nodes.";
   return changes.map((c) => `${c.path}: ${JSON.stringify(c.from)} → ${JSON.stringify(c.to)}`).join("; ");
 }
 
@@ -99,13 +100,13 @@ export async function decisionReceipt(log: AuditLog, id: string, opts?: { anchor
     return out;
   });
   const view = await programView(recs, typeof q?.sourceHash === "string" ? q.sourceHash : undefined);
-  const observations: any[] = view.payload?.thought?.observations ?? [];
+  const observations: any[] = view.payload?.task?.nodes?.filter((node: any) => node.basis) ?? [];
   const recorded = q?.inputs && typeof q.inputs === "object" ? Object.entries(q.inputs as Record<string, unknown>).map(([name, value]): ReceiptFact => {
-    const obs = observations.find((o) => o.input === name);
+    const obs = observations.find((o) => o.params?.name === name);
     return { name, value, ...(obs?.basis && { basis: String(obs.basis) }) };
   }) : [];
   const assertions = main?.params && typeof main.params === "object" ? Object.entries(main.params).map(([name, value]) => ({ name, value })) : [];
-  const basisNote = recorded.some((f) => f.basis) ? "Observation basis is text in the program. It is not a new measurement." : "The program text records no observation basis.";
+  const basisNote = recorded.some((f) => f.basis) ? "Input basis labels are caller assertions, not independently verified provenance." : "The policy declares no input basis.";
   let histories = policyHistories(recs);
   try { histories = await withChanges(histories, recs); } catch { histories = policyHistories(recs); }
   const history = histories.find((h) => h.systemId === main?.systemId && h.useCase === main?.useCase);
@@ -214,13 +215,13 @@ export function renderReceipt(receipt: DecisionReceipt, sharing?: { json: string
   <table><tr><th>Where</th><th>Op</th><th>Status</th><th>Error code</th></tr>${tools || row(["none", "", "", ""])}</table>
   <p>${esc(receipt.llm.retained)}</p>
   <h2>Input snapshot</h2>
-  <p>${esc(receipt.inputs.basisNote)} Recorded inputs are the values stored on the QDL step. Caller assertions are params supplied beside the decision. Tool-name observations stay on the LLM call.</p>
+  <p>${esc(receipt.inputs.basisNote)} Recorded inputs are the values stored on the policy step. Caller assertions are params supplied beside the decision. Tool-name observations stay on the LLM call.</p>
   <h3>Recorded inputs</h3>
   <table><tr><th>Name</th><th>Value</th><th>Basis</th></tr>${facts || row(["none", "", ""])}</table>
   <h3>Caller assertions</h3>
   <table><tr><th>Name</th><th>Value</th></tr>${assertions || row(["none", ""])}</table>
   <h2>Policy</h2>
-  <p>Source hash is the program identity. A similar body is a different program.</p>
+  <p>Source hash is the program identity. The step index is a navigation aid.</p>
   <table>
     <tr><th>Source hash</th><td><code>${esc(receipt.policy.sourceHash ?? "none")}</code></td></tr>
     <tr><th>Name</th><td>${esc(receipt.policy.name ?? "")}</td></tr>
@@ -244,7 +245,7 @@ export function renderReceipt(receipt: DecisionReceipt, sharing?: { json: string
   </table>
   ${simulated}
   <h2>Verification</h2>
-  <p>Overall success requires the chain, the link to the QDL record, and output consistency together. Replay and anchor status stay separate. Anchor status is ${esc(receipt.verification.anchor)}.</p>
+  <p>Overall success requires the chain, the link to the policy record, and output consistency together. Replay and anchor status stay separate. Anchor status is ${esc(receipt.verification.anchor)}.</p>
   <table>
     <tr><th>Replay</th><td>${esc(receipt.verification.replay.reproduced)}${receipt.verification.replay.status ? ` ${esc(receipt.verification.replay.status)}` : ""}${receipt.verification.replay.reason ? ` ${esc(receipt.verification.replay.reason)}` : ""}</td></tr>
     <tr><th>Chain</th><td>${receipt.verification.chain.ok ? "ok" : esc(receipt.verification.chain.reason ?? "not ok")}</td></tr>

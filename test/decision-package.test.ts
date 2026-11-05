@@ -81,14 +81,14 @@ test("portable verification rejects changed inputs, outputs, runtime identity, s
   runtime.program.registryDigest = "0".repeat(64);
   await assert.rejects(verifyPortableReceipt(JSON.stringify(reseal(runtime))), /audit_package_runtime_mismatch/);
   const source = structuredClone(bundle);
-  source.program.sourceHash = "ql_" + "0".repeat(64);
+  source.program.sourceHash = "ap_" + "0".repeat(64);
   await assert.rejects(verifyPortableReceipt(JSON.stringify(reseal(source))), /audit_package_source_mismatch/);
   const svg = await renderDecisionSvg(bundle);
   await assert.rejects(verifyPortableReceipt(svg.replace("Origin not verified", "Approved by everyone")), /audit_package_presentation_mismatch/);
   await assert.rejects(verifyPortableReceipt(svg.replace("</svg>", '<script>alert(1)</script></svg>')), /audit_package_presentation_mismatch/);
   assert.throws(() => parseDecisionPackage('{"format":"unknown"}'), /audit_invalid_decision_package/);
   assert.throws(() => parseDecisionPackage('{"format":"ai-audit-decision-package'), /audit_invalid_decision_package/);
-  assert.throws(() => parseDecisionPackage(JSON.stringify(bundle).replace('"version":1', '"version":1,"version":1')), /audit_invalid_decision_package/);
+  assert.throws(() => parseDecisionPackage(JSON.stringify(bundle).replace('"version":2', '"version":2,"version":2')), /audit_invalid_decision_package/);
   assert.throws(() => parseDecisionPackage(JSON.stringify({ ...bundle, prompt: "unexpected field" })), /audit_invalid_decision_package/);
 });
 
@@ -132,7 +132,7 @@ test("sharing refuses broken evidence, incomplete decisions and sensitive retain
   writeFileSync(log.path, original);
   const refused = await recordQdl(log, { systemId: "fixture", useCase: "quote", input: "bad input" }, { intent: policy }, { ...inputs, minutes: -1 });
   await assert.rejects(createDecisionPackage(log, refused.decision.id), /audit_package_requires_completed_decision/);
-  const notePolicy = { format: "qdl-intent", version: 1, name: "Echo", thought: "return input", inputs: [{ id: "note", name: "note", type: { kind: "string" } }], steps: [], outputs: ["note"] };
+  const notePolicy = { format: "auditline-policy", version: 1, name: "Echo", rationale: "return input", inputs: [{ id: "note", name: "note", type: { kind: "string" } }], steps: [], outputs: ["note"] };
   const email = "private@example.com";
   const sensitive = await recordQdl(log, { systemId: "fixture", useCase: "echo", input: "sensitive" }, { intent: notePolicy }, { note: email }, new Set([sha256(email)]));
   assert.equal(sensitive.step.qdl.status, "completed");

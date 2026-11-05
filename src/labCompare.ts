@@ -1,7 +1,7 @@
 import { readEvidenceRecords } from "./evidence.js";
 import { AuditLog, canon } from "./audit.js";
 import { governorIntent, governorSnapshots, SNAPSHOT_VERSION, type TurnSnapshot } from "./lab.js";
-import type { Session } from "@quinelings/agent-sdk/v1";
+import { policyRuntime, type RuntimeSession } from "./policyAdapter.js";
 
 interface ComparedPolicy { limit: number; sourceHash: string; source: string }
 interface Recommendation { action: "continue" | "pause"; reason: string; hypothetical: boolean; output: unknown }
@@ -26,9 +26,9 @@ export interface SessionComparison {
   rows: ComparisonRow[];
 }
 
-function evaluate(session: Session, policy: ComparedPolicy, inputs: { failures: number }, requestId: string): unknown[] {
+function evaluate(session: RuntimeSession, policy: ComparedPolicy, inputs: { failures: number }, requestId: string): unknown[] {
   const run = session.run({ artifactId: policy.sourceHash, requestId, inputs });
-  const output = run.result.occurrences?.[0]?.outputs;
+  const output = run.result.outputs;
   if (run.result.status !== "completed" || !Array.isArray(output) || typeof output[0] !== "boolean") throw new Error("audit_lab_evaluation_failed");
   return output;
 }
@@ -45,7 +45,7 @@ export async function compareSession(log: AuditLog, opts: { sessionId?: string; 
   const calls = records.filter((r) => r.kind === "llm-call");
   const byId = new Map(calls.map((r) => [r.id, r]));
   if (byId.size !== calls.length) throw new Error("audit_lab_duplicate_call");
-  const m = await import("@quinelings/agent-sdk/v1").catch(() => { throw new Error("audit_qdl_unavailable"); });
+  const m = await policyRuntime({ intent: baselineIntent });
   const session = new m.Session(), recovered = new m.Session();
   const compile = (intent: ReturnType<typeof governorIntent>, limit: number): ComparedPolicy => {
     const artifact = session.compile(intent);

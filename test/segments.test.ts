@@ -180,10 +180,10 @@ test("records are read line by line, also when a line is longer than one read an
 });
 
 const major = Number(process.versions.node.split(".")[0]);
-test("each segment stores the QDL programs its decisions use, and replay works on both sides of a rotation", { skip: major < 22 ? "Quinelings SDK needs Node >= 22" : false }, async () => {
+test("each segment stores the QDL programs its decisions use, and replay works on both sides of a rotation", { skip: major < 22 ? "Node >= 22 required" : false }, async () => {
   const { recordQdl, replayQdl } = await import("../src/qdl.js");
   const one = (unit: string) => ({ kind: "number", unit, min: 0 });
-  const perPiece = { format: "qdl-intent", version: 1, name: "Unit price", thought: "unit price = total / pieces",
+  const perPiece = { format: "auditline-policy", version: 1, name: "Unit price", rationale: "unit price = total / pieces",
     inputs: [{ id: "total", name: "total", type: one("PLN") }, { id: "pieces", name: "pieces", type: one("one") }],
     steps: [{ id: "unit", op: "arithmetic", inputs: ["total", "pieces"], params: { kind: "div" } }], outputs: ["unit"] };
   const entry = { systemId: "quote", useCase: "price", input: "part" };

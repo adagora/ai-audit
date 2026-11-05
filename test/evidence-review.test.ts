@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { anchor, AuditLog, canon, report, sha256 } from "../src/audit.js";
 import { PESEL } from "./helpers.js";
 
-const skip = Number(process.versions.node.split(".")[0]) < 22 ? "Quinelings SDK needs Node >= 22" : false;
+const skip = Number(process.versions.node.split(".")[0]) < 22 ? "Node >= 22 required" : false;
 const policy = JSON.parse(readFileSync(new URL("../../test/fixtures/floor-quote.json", import.meta.url), "utf8"));
 const inputs = { minutes: 42, rate: 4.5, proposed: 100 };
 const entry = { systemId: "shop-floor", useCase: "floor-quote", input: "42 min" };
@@ -59,18 +59,16 @@ test("forged main output is not an overall success, and a valid chain is not an 
   assert.equal(JSON.stringify(resealed).includes("authenticated"), false);
 });
 
-test("a later occurrence keeps the SDK diagnostic and replays as that diagnostic", { skip, timeout: 120_000 }, async () => {
+test("a trace budget failure keeps its native diagnostic and replays exactly", { skip }, async () => {
   const { recordQdl, replayQdl } = await import("../src/qdl.js");
-  const steps = [];
-  let prev = "blob";
-  for (let n = 0; n < 48; n++) { steps.push({ id: "n" + n, op: "dedupe", inputs: [prev], params: {} }); prev = "n" + n; }
-  const intent = { format: "qdl-intent", version: 1, name: "trace budget", thought: "chain dedupe until the trace budget",
-    inputs: [{ id: "blob", name: "blob", type: { kind: "array", element: { kind: "string" }, minLength: 1, maxLength: 1 } }],
-    steps, outputs: ["n47"], repeats: 8 };
+  const intent = { format: "auditline-policy", version: 1, name: "trace budget",
+    inputs: [{ id: "blob", name: "blob", type: { kind: "string" } }, { id: "yes", value: true, type: { kind: "boolean" } }],
+    steps: Array.from({ length: 48 }, (_, n) => ({ id: "n" + n, op: "choose", inputs: ["yes", "blob", "blob"], params: {} })), outputs: ["n47"] };
   const log = fresh();
-  const { step } = await recordQdl(log, { systemId: "budget", useCase: "trace", input: "blob" }, { intent }, { blob: ["x".repeat(12000)] });
+  const { step } = await recordQdl(log, { systemId: "budget", useCase: "trace", input: "blob" }, { intent }, { blob: "x".repeat(12000) });
   assert.equal(step.qdl.status, "failed");
-  assert.deepEqual(step.qdl.error, { code: "limit", path: "$.nodes.n35", nodeId: "n35", occurrence: 1 });
+  assert.equal(step.qdl.error?.code, "policy_trace_limit");
+  assert.ok(step.qdl.error?.nodeId);
   const again = await replayQdl(log, step.refId!);
   assert.equal(again.reproduced, true);
   assert.deepEqual(again.error, step.qdl.error);

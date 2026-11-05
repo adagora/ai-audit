@@ -1,0 +1,30 @@
+{
+  "node": "v26.8.1",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "policy": "machining-policy",
+  "input": "synthetic-fixed-394",
+  "scope": "in-process evaluation, 10 warmups, 100 unique requests; excludes log writes and LLM calls; selectionMs is not a cold-process startup measurement",
+  "results": [
+    {
+      "runtime": "qdl-v1",
+      "sourceBytes": 17243,
+      "selectionMs": 32.405249999999995,
+      "compileMs": 59.470625,
+      "recoveryMs": 34.29679200000001,
+      "samples": 100,
+      "p50Ms": 10.822082999999964,
+      "p95Ms": 11.747749999999996
+    },
+    {
+      "runtime": "auditline-policy-1",
+      "sourceBytes": 2137,
+      "selectionMs": 0.011083000000098764,
+      "compileMs": 1.1977079999999205,
+      "recoveryMs": 0.3264999999998963,
+      "samples": 100,
+      "p50Ms": 0.16625000000021828,
+      "p95Ms": 0.2161670000000413
+    }
+  ]
+}

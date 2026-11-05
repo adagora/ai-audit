@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { anchor, AuditLog, canon, sha256 } from "../src/audit.js";
 import { mockUpstream, startProxy } from "./helpers.js";
 
-const skip = Number(process.versions.node.split(".")[0]) < 22 ? "Quinelings SDK needs Node >= 22" : false;
+const skip = Number(process.versions.node.split(".")[0]) < 22 ? "Node >= 22 required" : false;
 const policy = JSON.parse(readFileSync(new URL("../../test/fixtures/floor-quote.json", import.meta.url), "utf8"));
 const inputs = { minutes: 42, rate: 4.5, proposed: 100 };
 const fresh = () => new AuditLog(join(mkdtempSync(join(tmpdir(), "receipt-")), "audit.jsonl"));
@@ -26,7 +26,8 @@ function reseal(lines: string[]) {
 function plain(name: string, floor: number) {
   const intent = structuredClone(policy);
   intent.name = name;
-  intent.thought = "price = max(minutes x rate, floor)";
+  intent.rationale = "price = max(minutes x rate, floor)";
+  for (const input of intent.inputs) delete input.basis;
   intent.inputs.find((i: any) => i.id === "floor").value = floor;
   return intent;
 }
@@ -64,8 +65,8 @@ test("a floor receipt and a confirmed-or-estimated receipt keep the same step va
     assert.equal(html.includes(email), false);
     assert.equal(floor.policy.sourceHash, first.step.qdl.sourceHash);
     assert.equal(floor.policy.version, 1);
-    assert.equal(floor.policy.registry, "qdl-kernels-1");
-    assert.match(floor.policy.registryDigest ?? "", /^43c66b70/);
+    assert.equal(floor.policy.registry, "auditline-policy-1");
+    assert.match(floor.policy.registryDigest ?? "", /^[0-9a-f]{64}$/);
     assert.match(html, /Source hash is the program identity/);
     assert.equal(floor.calculation.final, 189);
     assert.equal(stepForRegion(floor, "price")?.value, 189);

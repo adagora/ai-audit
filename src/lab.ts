@@ -1,9 +1,10 @@
-import { renderQuinelingBody } from "./quinelingSvg.js";
+import { renderPolicyIndex } from "./policySvg.js";
 import { readEvidenceRecords } from "./evidence.js";
 import type { Rec } from "./audit.js";
 import { AuditLog, canon, decisionConsistency } from "./audit.js";
 import { replayQdl, type QdlTraceStep } from "./qdl.js";
-import type { Session } from "@quinelings/agent-sdk/v1";
+import { policyRuntime } from "./policyAdapter.js";
+import type { NativePolicy } from "./policyRuntime.js";
 
 export const SNAPSHOT_VERSION = "session-governor-v2";
 export interface TurnSnapshot { callId: string; sessionId: string; turn: number; failures: number; retries: number; branches: number; reported?: number }
@@ -80,14 +81,10 @@ export function governorSnapshots(recs: Rec[]): TurnSnapshot[] {
   return out;
 }
 
-export function governorIntent(limit: number): Parameters<Session["compile"]>[0] {
+export function governorIntent(limit: number): NativePolicy {
   if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("audit_invalid_failure_limit");
   return {
-    format: "qdl-intent", version: 1, name: "Session governor",
-    thought: {
-      observations: [], evidence: [], goals: [], decisions: [], plans: [],
-      tasks: [{ id: "govern", text: "halt when cumulative failed calls reach the limit", nodes: ["failures", "limit", "reached", "halt", "pause"], outputs: ["halt", "pause"] }],
-    },
+    format: "auditline-policy", version: 1, name: "Session governor",
     inputs: [
       { id: "failures", name: "failures", type: { kind: "number", unit: "one", min: 0 } },
       { id: "limit", value: limit, type: { kind: "number", unit: "one", min: 0 } },
@@ -115,16 +112,16 @@ const esc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&
 const show = (v: unknown) => typeof v === "string" ? v : JSON.stringify(v);
 
 
-async function creature(source: string, sourceHash: string): Promise<{ body?: string; nodeIds: string[] }> {
-  const m = await import("@quinelings/agent-sdk/v1").catch(() => null);
+async function policyIndex(source: string, sourceHash: string): Promise<{ body?: string; nodeIds: string[] }> {
+  const m = await policyRuntime({ source }).catch(() => null);
   if (!m) return { nodeIds: [] };
   try {
     const s = new m.Session();
     const artifact = s.recover({ source });
     if (artifact.id !== sourceHash) return { nodeIds: [] };
-    const frame = s.frame(artifact.id, 0.25);
-    const body = renderQuinelingBody(frame);
-    return { nodeIds: [...frame.nodeIds], ...(body && { body }) };
+    const index = s.index(artifact.id);
+    const body = renderPolicyIndex(index);
+    return { nodeIds: [...index.nodeIds], ...(body && { body }) };
   } catch { return { nodeIds: [] }; }
 }
 
@@ -154,7 +151,7 @@ export async function labView(log: AuditLog, strictId: string, looseId: string):
   const steps: LabStep[] = (strictReplay.trace ?? []).map((step: QdlTraceStep) => ({ stepId: step.nodeId, op: step.op, value: step.value, ...(looseById.has(step.nodeId) && { other: looseById.get(step.nodeId) }) }));
   const limit = (pick: "value" | "other") => { const found = steps.find((s) => s.stepId === "limit"); const value = found?.[pick]; return typeof value === "number" ? value : undefined; };
   const inputs = strictQ?.inputs && typeof strictQ.inputs === "object" ? Object.entries(strictQ.inputs).map(([name, value]) => ({ name, value })) : [];
-  const drawn = typeof strictQ?.sourceHash === "string" ? await creature(String(recs.find((r) => r.kind === "program" && r.id === strictQ.sourceHash)?.source ?? ""), strictQ.sourceHash) : { nodeIds: [] as string[] };
+  const drawn = typeof strictQ?.sourceHash === "string" ? await policyIndex(String(recs.find((r) => r.kind === "program" && r.id === strictQ.sourceHash)?.source ?? ""), strictQ.sourceHash) : { nodeIds: [] as string[] };
   const stepIds = new Set(steps.map((s) => s.stepId));
   const regionIds = drawn.nodeIds.filter((id) => stepIds.has(id));
   const regions = (regionIds.length ? regionIds : [...stepIds]).map((regionId) => ({ regionId, stepId: regionId }));

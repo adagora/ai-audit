@@ -1,5 +1,5 @@
 # 36. Portable QDL decision receipts have separate replay and origin claims
-Status: Accepted (2026-10-26). Extends [0023](0023-decision-records-cli-and-outcomes.md), [0026](0026-store-each-program-once.md) and [0033](0033-decision-verification-and-occurrence.md).
+Status: Superseded for the QDL runtime and old receipts by [0071](0071-native-only-development-reset.md); previously accepted (2026-10-26). Extends [0023](0023-decision-records-cli-and-outcomes.md), [0026](0026-store-each-program-once.md) and [0033](0033-decision-verification-and-occurrence.md).
 ## Context
 The HTML decision receipt is useful for the log owner but cannot be replayed by a recipient without the original log. A program picture alone cannot recover the source. A screenshot or plain SVG could be changed while still looking plausible. A shareable artifact also risks disclosing retained inputs or implying that a checksum authenticates its author.
 ## Decision

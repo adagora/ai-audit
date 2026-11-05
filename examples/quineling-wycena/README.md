@@ -1,6 +1,6 @@
 # Toolroom quote rule
 
-A toolroom quotes machined parts. The LLM reads the request and estimates the work: blank mass, hours per machine group, cooperation and its own confidence. A fixed QDL program, [policy.json](policy.json), turns those numbers into a price with the company's rates and decides whether the quote may go out or goes to the estimator. The model judges; the rule calculates; a person reviews.
+A toolroom quotes machined parts. The LLM reads the request and estimates the work: blank mass, hours per machine group, cooperation and its own confidence. A fixed native policy, [policy.json](policy.json), turns those numbers into a price with the company's rates and decides whether the quote may go out or goes to the estimator. The model judges; the rule calculates; a person reviews.
 
 ```sh
 npm run example:wycena

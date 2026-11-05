@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const skip = Number(process.versions.node.split(".")[0]) < 22 ? "Quinelings SDK needs Node >= 22" : false;
+const skip = Number(process.versions.node.split(".")[0]) < 22 ? "Node >= 22 required" : false;
 
 test("example: the toolroom quote rule prices five parts with the company rates and routes three to the estimator", { skip }, () => {
   const dir = mkdtempSync(join(tmpdir(), "wycena-test-")), logPath = join(dir, "audit.jsonl");

@@ -1,0 +1,16 @@
+# 70. Auditline owns a bounded, versioned policy interpreter
+Status: Superseded for legacy replay and SDK retention by [0071](0071-native-only-development-reset.md). Extends [0004](0004-quinelings-optional.md), [0023](0023-decision-records-cli-and-outcomes.md), [0035](0035-read-only-session-policy-comparison.md) and [0036](0036-portable-qdl-decision-receipts.md).
+
+## Context
+The optional Quinelings SDK installs transport dependencies alongside its interpreter. Auditline needs pure deterministic policies and replay, while it already owns logging, review and effects. Historical QDL sources and receipts bind to exact source, registry identity and rendering; replacing their semantics would invalidate evidence.
+
+## Decision
+- Add a standard-library-only interpreter for `auditline-policy` version 1. It evaluates ordered acyclic data nodes, never executable JavaScript. Initially support arithmetic, comparisons, choose, reports and simulated actions, as required by the machining quote and session governor.
+- Native source is the exact canonical JSON policy. Recovery accepts only that spelling. Native source identities use `ap_`, input identities `ai_`, and a separately versioned runtime descriptor binds the semantics and resource limits.
+- Bound policy/input bytes, JSON depth and value count, strings and collections, nodes and outputs, and retained trace bytes. Reject unknown fields, unsafe keys, missing or extra bindings, forward references and unsupported operations. Invalid policies and bindings refuse; errors computed during evaluation return failed results with fixed structural diagnostics.
+- Numbers are finite IEEE-754 doubles; normalize negative zero. Check arithmetic dimensions and operand/guard kinds during compilation. Multiplication/division combine unit exponents; addition and numeric comparisons require equal units. Integer inputs, inferred integer arithmetic and explicitly integer results must be safe integers. Division by zero and nonfinite arithmetic fail. Choose evaluates an already evaluated condition and branches; all nodes run in declared order. Actions produce data only, never effects.
+- An internal adapter selects native policies by their explicit format, and historical QDL uses its original interpreter. Keep the existing log record names and linkage; program identity distinguishes the runtimes. Portable receipt version 2 requires native source/input identities and runtime identity; version 1 keeps its exact QDL renderer. Both retain the exact-byte JSON/SVG verification of ADR 0059.
+- The machining examples and new session governors use native policies. Preserve QDL policy fixtures for legacy conformance tests. The SDK is a development dependency and optional peer for historical QDL; production installation omits it. A deployment that needs historical replay installs the pinned vendored SDK explicitly.
+
+## Consequences
+Owning the interpreter also means owning validation and semantic compatibility. Native policies gain a new identity; translation never rewrites historical logs. Production installs have no runtime packages; development retains the legacy SDK for compatibility checks. Performance claims require measurements against the same cases.

@@ -1,12 +1,13 @@
+import { policyRuntime } from "./policyAdapter.js";
 import { AuditLog, canon, decisionConsistency, sha256 } from "./audit.js";
 import { readEvidenceRecords } from "./evidence.js";
 import { replayQdl, type QdlStep } from "./qdl.js";
 import { hasDuplicateKeys, inspect } from "./scan.js";
-import { QUINELING_COLORS, renderQuinelingBody, xmlEscape as esc } from "./quinelingSvg.js";
+import { POLICY_COLORS, renderPolicyIndex, xmlEscape as esc } from "./policySvg.js";
 
 export interface DecisionPackage {
   format: "ai-audit-decision-package";
-  version: 1;
+  version: 2;
   decision: { id: string; llmCallId?: string };
   program: { source: string; sourceHash: string; registry: string; registryDigest: string };
   run: { inputs: Record<string, unknown>; inputHash: string; outputs: unknown[]; outputsHash: string };
@@ -23,15 +24,15 @@ const fields = (value: unknown, required: string[], optional: string[] = []): va
 
 function packageShape(value: unknown): asserts value is DecisionPackage {
   if (!fields(value, ["format", "version", "decision", "program", "run", "origin", "digest"])
-    || value.format !== "ai-audit-decision-package" || value.version !== 1
+    || value.format !== "ai-audit-decision-package" || value.version !== 2
     || !fields(value.decision, ["id"], ["llmCallId"]) || typeof value.decision.id !== "string"
     || (value.decision.llmCallId !== undefined && typeof value.decision.llmCallId !== "string")
     || !fields(value.program, ["source", "sourceHash", "registry", "registryDigest"])
     || typeof value.program.source !== "string" || Buffer.byteLength(value.program.source) > 2 * 1024 * 1024
-    || typeof value.program.sourceHash !== "string" || !/^ql_[0-9a-f]{64}$/.test(value.program.sourceHash)
+    || typeof value.program.sourceHash !== "string" || !/^ap_[0-9a-f]{64}$/.test(value.program.sourceHash)
     || typeof value.program.registry !== "string" || !hash(value.program.registryDigest)
     || !fields(value.run, ["inputs", "inputHash", "outputs", "outputsHash"]) || !object(value.run.inputs)
-    || typeof value.run.inputHash !== "string" || !/^qi_[0-9a-f]{64}$/.test(value.run.inputHash) || !Array.isArray(value.run.outputs) || !hash(value.run.outputsHash)
+    || typeof value.run.inputHash !== "string" || !/^ai_[0-9a-f]{64}$/.test(value.run.inputHash) || !Array.isArray(value.run.outputs) || !hash(value.run.outputsHash)
     || !fields(value.origin, ["logDigest", "decisionHash", "stepHash"])
     || !Object.values(value.origin).every(hash) || !hash(value.digest)) throw new Error("audit_invalid_decision_package");
 }
@@ -55,7 +56,7 @@ export async function reproducePackage(value: DecisionPackage) {
   packageShape(value);
   if (digestOf(value) !== value.digest) throw new Error("audit_package_digest_mismatch");
   if (sha256(canon(value.run.outputs)) !== value.run.outputsHash) throw new Error("audit_package_output_mismatch");
-  const m = await import("@quinelings/agent-sdk/v1").catch(() => { throw new Error("audit_qdl_unavailable"); });
+  const m = await policyRuntime({ source: value.program.source });
   const session = new m.Session();
   const described = session.describe();
   if (described.registry !== value.program.registry || described.registryDigest !== value.program.registryDigest) throw new Error("audit_package_runtime_mismatch");
@@ -63,8 +64,8 @@ export async function reproducePackage(value: DecisionPackage) {
   if (artifact.id !== value.program.sourceHash) throw new Error("audit_package_source_mismatch");
   const run = session.run({ artifactId: artifact.id, requestId: "verify-package", inputs: value.run.inputs as Parameters<typeof session.run>[0]["inputs"] });
   if (run.result.status !== "completed" || run.result.inputHash !== value.run.inputHash
-    || canon(run.result.occurrences[0]?.outputs) !== canon(value.run.outputs)) throw new Error("audit_package_replay_failed");
-  return { session, artifact, occurrence: run.result.occurrences[0] };
+    || canon(run.result.outputs) !== canon(value.run.outputs)) throw new Error("audit_package_replay_failed");
+  return { session, artifact, run: run.result };
 }
 
 export async function createDecisionPackage(log: AuditLog, id: string): Promise<DecisionPackage> {
@@ -79,10 +80,10 @@ export async function createDecisionPackage(log: AuditLog, id: string): Promise<
   if (typeof source !== "string") throw new Error("audit_qdl_source_missing");
   const replay = await replayQdl(log, main.id, records);
   if (!replay.reproduced || replay.status !== "completed" || !replay.output) throw new Error("audit_package_replay_failed");
-  const m = await import("@quinelings/agent-sdk/v1");
+  const m = await policyRuntime({ source });
   const { registry, registryDigest } = new m.Session().describe();
   const value: DecisionPackage = {
-    format: "ai-audit-decision-package", version: 1,
+    format: "ai-audit-decision-package", version: 2,
     decision: { id: main.id, ...(main.llmCallId && { llmCallId: main.llmCallId }) },
     program: { source, sourceHash: q.sourceHash, registry, registryDigest },
     run: { inputs: q.inputs, inputHash: q.inputHash, outputs: replay.output, outputsHash: q.outputsHash },
@@ -101,28 +102,28 @@ const shortValue = (value: unknown, max = 72) => {
 };
 
 export async function renderDecisionSvg(value: DecisionPackage): Promise<string> {
-  const { session, artifact, occurrence } = await reproducePackage(value);
-  const steps = occurrence.trace ?? [];
+  const { session, artifact, run } = await reproducePackage(value);
+  const steps = run.trace;
   const height = Math.max(860, 410 + steps.length * 56);
-  const frame = session.frame(artifact.id, 0.25);
-  const body = renderQuinelingBody(frame).replace('<svg xmlns="http://www.w3.org/2000/svg"', '<svg x="32" y="192" width="470" height="390"');
+  const index = session.index(artifact.id);
+  const body = renderPolicyIndex(index).replace('<svg xmlns="http://www.w3.org/2000/svg"', '<svg x="32" y="192" width="470" height="390"');
   const nodes = artifact.payload.task?.nodes ?? [];
   const summary = value.run.outputs.slice(0, 3).map((output, index) => {
     const id = artifact.payload.task?.outputs?.[index] ?? `output ${index + 1}`;
-    const type = nodes.find((node) => node.id === id)?.type;
+    const type = nodes.find((node: any) => node.id === id)?.type;
     const unit = type?.kind === "number" ? type.unit : undefined;
     const label = object(output) ? `${output.status ?? "receipt"}${typeof output.action === "string" ? `: ${output.action}` : ""}` : shortValue(output, 35);
     return `${id} = ${label}${typeof unit === "string" && unit !== "one" ? ` ${unit}` : ""}`;
   }).join(" · ");
-  const rows = steps.map((step, i) => {
+  const rows = steps.map((step: any, i: number) => {
     const y = 210 + i * 56;
-    const owner = frame.nodeIds.indexOf(step.nodeId);
-    const marker = owner < 0 ? "" : `<circle cx="541" cy="${y - 5}" r="5" fill="${QUINELING_COLORS[owner % QUINELING_COLORS.length]}"/>`;
+    const owner = index.nodeIds.indexOf(step.nodeId);
+    const marker = owner < 0 ? "" : `<circle cx="541" cy="${y - 5}" r="5" fill="${POLICY_COLORS[owner % POLICY_COLORS.length]}"/>`;
     return `<g><title>${esc(step.nodeId)}: ${esc(JSON.stringify(step.value))}</title><line x1="532" y1="${y + 37}" x2="1068" y2="${y + 37}" stroke="#d9d0bf"/>${marker}<text x="554" y="${y}" font-size="14" font-weight="600">${esc(step.nodeId)} · ${esc(step.op)}</text><text x="554" y="${y + 22}" font-size="12" font-family="monospace">${esc(shortValue(step.value, 66))}</text></g>`;
   }).join("");
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="${height}" viewBox="0 0 1100 ${height}" role="img" aria-labelledby="title description">
 <title id="title">Decision receipt: ${esc(artifact.payload.name)}</title>
-<desc id="description">A Quinelings program body and its recorded calculation. Exact source and inputs are embedded in metadata. The calculation reproduced; origin and human approval are not verified by this file.</desc>
+<desc id="description">An Auditline policy index and its recorded calculation. Exact source and inputs are embedded in metadata. The calculation reproduced; origin and human approval are not verified by this file.</desc>
 <metadata id="ai-audit-package">${esc(JSON.stringify(value))}</metadata>
 <rect width="1100" height="${height}" fill="#f4f1ea"/>
 <g fill="#24221d" font-family="sans-serif">
@@ -132,9 +133,9 @@ export async function renderDecisionSvg(value: DecisionPackage): Promise<string>
 <text x="32" y="150" font-size="13">Calculation reproduced · Origin not verified · Simulated actions only</text>
 <text x="32" y="174" font-size="12" font-family="monospace">Decision ${esc(shortValue(value.decision.id, 100))}</text>
 ${body}
-<text x="48" y="610" font-size="16" font-weight="600">The body is a visual index of the program.</text>
-<text x="48" y="636" font-size="13">Step names link its regions to the calculation on the right.</text>
-<text x="48" y="662" font-size="13">Similar shapes do not establish identical source.</text>
+<text x="48" y="610" font-size="16" font-weight="600">Named steps index the policy.</text>
+<text x="48" y="636" font-size="13">Select a step to inspect the calculation on the right.</text>
+<text x="48" y="662" font-size="13">The source hash identifies the exact policy.</text>
 <text x="48" y="702" font-size="15" font-weight="600">This SVG carries exact source and inputs.</text>
 <text x="48" y="728" font-size="13">Review the embedded data before sharing.</text>
 <text x="48" y="754" font-size="13">Long display values are shortened; metadata keeps them whole.</text>

@@ -21,7 +21,9 @@
     "results": "npm run build && node scripts/results.mjs",
     "check:tsc": "tsc --noEmit",
     "verify:formal": "bash spec/run.sh && npm run build && node --test dist/test/logsafety.test.js dist/test/audit.test.js dist/test/qdl.test.js dist/test/laws.test.js dist/test/segments.test.js dist/test/refusals.test.js dist/test/verdict.test.js",
-    "verify:bend": "bash bend/run.sh"
+    "verify:bend": "bash bend/run.sh",
+    "verify:native-install": "npm run build && node scripts/verify-native-install.mjs",
+    "bench:policy": "npm run build && node bench/policy-runtime.mjs"
   },
   "keywords": [
     "ai-act",
@@ -40,9 +42,6 @@
     "openai": "^6.49.0",
     "tsrs": "0.18.0-ts7.1.0-dev.20260929",
     "typescript": "^5.9.3"
-  },
-  "optionalDependencies": {
-    "@quinelings/agent-sdk": "file:vendor/quinelings-agent-sdk-1.0.0.tgz"
   },
   "bin": {
     "ai-audit": "dist/src/cli.js",

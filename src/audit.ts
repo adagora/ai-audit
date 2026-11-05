@@ -412,8 +412,8 @@ export function report(log: AuditLog, from: string, to: string) {
       "| przypadek | poziom | wersje wiersza | wywołania | przekazane | zredagowane | zablokowane | odrzucone | odmowy | wstrzymane narzędzia | tokeny we / wy | decyzje | ocenione | nadpisane |",
       "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
       ...useCases.map((u) => `| ${u.useCase ?? "(brak)"} | ${u.tiers.join(" → ") || "—"} | ${u.versions} | ${u.calls} | ${u.forwarded} | ${u.redacted} | ${u.blocked} | ${u.rejected} | ${u.refused} | ${u.gateHolds} | ${u.inputTokens} / ${u.outputTokens}${u.unknownUsage ? ` (+${u.unknownUsage} bez danych)` : ""} | ${u.decisions} | ${u.reviewed} | ${u.overridden}${u.overrideRatePct === null ? "" : ` (${u.overrideRatePct} %)`} |`), ""] : []),
-    ...(steps.length ? ["## Kroki QDL", "| status | liczba |", "|---|---|", ...Object.entries(qdl).map(([k, x]) => `| ${k} | ${x} |`), ""] : []),
-    ...(policies.length ? ["## Wersje polityk QDL", "Wersje są numerowane z całego dziennika. „aktualna” oznacza wersję ostatniej decyzji w całym dzienniku, nie ostatnią w tym oknie.", ...policies.flatMap((p) => [`### ${p.systemId} / ${p.useCase}`,
+    ...(steps.length ? ["## Kroki polityk", "| status | liczba |", "|---|---|", ...Object.entries(qdl).map(([k, x]) => `| ${k} | ${x} |`), ""] : []),
+    ...(policies.length ? ["## Wersje polityk", "Wersje są numerowane z całego dziennika. „aktualna” oznacza wersję ostatniej decyzji w całym dzienniku, nie ostatnią w tym oknie.", ...policies.flatMap((p) => [`### ${p.systemId} / ${p.useCase}`,
       ...p.versions.map((v) => `- v${v.version}${v.current ? " (aktualna)" : ""} ${v.sourceHash.slice(0, 15)}…${v.name ? ` „${v.name}”` : ""}: decyzje ${v.decisions}, ${v.firstUsed} – ${v.lastUsed}`)]), ""] : []),
     ...(evidence.length ? ["## Niepełne dowody decyzji", ...evidence.map((g) => `- ${g.id}: ${GAP_TEXT[g.reason]}`), ""] : []),
     "## Decyzje według systemu", ...Object.entries(dec.reduce<Record<string, number>>((a, d) => ((a[`${d.systemId} / ${d.useCase}`] = (a[`${d.systemId} / ${d.useCase}`] ?? 0) + 1), a), {})).map(([k, x]) => `- ${k}: ${x}`), "",
@@ -434,7 +434,7 @@ export function report(log: AuditLog, from: string, to: string) {
   return { md, stats, llm, refusals, qdl, policies, evidence, useCases };
 }
 
-const GAP_TEXT = { "companion-missing": "brak zapisu QDL", "program-missing": "brak programu", "not-reconstructible": "wynik zapisany, nie do odtworzenia", "output-mismatch": "wynik decyzji nie zgadza się z zapisem QDL" };
+const GAP_TEXT = { "companion-missing": "brak zapisu polityki", "program-missing": "brak programu", "not-reconstructible": "wynik zapisany, nie do odtworzenia", "output-mismatch": "wynik decyzji nie zgadza się z zapisem polityki" };
 
 function periodPolicies(all: Rec[], inRange: (ts: string) => boolean) {
   const steps = new Map<string, any>();

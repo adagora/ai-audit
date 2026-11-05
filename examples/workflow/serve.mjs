@@ -43,8 +43,8 @@ const syntheticKey = "AKIAIOSFODNN7EXAMPLQ";
 const WATCH = process.env.WORKFLOW_WATCH_METRICS, WEBHOOK = process.env.WORKFLOW_ALERT_WEBHOOK;
 if (WATCH !== undefined && !/^https?:\/\/[^\s/]+\/metrics$/.test(WATCH)) throw new Error("WORKFLOW_WATCH_METRICS must be an http(s) URL ending in /metrics");
 if (WEBHOOK !== undefined && !/^https?:\/\/\S+$/.test(WEBHOOK)) throw new Error("WORKFLOW_ALERT_WEBHOOK must be an http(s) URL");
-const quotePolicy = JSON.parse(readFileSync(new URL("../quineling-quote/policy.json", import.meta.url), "utf8"));
-const quoteInputs = JSON.parse(readFileSync(new URL("../quineling-quote/inputs.json", import.meta.url), "utf8"));
+const quotePolicy = JSON.parse(readFileSync(new URL("../evaluation/machining-policy.json", import.meta.url), "utf8"));
+const quoteInputs = JSON.parse(readFileSync(new URL("../evaluation/machining-inputs.json", import.meta.url), "utf8"));
 const decisions = new Map();
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const listen = (server, port = 0) => new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
@@ -344,7 +344,7 @@ const CHECKS = {
   session: ["second turn linked to the session", (r) => r.status === 200 && r.record?.session?.turn === 2],
   contextGrowth: ["five turns in one session as the context grows", (r) => r.statuses?.length === 5 && r.statuses.every((s) => s === 200) && r.record?.session?.turn === 5],
   quineling: ["Quinelings result observed", (r) => r.status === 200 && r.record?.quinelings?.length > 0],
-  qdl: ["QDL completed and receipt verifies", (r) => r.qdl?.status === "completed" && r.portableVerification?.reproduced === true],
+  qdl: ["Policy completed and receipt verifies", (r) => r.qdl?.status === "completed" && r.portableVerification?.reproduced === true],
   signed: ["signature verifies", (r) => r.verification?.reproduced === true && r.verification?.approval === "signed-review-record"],
   alerting: ["held call fires the tool-call alert", (r) => r.status === 200 && r.alert?.firing === true],
   checkQuotes: ["wrong value and missing quote found", (r) => r.quotes?.ok === false && r.quotes.issues.length === 2],

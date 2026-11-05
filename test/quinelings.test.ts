@@ -10,15 +10,15 @@ import { quinelingCalls, quinelingOp, quinelingResults } from "../src/quinelings
 import { metrics } from "../src/proxy.js";
 import { startProxy } from "./helpers.js";
 
-const skip = Number(process.versions.node.split(".")[0]) < 22 ? "Quinelings SDK needs Node >= 22" : false;
+const skip = Number(process.versions.node.split(".")[0]) < 22 ? "Node >= 22 required" : false;
 const policy = JSON.parse(readFileSync(new URL("../../examples/evaluation/machining-policy.json", import.meta.url), "utf8"));
 const quote = { minutes: 42, rate: 4.5, setup: 120, material: 85, llmPrice: 274 };
 const refusedText = JSON.stringify({ error: { code: "refinement", path: "$.bindings.minutes", message: "Number is below minimum" } });
 const mcpErrorText = "MCP error -32602: Input validation error: Invalid arguments for tool quineling_v1_compile: Invalid input at intent.steps[14]";
 const call = (id: string, name: string, args: object) => ({ id, type: "function", function: { name, arguments: JSON.stringify(args) } });
 const payloads = async () => {
-  const { Session } = await import("@quinelings/agent-sdk/v1");
-  const s = new Session(), artifact = s.compile(policy), run = s.run({ artifactId: artifact.id, requestId: "r1", inputs: quote });
+  const artifact = { id: "ql_" + "a".repeat(64), source: "EXTERNAL_PROGRAM_SOURCE_NOT_RETAINED", payload: { format: "qdl-program" } };
+  const run = { result: { format: "qdl-run", sourceHash: artifact.id, status: "completed" } };
   return { artifact, compileText: JSON.stringify({ result: artifact }), runText: JSON.stringify({ result: run }) };
 };
 

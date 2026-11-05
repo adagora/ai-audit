@@ -1,3 +1,4 @@
+import { policyRuntime } from "./policyAdapter.js";
 import http from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -144,11 +145,11 @@ export function createConsole(o: ConsoleOptions) {
   const outputNames = new Map<string, string[] | null>();
   const decisions = async () => {
     const { records } = load(), views = decisionViews(records);
-    let sdk: any;
     for (const hash of new Set(views.map((v) => v.qdl?.sourceHash).filter((h): h is string => !!h && !outputNames.has(h)))) {
       const source = records.find((r) => r.kind === "program" && r.id === hash)?.source;
       try {
-        sdk ??= await import("@quinelings/agent-sdk/v1");
+        if (typeof source !== "string") throw new Error("audit_qdl_source_missing");
+        const sdk = await policyRuntime({ source });
         const names = new sdk.Session().recover({ source }).payload?.task?.outputs;
         outputNames.set(hash, Array.isArray(names) && names.every((n: unknown) => typeof n === "string") ? names : null);
       } catch { outputNames.set(hash, null); }
@@ -231,7 +232,7 @@ export function createConsole(o: ConsoleOptions) {
       }
       if (req.method === "POST" && section === "decisions" && id && action === "replay") {
         try { return json(res, 200, await verifyDecision(o.log, id, o.anchorsPath ? { anchorsPath: o.anchorsPath } : undefined)); }
-        catch (e) { throw new ConsoleError(e instanceof Error && e.message === "audit_qdl_unavailable" ? 503 : 422, e instanceof Error && /^audit_[a-z_]+$/.test(e.message) ? e.message : "audit_console_replay_failed"); }
+        catch (e) { throw new ConsoleError(422, e instanceof Error && /^audit_[a-z_]+$/.test(e.message) ? e.message : "audit_console_replay_failed"); }
       }
       if (req.method === "POST" && section === "decisions" && id && action === "review") {
         if (!reviewer) throw new ConsoleError(403, "audit_console_read_only");

@@ -37,13 +37,13 @@ test("workbench links sessions, scan history and QDL evidence without retained v
   const snapshot = readEvidenceRecords(log);
   const result = renderWorkbench(snapshot.records, snapshot.digest, { from, to });
   assert.deepEqual([result.calls, result.sessions, result.findings, result.decisions, result.observedQuinelings], [2, 1, 2, 1, 1]);
-  for (const shown of ["Sessions & context", "Scan & signal history", "Quinelings activity", "QDL decisions & reviews", "Where every feature lives", "System 20", "User 40", "pii-email", "pi-ignore-instructions", "decision-1", "receipt --log LOG", "Hash chain verified", "unknown"]) assert.ok(result.html.includes(shown), shown);
+  for (const shown of ["Sessions & context", "Scan & signal history", "Quinelings activity", "Policy decisions & reviews", "Where every feature lives", "System 20", "User 40", "pii-email", "pi-ignore-instructions", "decision-1", "receipt --log LOG", "Hash chain verified", "unknown"]) assert.ok(result.html.includes(shown), shown);
   for (const omitted of ["PRIVATE_OUTPUT", "PRIVATE_DECISION_OUTPUT", "PRIVATE_INPUT", "PRIVATE_PARAM", "PRIVATE_QDL_INPUT", "PRIVATE_REVIEWER", "PRIVATE_REVIEW_NOTE", "alice@example.com", "client@example.com", '<img src=x onerror=alert(1)>', '<svg onload=alert(1)>']) assert.equal(result.html.includes(omitted), false, omitted);
   assert.match(result.html, /&lt;img src=x onerror=alert\(1\)&gt;/);
   assert.match(result.html, /\[withheld\]/);
-  for (const expected of ["Investigate a request", "Client request", "Inspection", "Forwarding", "Provider result", "Tool observations", "QDL decision and review", "Integrity and origin", "No linked decision in this interval", "external anchor not checked", "decision-1", "observed", "derived", "unknown"]) assert.ok(result.html.includes(expected), expected);
+  for (const expected of ["Investigate a request", "Client request", "Inspection", "Forwarding", "Provider result", "Tool observations", "Policy decision and review", "Integrity and origin", "No linked decision in this interval", "external anchor not checked", "decision-1", "observed", "derived", "unknown"]) assert.ok(result.html.includes(expected), expected);
   assert.match(result.html, /href="#investigate-/);
-  assert.match(result.html, /QDL completed · review approved/);
+  assert.match(result.html, /policy completed · review approved/);
   assert.equal(result.html.match(/<tr data-search-row/g)?.length, 8);
 });
 
