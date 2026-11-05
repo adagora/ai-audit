@@ -1,5 +1,5 @@
 # 63. A separate executor authorizes effects and reconciles uncertain outcomes
-Status: Accepted. Consolidated 2026-11-04 from the unpublished executor/consent decisions at the user's request. Extends 0055, 0061 and 0062.
+Status: Accepted. Consolidated 2026-11-04 from the unpublished executor/consent decisions at the user's request. Extends 0055, 0061 and 0062. The JavaScript application and workbench it names were removed by [0067](0067-no-help-desk-application-in-ai-audit.md); the decision holds and the Python application implements it.
 
 ## Context
 A correct quote, allowed tool or valid audit chain cannot establish customer ownership, consent, eligibility, settlement or safety after a crash. Those checks belong where backend credentials are used.

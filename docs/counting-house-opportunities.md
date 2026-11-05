@@ -32,8 +32,8 @@ My recommendation goes beyond a gateway: make every grant of authority inspectab
 | Deterministic decisions | Optional QDL, replay, program identity, receipts and attestations | A correct replay reproduces the computation; input truth and business suitability still need evidence |
 | Human review and action evidence | `src/verdict.ts`, ADRs 0055 and 0057 | Application execution and effect recording are separate; timeout and check/action windows are documented; 0057 remains Proposed |
 | Evaluations | IntentGauge `src/types.ts`, `src/calibration.ts`: per-intent metrics, mistake costs, repeats, independent human labels and judge eligibility | Representative independently reviewed data, operational approval, drift response and execution remain separate responsibilities |
-| Cross-project experiments | ADR 0060; `examples/citywheels/workbench/README.md` | Export, isolated workers, retained runs, repeated comparisons and interactive drafts already exist; qualification and production connection are unfinished |
-| CityWheels behavior | Both help desks calculate quotes; `examples/citywheels/helpdesk.mjs` explicitly forbids booking changes | Neither cancellation nor payment is implemented; a quote experiment cannot validate transaction safety |
+| Cross-project experiments | ADR 0060; `examples/citywheels/workbench/README.md` at tag `helpdesk-workbench-archive` | Export, isolated workers, retained runs, repeated comparisons and interactive drafts already exist; qualification and production connection are unfinished |
+| CityWheels behavior | Both help desks calculate quotes; `examples/citywheels/helpdesk.mjs` at that tag explicitly forbids booking changes | Neither cancellation nor payment is implemented; a quote experiment cannot validate transaction safety |
 
 The inspected Python application is the separate `help-desk-agent` checkout selected by `CITYWHEELS_PYTHON_ROOT`. IntentGauge is the separate evaluation checkout selected by `INTENTGAUGE_ROOT`. This assessment does not generalize to the rest of EternalChat.
 

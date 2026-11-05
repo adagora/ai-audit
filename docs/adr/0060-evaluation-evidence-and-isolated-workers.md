@@ -1,5 +1,5 @@
 # 60. Evaluations use isolated workers and separately retained evidence
-Status: Accepted. Consolidated 2026-11-04 from the unpublished evaluation/workbench decisions at the user's request. Extends 0007, 0038 and 0043.
+Status: Accepted. Consolidated 2026-11-04 from the unpublished evaluation/workbench decisions at the user's request. Extends 0007, 0038 and 0043. The JavaScript application and workbench it names were removed by [0067](0067-no-help-desk-application-in-ai-audit.md); IntentGauge now evaluates the Python application.
 
 ## Context
 Metadata audit logs cannot reconstruct a customer conversation, and a replayed answer does not prove business correctness. Evaluating applications requires independent expectations, isolated fixtures and durable source references without coupling evaluation to proxy forwarding.

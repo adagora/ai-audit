@@ -1,6 +1,8 @@
 # Release qualification evidence
 
-Run `npm run example:helpdesk`, execute a question, then open **Release qualification · evidence only** beneath the evaluation. Each intent receives a versioned package binding the retained suite, report, application files and available policy, prompt, tools, knowledge, dependency and evaluator snapshots.
+The synthetic workbench and cockpit that served this module are no longer in the repository ([ADR 0067](adr/0067-no-help-desk-application-in-ai-audit.md)). They are kept at git tag `helpdesk-workbench-archive`; check it out to run `npm run example:helpdesk`. The module in `src/` remains and its tests are in `test/`.
+
+In the archived workbench, run `npm run example:helpdesk`, execute a question, then open **Release qualification · evidence only** beneath the evaluation. Each intent receives a versioned package binding the retained suite, report, application files and available policy, prompt, tools, knowledge, dependency and evaluator snapshots.
 
 The workbench captures release identities before and after execution. Changed files make the evaluated release inapplicable. Blob hashes are checked when evidence is reopened. Package files never grant permission or write to the proxy audit chain.
 

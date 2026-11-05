@@ -1,5 +1,5 @@
 # 66. The help desk is its own repository, Temporal runs its write intents, and domain code stays out of `src/`
-Status: Accepted (2026-11-05). Extends [0062](0062-casework-application-boundary.md) and [0063](0063-synthetic-execution-and-reconciliation.md), and decides the Temporal placement that 0062 left as a proposal.
+Status: Superseded by [0067](0067-no-help-desk-application-in-ai-audit.md) (2026-11-05). Extended [0062](0062-casework-application-boundary.md) and [0063](0063-synthetic-execution-and-reconciliation.md), and decides the Temporal placement that 0062 left as a proposal.
 
 ## Context
 Commit 77e2952 put the synthetic CityWheels executor and read context in `src/`, 21 help-desk scripts in `scripts/`, and made `src/casework.ts` depend on the CityWheels context. `src/` was meant to stay free of any one industry. CI failed on `main` because two tests needed sibling checkouts that CI does not have.

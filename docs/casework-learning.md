@@ -1,8 +1,10 @@
 # Independent review and calibration
 
+The synthetic workbench and cockpit that served this module are no longer in the repository ([ADR 0067](adr/0067-no-help-desk-application-in-ai-audit.md)). They are kept at git tag `helpdesk-workbench-archive`; check it out to run `npm run example:helpdesk`. The module in `src/` remains and its tests are in `test/`.
+
 `src/caseworkLearning.ts` stores tenant-scoped, immutable labels separately from answer approvals and execution reviews. Two assigned labelers commit one Boolean label each against versioned rubric text and source context. A third assigned adjudicator resolves disagreement after both labels are locked. Assignment responses omit model verdicts and peer labels; only the adjudicator sees conflicting human labels. Distinct credentials prove access boundaries, not independence of actual people.
 
-Start `npm run example:helpdesk`. The console prints separate `/learning#token=…` URLs for `demo-labeler-a`, `demo-labeler-b` and `demo-adjudicator`. These identities have no operational roles. No tasks are created automatically. The cockpit Learning view assigns retained answers with the exact stored SOP documents and explicit operator-supplied facts. It also freezes judge evidence references and publishes resolved gold. External sample creation and held-out calibration export use the authenticated operator API. Reviewer credentials rotate on restart; stored identity assignments and locked labels persist.
+In the archived cockpit, `npm run example:helpdesk` printed separate `/learning#token=…` URLs for `demo-labeler-a`, `demo-labeler-b` and `demo-adjudicator`. These identities have no operational roles. No tasks are created automatically. The cockpit Learning view assigns retained answers with the exact stored SOP documents and explicit operator-supplied facts. It also freezes judge evidence references and publishes resolved gold. External sample creation and held-out calibration export use the authenticated operator API. Reviewer credentials rotate on restart; stored identity assignments and locked labels persist.
 
 The API uses `x-workbench-token` or a Bearer credential. Roles and tenant come from server configuration. Available routes:
 

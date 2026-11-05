@@ -1,6 +1,8 @@
 # Paired human and candidate economics
 
-`src/caseworkEconomics.ts` analyzes an operator-attested dataset; it does not change routing or authority. The Outcomes view accepts JSON and can load `examples/citywheels/workbench/economics.sample.json`. The endpoint `POST /api/casework/economics/analyze` accepts `{dataset}` for an authenticated operator, returns analysis, and does not retain the supplied dataset. Use sanitized references without customer content.
+The synthetic workbench and cockpit that served this module are no longer in the repository ([ADR 0067](adr/0067-no-help-desk-application-in-ai-audit.md)). They are kept at git tag `helpdesk-workbench-archive`; check it out to run `npm run example:helpdesk`. The module in `src/` remains and its tests are in `test/`.
+
+`src/caseworkEconomics.ts` analyzes an operator-attested dataset; it does not change routing or authority. The Outcomes view accepts JSON and could load `examples/citywheels/workbench/economics.sample.json` from the tag. The endpoint `POST /api/casework/economics/analyze` accepts `{dataset}` for an authenticated operator, returns analysis, and does not retain the supplied dataset. Use sanitized references without customer content.
 
 The synthetic example uses development estimates. It intentionally produces no representative ranking. Its per-sample diagnostics still show handling costs. No real human baseline has been collected or production advantage established.
 

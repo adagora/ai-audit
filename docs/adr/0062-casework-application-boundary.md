@@ -1,5 +1,5 @@
 # 62. The casework application owns customer work outside the inference proxy
-Status: Accepted. Consolidated 2026-11-04 from the unpublished application/casework decisions at the user's request. Extends 0004, 0007, 0053, 0060 and 0061.
+Status: Accepted. Consolidated 2026-11-04 from the unpublished application/casework decisions at the user's request. Extends 0004, 0007, 0053, 0060 and 0061. The JavaScript application and workbench it names were removed by [0067](0067-no-help-desk-application-in-ai-audit.md); the decision holds and the Python application implements it.
 
 ## Context
 A proxy sees model traffic but cannot prove booking ownership, enforce actual customer delivery or own a multi-day business case. Embedding domain workflows and write credentials would compromise its independent role.

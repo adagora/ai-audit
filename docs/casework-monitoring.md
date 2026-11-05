@@ -1,5 +1,7 @@
 # Monitoring, restriction and recovery
 
+The synthetic workbench and cockpit that served this module are no longer in the repository ([ADR 0067](adr/0067-no-help-desk-application-in-ai-audit.md)). They are kept at git tag `helpdesk-workbench-archive`; check it out to run `npm run example:helpdesk`. The module in `src/` remains and its tests are in `test/`.
+
 The local cockpit uses ADR 0065 to connect retained evidence to owned operational reviews. It never treats a score or alert as permission. Monitoring data stays outside the runtime audit chain.
 
 Before activating a grant, a reviewer records a plan for its intent. The plan names an incident owner, human fallback owner, declared capacity, maximum pending queue, response deadline, observation window, signal thresholds and expiry. The plan must remain valid through the grant's expiry. The fallback queue must fit both the declared maximum and the capacity available within the response deadline. These are accountable declarations; the software does not manufacture a staffing measurement. The cockpit accepts synthetic plans only. Library integrations with production scope must provide explicitly measured capacity and install the operational activation gate at their own deployment boundary.
