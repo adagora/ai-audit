@@ -18,7 +18,7 @@ const cli = (...args: string[]) => spawnSync(process.execPath, [cliPath, ...args
 async function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "decision-attestation-"));
   const log = new AuditLog(join(directory, "audit.jsonl"));
-  const { decision } = await recordQdl(log, { systemId: "fixture", useCase: "quote", input: "fake quote" }, { intent: policy }, inputs);
+  const { decision } = await recordQdl(log, { systemId: "fixture", useCase: "quote", correlation: "conv-0123abcd", input: "fake quote" }, { intent: policy }, inputs);
   const privatePath = join(directory, "reviewer-private.pem"), publicPath = join(directory, "reviewer-public.pem");
   const keyId = generateAttestationKeys(privatePath, publicPath);
   return { directory, log, decision, privatePath, publicPath, keyId };

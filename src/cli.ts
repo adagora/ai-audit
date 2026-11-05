@@ -2,7 +2,7 @@
 import { parseArgs } from "node:util";
 import { basename } from "node:path";
 import { readFileSync, statSync, writeFileSync } from "node:fs";
-import { AuditLog, AuditLogUnavailable, anchor, prune, report, sha256, stats, verifyAnchors, type Effect, type Review } from "./audit.js";
+import { AuditLog, AuditLogUnavailable, anchor, prune, report, sha256, stats, validCorrelation, verifyAnchors, type Effect, type Review } from "./audit.js";
 import { recordQdl, verifyDecision } from "./qdl.js";
 import { decisionReceipt, renderReceipt } from "./receipt.js";
 import { policyHistories, withChanges } from "./policies.js";
@@ -28,7 +28,7 @@ const { values: a } = parseArgs({ args: rest, options: {
   mode: { type: "string", default: "redact" }, log: { type: "string", default: "./audit.jsonl" }, port: { type: "string", default: "8787" },
   host: { type: "string", default: "127.0.0.1" }, anchors: { type: "string" }, config: { type: "string" }, by: { type: "string", default: "model" }, name: { type: "string", default: "client" }, "no-page-redaction": { type: "boolean", default: false }, "unsafe-no-sandbox": { type: "boolean", default: false }, "log-content": { type: "boolean", default: false }, "allow-hashes": { type: "string" }, from: { type: "string", default: "1970-01-01" }, to: { type: "string", default: "9999-12-31" },
   input: { type: "string" }, session: { type: "string" }, output: { type: "string" }, format: { type: "string" }, "max-record-bytes": { type: "string" },
-  policy: { type: "string" }, inputs: { type: "string" }, "system-id": { type: "string" }, "use-case": { type: "string" }, "llm-call": { type: "string" },
+  policy: { type: "string" }, inputs: { type: "string" }, "system-id": { type: "string" }, "use-case": { type: "string" }, "llm-call": { type: "string" }, correlation: { type: "string" },
   "private-key": { type: "string" }, "public-key": { type: "string" }, attestation: { type: "string" },
   decision: { type: "string" }, reviewer: { type: "string" }, verdict: { type: "string" }, note: { type: "string" },
   source: { type: "string" }, answer: { type: "string" }, metrics: { type: "string" }, "notify-url": { type: "string" }, "overdue-minutes": { type: "string" },
@@ -228,9 +228,10 @@ if (cmd === "attest-keygen") {
       if (!program) throw new Error("audit_invalid_policy");
       if (!inputs || typeof inputs !== "object" || Array.isArray(inputs)) throw new Error("audit_invalid_inputs");
       if (!a["system-id"] || !a["use-case"]) throw new Error("audit_missing_argument");
+      if (a.correlation !== undefined && validCorrelation(a.correlation) === undefined) throw new Error("audit_invalid_correlation");
       if (a["llm-call"] && !log.read().some((r) => r.kind === "llm-call" && r.id === a["llm-call"])) throw new Error("audit_unknown_llm_call");
       const carnet = createInspectionProfile({ mode: "redact", carnet: allowlist() }).carnet;
-      const { decision, step } = await recordQdl(log, { systemId: a["system-id"], useCase: a["use-case"], llmCallId: a["llm-call"], input: readFileSync(a.inputs!, "utf8") }, program, inputs, carnet);
+      const { decision, step } = await recordQdl(log, { systemId: a["system-id"], useCase: a["use-case"], llmCallId: a["llm-call"], correlation: a.correlation, input: readFileSync(a.inputs!, "utf8") }, program, inputs, carnet);
       console.log(JSON.stringify({ decision: decision.id, status: step.qdl.status, ...(decision.output !== undefined && { outputs: decision.output }),
         ...(step.qdl.error && { error: step.qdl.error }), ...(step.qdl.findings && { findings: step.qdl.findings }) }));
       process.exitCode = step.qdl.status === "completed" ? 0 : 1;

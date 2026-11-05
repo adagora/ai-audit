@@ -69,7 +69,7 @@ export async function recordQdl(log: AuditLog, e: Omit<Entry, "output" | "step">
   const { s, refusal } = await session();
   const findings = inspect({ inputs, program: prog.source ?? prog.intent, params: entry.params, sources: entry.sources, model: entry.model, prompt: entry.prompt?.templateId }, carnet).findings;
   if (findings.length) {
-    const decision = log.record({ systemId: entry.systemId, useCase: entry.useCase, llmCallId: entry.llmCallId, input: entry.input, output: undefined, qdlDecision: true });
+    const decision = log.record({ systemId: entry.systemId, useCase: entry.useCase, llmCallId: entry.llmCallId, correlation: entry.correlation, input: entry.input, output: undefined, qdlDecision: true });
     const step = log.append({ kind: "decision", id: decision.id + ":qdl", ts: decision.ts, refId: decision.id,
       qdl: { status: "refused", error: { code: "audit-sensitive-input", path: findings[0].path }, findings: findings.map((f) => ({ rule: f.rule, path: f.path })) } }) as QdlRec;
     return { decision, step };

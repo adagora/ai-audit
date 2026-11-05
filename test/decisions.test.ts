@@ -27,11 +27,11 @@ test("decide, approve and replay from the CLI, linked to a proxied LLM call, in 
     body: JSON.stringify({ model: "gpt-x", messages: [{ role: "user", content: "Quote flange DN100, CAM 42 min" }] }) });
   await llm.text();
   const llmCallId = llm.headers.get("x-request-id")!;
-  const d = decide(inputs, "--llm-call", llmCallId);
+  const d = decide(inputs, "--llm-call", llmCallId, "--correlation", "conv-0123abcd");
   assert.equal(d.code, 0, d.err); assert.equal(d.out.status, "completed"); assert.deepEqual(d.out.outputs.slice(0, 3), [394, false, false]);
   assert.equal(d.out.outputs[4].action, "route-to-human-review");
   const rec = px.log.read().find((r) => r.id === d.out.decision)!;
-  assert.equal(rec.llmCallId, llmCallId); assert.equal(rec.output !== undefined, true);
+  assert.equal(rec.llmCallId, llmCallId); assert.equal(rec.correlation, "conv-0123abcd"); assert.equal(rec.output !== undefined, true);
   const review = run("approve", "--decision", d.out.decision, "--reviewer", "A. Nowak", "--verdict", "approved", "--note", "policy price 394 PLN");
   assert.equal(review.code, 0, review.err); assert.equal(review.out.decision, d.out.decision);
   const replay = run("replay", "--decision", d.out.decision);
@@ -52,6 +52,7 @@ test("a refusal is recorded and replays as a refusal; usage errors write nothing
   assert.equal(replay.code, 0, replay.err); assert.deepEqual([replay.out.reproduced, replay.out.status], [true, "refused"]);
   for (const [args, code] of [
     [["decide", "--policy", policy, "--inputs", inputs, "--system-id", "s", "--use-case", "u", "--llm-call", "not-a-call"], "audit_unknown_llm_call"],
+    [["decide", "--policy", policy, "--inputs", inputs, "--system-id", "s", "--use-case", "u", "--correlation", "bad value"], "audit_invalid_correlation"],
     [["decide", "--policy", inputs, "--inputs", inputs, "--system-id", "s", "--use-case", "u"], "audit_invalid_policy"],
     [["decide", "--policy", policy, "--inputs", join(dir, "missing.json"), "--system-id", "s", "--use-case", "u"], "audit_invalid_inputs"],
     [["decide", "--policy", policy, "--inputs", inputs], "audit_missing_argument"],

@@ -32,6 +32,16 @@ test("redact: secret + PII replaced (incl. tool results) before upstream sees th
   assert.deepEqual((rec as any).toolCalls.map((t: any) => t.name), ["get_price"]);
 });
 
+test("a correlation header is logged when well formed, never forwarded, and dropped when not", async () => {
+  const good = await post(proxies.redact.url, "/v1/chat/completions", { model: "gpt-x", messages: [{ role: "user", content: "hi" }] }, { "x-audit-correlation": "conv-0123abcd" });
+  assert.equal(good.status, 200); await good.text();
+  assert.equal(proxies.redact.log.read().at(-1)!.correlation, "conv-0123abcd");
+  assert.equal(last().headers["x-audit-correlation"], undefined);
+  const bad = await post(proxies.redact.url, "/v1/chat/completions", { model: "gpt-x", messages: [{ role: "user", content: "hi" }] }, { "x-audit-correlation": "has space;and/other" });
+  assert.equal(bad.status, 200); await bad.text();
+  assert.equal(proxies.redact.log.read().at(-1)!.correlation, undefined);
+});
+
 test("no-go: 409 with rule IDs only, upstream never called, blocked call still logged", async () => {
   const before = up.seen.length;
   const r = await post(proxies["no-go"].url, "/v1/messages", { model: "claude", max_tokens: 5, messages: [{ role: "user", content: `x ${AWS}` }] });

@@ -1,6 +1,6 @@
 import http from "node:http";
 import { randomUUID } from "node:crypto";
-import { AuditLog, AuditLogUnavailable, sha256, stats } from "./audit.js";
+import { AuditLog, AuditLogUnavailable, sha256, stats, validCorrelation } from "./audit.js";
 import { decide, hasDuplicateKeys, inspect, MAX_JSON_DEPTH, nestedDeeperThan, storedFindings, type Mode } from "./scan.js";
 import { checkActions, enforces, requestTexts, validateActionGate, validateKeyTools, type ActionGate, type CallResult, type KeyTools, type ToolLimits } from "./actionGate.js";
 import { resolveUseCase, validateUseCases, type UseCase } from "./useCases.js";
@@ -72,7 +72,7 @@ const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(
 const ROUTES: Record<string, Api | "count" | undefined> = {
   "/v1/chat/completions": "openai-chat", "/v1/responses": "openai-responses", "/v1/messages": "anthropic-messages", "/v1/messages/count_tokens": "count",
 };
-const HOP = new Set(["host", "connection", "content-length", "transfer-encoding", "accept-encoding", "keep-alive", "upgrade", "proxy-connection", "x-audit-use-case", "x-audit-system-id"]);
+const HOP = new Set(["host", "connection", "content-length", "transfer-encoding", "accept-encoding", "keep-alive", "upgrade", "proxy-connection", "x-audit-use-case", "x-audit-system-id", "x-audit-correlation"]);
 const RESP_DROP = new Set(["content-encoding", "content-length", "transfer-encoding", "connection", "keep-alive"]);
 
 export function createProxy(o: ProxyOpts) {
@@ -221,6 +221,7 @@ export function createProxy(o: ProxyOpts) {
       const context = {
         provider: anthropic ? "anthropic" : "openai", api: route, endpoint: url.pathname, requestId: rid,
         systemId: str(req.headers["x-audit-system-id"]), useCase: useCase ? useCase.name : str(req.headers["x-audit-use-case"]),
+        correlation: validCorrelation(req.headers["x-audit-correlation"]),
         ...(useCase && { useCasePolicy: { tier: useCase.row.tier, digest: useCase.row.digest } }),
         ...who, model: typeof body.model === "string" ? body.model : undefined, requestedModel: alias ? requestedModel : undefined, stream: body.stream === true,
         requestHash: sha256(raw.toString("latin1")), inspectionProfile: profile.receipt,

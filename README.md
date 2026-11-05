@@ -458,7 +458,7 @@ After `npm link`, the binary is `ai-audit`. The examples below use that name. `n
 | `profile` | `ai-audit profile --mode redact --config gateway.json` | JSON identity of the current scanner, mode and config. |
 | `scrub` | `ai-audit scrub --input history.jsonl --output history.redacted.jsonl` | A separate sanitized copy, plus a receipt on stdout. |
 | `check-quotes` | `ai-audit check-quotes --source email.txt --answer answer.json` | Checks values the model claims to have read. |
-| `decide` | `ai-audit decide --policy policy.json --inputs inputs.json --system-id shop --use-case quote` | Records a policy decision. |
+| `decide` | `ai-audit decide --policy policy.json --inputs inputs.json --system-id shop --use-case quote [--correlation ID]` | Records a policy decision. `--correlation` names the case it belongs to; the proxy stores the same id from the `x-audit-correlation` header on model calls ([ADR 0068](docs/adr/0068-correlation-and-the-application-cockpit.md)). |
 | `approve` | `ai-audit approve --decision ID --reviewer ada --verdict approved` | Appends a review. Verdicts are `approved`, `overridden`, `rejected`. A decision takes one verdict; a second one is refused with `audit_already_reviewed` ([ADR 0057](docs/adr/0057-one-verdict-per-decision.md)). |
 | `replay` | `ai-audit replay --decision ID --anchors anchors.jsonl` | Recomputes that decision from the log. |
 | `await` | `ai-audit await --decision ID --timeout-s 600` | Waits for a review of that decision. Exit 0 approved, 1 rejected or overridden, 3 timeout. With `--timeout-s 0` it only checks; run it before an action the rule allows, and record `skipped` with code `timeout` when you stop waiting. |

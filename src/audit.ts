@@ -17,9 +17,11 @@ export class AuditLogUnavailable extends Error { constructor(reason: string) { s
 
 export interface Step { source: string; input: unknown; output: unknown }
 export interface Review { reviewer: string; decision: "approved" | "overridden" | "rejected"; note?: string; at: string }
+const CORRELATION = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+export const validCorrelation = (value: unknown): string | undefined => (typeof value === "string" && CORRELATION.test(value) ? value : undefined);
 export interface Effect { action: string; status: "done" | "skipped" | "failed"; review?: string; code?: string }
 export interface Entry {
-  systemId: string; useCase: string; llmCallId?: string;
+  systemId: string; useCase: string; llmCallId?: string; correlation?: string;
   input: string; storeRedactedInput?: boolean;
   sources?: { doc: string; page?: number }[];
   model?: { name: string; version: string };
@@ -31,7 +33,7 @@ export interface Entry {
 }
 export interface Rec {
   kind: "decision" | "review" | "llm-call" | "program" | "refusal" | "segment" | "prune" | "effect"; id: string; ts: string; refId?: string;
-  systemId?: string; useCase?: string; llmCallId?: string; inputHash?: string; redactedInput?: string;
+  systemId?: string; useCase?: string; llmCallId?: string; correlation?: string; inputHash?: string; redactedInput?: string;
   sources?: { doc: string; page?: number }[]; model?: { name: string; version: string };
   prompt?: { templateId: string; hash: string }; params?: Record<string, unknown>; output?: unknown;
   step?: { sourceHash: string; input: unknown; outputHash: string };
@@ -210,7 +212,7 @@ export class AuditLog {
       step = { sourceHash, input: e.step.input, outputHash: sha256(canon(e.step.output)) };
     }
     return this.append({
-      kind: "decision", id: randomUUID(), ts: this.now(), systemId: e.systemId, useCase: e.useCase, llmCallId: e.llmCallId,
+      kind: "decision", id: randomUUID(), ts: this.now(), systemId: e.systemId, useCase: e.useCase, llmCallId: e.llmCallId, correlation: e.correlation,
       inputHash: sha256(e.input), redactedInput: e.storeRedactedInput ? redact(e.input) : undefined,
       sources: e.sources, model: e.model,
       prompt: e.prompt && { templateId: e.prompt.templateId, hash: sha256(e.prompt.template) },
