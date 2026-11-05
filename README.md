@@ -55,11 +55,17 @@ TypeScript, Node's standard library, no runtime dependencies. [Quinelings](https
 
 ## What it looks like
 
-The [operator console](#operator-console) over the synthetic log of `npm run example:workflow` and `npm run example:wycena -- --console --wait`. No real traffic.
+The [operator console](#operator-console) on a live run: two recordings first, then still images over a synthetic log.
 
-![Operator console walkthrough: a reviewer replays a quote rule, approves it with a note, then opens the request flow, one request, the context of a session and the integrity of the log.](docs/images/console-walkthrough.gif)
+![Operator console walkthrough on a live run: the overview, a decision replayed and approved with a note, the recorded action, use cases, request flow, refused, held and redacted requests, sessions, keys, integrity with an anchor and live counters.](docs/images/console-walkthrough.gif)
 
-The recording runs `npm run example:wycena -- --console --wait`: a synthetic toolroom quote rule, a scripted model and no real traffic. Its data and its reviewer name are in Polish.
+The recording is a live run of the [Deskhand](https://github.com/adagora/deskhand) help-desk agent: `gpt-4o-mini` through the Auditline proxy, real Temporal cases and made-up CityWheels bookings. The gateway has three keys, three use cases (`assist`, `shadow` and `off`) and a tool limit on one key. The traffic includes a wrong key, a switched-off use case, a model that the use case does not allow, a tool call outside the key's list and an IBAN in a customer message that the proxy redacts. The reviewer approves a refund decision in the console and the application then records the action.
+
+![Decision receipt walkthrough: the receipt page, the portable SVG receipt, and the output of receipt, verify-receipt, replay, verify and report.](docs/images/receipts-walkthrough.gif)
+
+The second recording shows the receipt of that decision as a page and as a portable SVG. The terminal frames show the real output of `receipt`, `verify-receipt`, `replay`, `verify` and `report`, drawn as text. The `report` command prints its labels in Polish.
+
+The still images below come from synthetic logs with scripted models. They hold no real traffic.
 
 **What needs attention now**, and what the log suggests changing:
 
