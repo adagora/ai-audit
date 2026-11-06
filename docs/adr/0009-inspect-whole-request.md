@@ -1,5 +1,5 @@
 # 9. One decision per request, before forwarding
-Status: Accepted (2026-10-20)
+Status: Accepted (2026-10-20); unnumbered placeholders in optional vault mode superseded by [0074](0074-scoped-encrypted-pii-tokens.md)
 ## Context
 Secrets hide in tool results, arguments and object keys, and the scanner must see exactly what upstream will see.
 ## Decision

@@ -1,3 +1,6 @@
+import { inspectPii, piiTokens, redactPiiLog, PII_TOKEN, type PiiEntry } from "./pii.js";
+import { PiiVault, PiiVaultError, type PiiVaultOptions } from "./piiVault.js";
+import { readPiiResponse, restorePiiResponse } from "./piiDelivery.js";
 import http from "node:http";
 import { randomUUID } from "node:crypto";
 import { AuditLog, AuditLogUnavailable, sha256, stats, validCorrelation } from "./audit.js";
@@ -22,6 +25,7 @@ import { tokenCount } from "./extract.js";
 export interface ProxyOpts {
   upstreamOpenai: string; upstreamAnthropic: string; mode: Mode; log: AuditLog; maxBodyBytes?: number; timeoutMs?: number; carnet?: Set<string>;
   pageRedaction?: boolean;
+  piiVault?: PiiVaultOptions;
   sessionKey?: Buffer;
   keys?: VKey[];
   budgetDirectory?: string;
@@ -41,7 +45,7 @@ export interface ProxyOpts {
   inspectQueue?: number;
   inspectOffloadChars?: number;
 }
-export interface VKey { name: string; sha256: string; models?: string[]; providers?: ("openai" | "anthropic")[]; logContent?: boolean; tokenBudget?: TokenBudget; tools?: KeyTools; useCases?: string[] }
+export interface VKey { piiRestore?: boolean; name: string; sha256: string; models?: string[]; providers?: ("openai" | "anthropic")[]; logContent?: boolean; tokenBudget?: TokenBudget; tools?: KeyTools; useCases?: string[] }
 export interface Alias { model: string; upstream?: string }
 export const LATENCY_BUCKETS_SECONDS = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300] as const;
 let unsandboxedProxies = 0;
@@ -72,10 +76,15 @@ const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(
 const ROUTES: Record<string, Api | "count" | undefined> = {
   "/v1/chat/completions": "openai-chat", "/v1/responses": "openai-responses", "/v1/messages": "anthropic-messages", "/v1/messages/count_tokens": "count",
 };
-const HOP = new Set(["host", "connection", "content-length", "transfer-encoding", "accept-encoding", "keep-alive", "upgrade", "proxy-connection", "x-audit-use-case", "x-audit-system-id", "x-audit-correlation"]);
+const HOP = new Set(["host", "connection", "content-length", "transfer-encoding", "accept-encoding", "keep-alive", "upgrade", "proxy-connection", "x-audit-use-case", "x-audit-system-id", "x-audit-correlation", "x-audit-pii-scope"]);
 const RESP_DROP = new Set(["content-encoding", "content-length", "transfer-encoding", "connection", "keep-alive"]);
 
 export function createProxy(o: ProxyOpts) {
+  o = { ...o, keys: o.keys?.map((key) => ({ ...key })) };
+  if ((o.keys ?? []).some((k) => k.piiRestore !== undefined && typeof k.piiRestore !== "boolean")
+    || (!o.piiVault && (o.keys ?? []).some((k) => k.piiRestore))) throw new Error("audit_pii_vault_config_invalid");
+  if (o.piiVault && (o.mode !== "redact" || !o.keys?.length || o.carnet?.size || o.injectionJudge || o.keys.some((k) => !/^[a-f0-9]{64}$/.test(k.sha256)) || new Set(o.keys.map((k) => k.sha256)).size !== o.keys.length)) throw new Error("audit_pii_vault_config_invalid");
+  const piiVault = o.piiVault && new PiiVault(o.piiVault);
   for (const key of o.keys ?? []) if (key.tokenBudget !== undefined) {
     validateBudget(key.tokenBudget);
     if (!/^[a-f0-9]{64}$/.test(key.sha256)) throw new Error("audit_budget_config_invalid");
@@ -85,13 +94,14 @@ export function createProxy(o: ProxyOpts) {
     if (duplicateKeys.has(key.sha256) && (duplicateKeys.get(key.sha256) || key.tokenBudget)) throw new Error("audit_budget_duplicate_key");
     duplicateKeys.set(key.sha256, !!key.tokenBudget);
   }
+  const append = (record: object) => o.log.append((piiVault ? redactPiiLog(record) : record) as any);
   const budgets = new BudgetStore(o.budgetDirectory ?? o.log.path + ".budgets");
   const max = o.maxBodyBytes ?? 32 * 1024 * 1024, timeoutMs = o.timeoutMs ?? 180_000;
   const actionGate = o.actionGate && validateActionGate(o.actionGate);
   const keyTools = new Map((o.keys ?? []).flatMap((key) => key.tools === undefined ? [] : [[key, validateKeyTools(key.tools)] as const]));
   const useCases = validateUseCases(o.useCases, o.keys ?? []);
   const profile = createInspectionProfile({ ...o, actionGate });
-  const inspection = createInspectionPool({ allowHashes: profile.allowHashes, timeoutMs: o.inspectTimeoutMs ?? 5_000, size: o.inspectWorkers, queueLimit: o.inspectQueue });
+  const inspection = createInspectionPool({ allowHashes: profile.allowHashes, timeoutMs: o.inspectTimeoutMs ?? 5_000, size: o.inspectWorkers, queueLimit: o.inspectQueue, tokenizePii: !!piiVault });
   const offloadChars = o.inspectOffloadChars ?? OFFLOAD_CHARS;
   const judgeOptions = o.injectionJudge && { ...o.injectionJudge };
   if (judgeOptions && (typeof judgeOptions.task !== "string" || !judgeOptions.task.trim() || Buffer.byteLength(judgeOptions.task) > 2_000)) throw new Error("audit_injection_task_invalid");
@@ -108,7 +118,7 @@ export function createProxy(o: ProxyOpts) {
   const refusalLimit = o.refusalsPerMinute ?? 60;
   let refusalMinute = 0, refusalsThisMinute = 0, refusalsSuppressed = 0;
   const appendRefusal = (record: object) => {
-    try { o.log.append({ kind: "refusal", ts: new Date().toISOString(), ...record } as any); }
+    try { append({ kind: "refusal", ts: new Date().toISOString(), ...record } as any); }
     catch (e) { metrics.logWriteFailures.inc(); if (!o.quiet) process.stderr.write(JSON.stringify({ ts: new Date().toISOString(), event: "audit_log_write_failed", reason: contentFreeReason(e) }) + "\n"); }
   };
   const flushSuppressed = () => {
@@ -206,9 +216,20 @@ export function createProxy(o: ProxyOpts) {
       if (alias) { body.model = alias.model; if (alias.upstream) base = alias.upstream; }
       const modelAllowed = (models?: readonly string[]) => !models || models.includes("*") || models.includes(requestedModel ?? "") || models.includes(body?.model);
       if (!modelAllowed(vkey?.models) || !modelAllowed(useCase?.row.models)) { clearTimeout(timer); return refuse(403, "audit_model_not_allowed", { provider, ...(requestedModel && { model: requestedModel.slice(0, 128) }) }); }
+      let piiScope: string | undefined;
+      if (piiVault) {
+        try { piiScope = piiVault.scope(vkey!.sha256, typeof req.headers["x-audit-pii-scope"] === "string" ? req.headers["x-audit-pii-scope"] : ""); }
+        catch (e) { if (e instanceof PiiVaultError) return refuse(e.status, e.message, { provider }); throw e; }
+      }
       const target = base.replace(/\/$/, "") + url.pathname + url.search;
-      let inspected: { value: any; findings: any[] }, inspectionStopped: string | undefined;
-      if (!scannedCharsAbove(body, offloadChars)) inspected = inspect(body, profile.carnet) as { value: any; findings: any[] };
+      let inspected: { value: any; findings: any[]; pii?: PiiEntry[] }, inspectionStopped: string | undefined;
+      if (!scannedCharsAbove(body, offloadChars)) {
+        try { inspected = (piiVault ? inspectPii(body, profile.carnet) : inspect(body, profile.carnet)) as typeof inspected; }
+        catch (e) {
+          if (!piiVault) throw e;
+          inspected = { value: body, findings: [] }; inspectionStopped = "audit_inspection_failed";
+        }
+      }
       else try { inspected = await inspection.run(body) as { value: any; findings: any[] }; metrics.inspectionsOffloaded.inc({ result: "ok" }); }
       catch (e) {
         if (e instanceof InspectionBusy) { metrics.inspectionsOffloaded.inc({ result: "busy" }); clearTimeout(timer); return refuse(503, "audit_inspection_busy", { provider }); }
@@ -237,12 +258,13 @@ export function createProxy(o: ProxyOpts) {
       const observe = (events: QuinelingEvent[]) => { events.forEach((e) => metrics.quinelingEvents.inc({ where: e.where, op: e.op })); return events.length ? { quinelings: events } : {}; };
       const reject = (code: string) => {
         clearTimeout(timer); decisionTag = "reject";
-        if (route !== "count") o.log.append({ kind: "llm-call", id: rid, ts: new Date(t0).toISOString(), ...context,
+        if (route !== "count") append({ kind: "llm-call", id: rid, ts: new Date(t0).toISOString(), ...context,
           decision: { mode: profile.mode, action: "reject", ...storedFindings(findings), ...(atts.length && { sandbox }) },
           ...(composition && { context: composition }), ...(session && { session }), ...observe(traced), upstreamStatus: null, error: code, latencyMs: Date.now() - t0 });
         return fail(422, code);
       };
       if (inspectionStopped) return reject(inspectionStopped);
+      if (piiVault && (atts.length || refs.length || opaquePiiInput(body))) return reject("audit_pii_unsupported_content");
       if (refs.length && profile.mode !== "advisory") return reject("audit_uninspectable_reference");
       if (atts.length && sandbox === "unavailable") { metrics.sandboxUnavailable.inc(); return reject("audit_sandbox_unavailable"); }
       if (atts.length && !TOOLS_OK) return reject("audit_inspection_unavailable");
@@ -271,14 +293,27 @@ export function createProxy(o: ProxyOpts) {
       if (d.action === "forward-redacted") sanitize.forEach((f) => f());
       const forwardedBody = d.action === "forward-redacted" ? value : body;
       let fwd = d.action === "forward-redacted" ? Buffer.from(JSON.stringify(value)) : alias ? Buffer.from(JSON.stringify(body)) : raw;
+      const piiAllowed = new Set(piiVault ? piiTokens(JSON.stringify(forwardedBody)) : []);
       const rec = {
-        ...context, forwardedPromptDigest: sha256(fwd.toString("latin1")), ...(composition && { context: composition }), ...(session && { session }),
+        ...context, ...(piiVault && { pii: { version: 1, delivery: vkey?.piiRestore === true ? "customer" : "tokenized" } }), forwardedPromptDigest: sha256(fwd.toString("latin1")), ...(composition && { context: composition }), ...(session && { session }),
         ...(judged && { injectionJudge: { ...judged, policyDigest: injectionPolicyDigest } }),
         ...(vkey?.tokenBudget && { tokenBudget: { policy: vkey.tokenBudget } }),
         decision: { mode: profile.mode, action: d.action, ...storedFindings(d.findings), ...(signals.length && { signals }), ...(d.action === "forward-redacted" && rasterized.length && { rasterized }), ...(atts.length && { sandbox }) },
       };
-      const write = (extra: object) => { if (route !== "count") o.log.append({ kind: "llm-call", id: rid, ts: new Date(t0).toISOString(), ...rec, ...extra, latencyMs: Date.now() - t0 } as any); };
+      const write = (extra: object) => { if (route !== "count") append({ kind: "llm-call", id: rid, ts: new Date(t0).toISOString(), ...rec, ...extra, latencyMs: Date.now() - t0 } as any); };
       if (d.action === "block") { clearTimeout(timer); write({ upstreamStatus: null, ...observe(traced) }); return fail(d.status!, d.code!, d.findings.map((f) => f.rule)); }
+
+      if (piiVault) {
+        try {
+          piiVault.put(piiScope!, inspected.pii ?? []);
+          for (const token of piiAllowed) piiVault.get(piiScope!, token);
+        } catch (e) {
+          const error = e instanceof PiiVaultError ? e : new PiiVaultError();
+          clearTimeout(timer); decisionTag = "pii-reject";
+          write({ decision: { ...rec.decision, action: "block" }, upstreamStatus: null, error: error.message, ...observe(traced) });
+          return fail(error.status, error.message);
+        }
+      }
 
       if (vkey?.tokenBudget && route !== "count") {
         try {
@@ -321,7 +356,7 @@ export function createProxy(o: ProxyOpts) {
       let up: Response;
       try { budgetSent = true; up = await fetch(target, { method: "POST", headers, body: fwd, signal: ac.signal }); }
       catch { clearTimeout(timer); metrics.upstreamErrors.inc({ provider: context.provider, reason: ac.signal.aborted ? "deadline" : "unreachable" }); const code = ac.signal.aborted ? "audit_deadline_exceeded" : "audit_upstream_unreachable"; write({ upstreamStatus: null, error: code, ...observe(traced) }); return fail(ac.signal.aborted ? 408 : 502, code); }
-      clearTimeout(timer); forwarded = true;
+      if (!piiVault || !vkey?.piiRestore) clearTimeout(timer); forwarded = true;
       metrics.upstreamResponses.inc({ provider: context.provider, class: `${Math.floor(up.status / 100)}xx` });
       const sse = (up.headers.get("content-type") ?? "").includes("text/event-stream");
       const toolLimits: ToolLimits = { key: vkey && keyTools.get(vkey), useCase: useCase?.row.tools }, succeeded = up.status >= 200 && up.status < 400;
@@ -334,8 +369,27 @@ export function createProxy(o: ProxyOpts) {
         return verdict.notice;
       };
       const enforcing = route !== "count" && succeeded && enforces(actionGate, toolLimits);
-      const captured = enforcing ? await pipeGated(up, res, route as Api, sse, `msg_audit_${rid.replaceAll("-", "")}`, judge) : await pipe(up, res);
-      if (!enforcing) judge(captured);
+      let captured = "", deliveryError: string | undefined;
+      if (piiVault && vkey?.piiRestore && route !== "count" && succeeded) {
+        try {
+          captured = await readPiiResponse(up, max);
+          const notice = judge(captured);
+          let deliver = captured;
+          if (enforcing && notice) {
+            if (sse) { const gate = streamGate(route, `msg_audit_${rid.replaceAll("-", "")}`); deliver = gate.push(captured) + gate.finish(notice); }
+            else deliver = rewriteResponse(route, captured, notice, `msg_audit_${rid.replaceAll("-", "")}`);
+          }
+          deliver = restorePiiResponse(route, deliver, sse, (text) => text.replace(PII_TOKEN, (token) => piiAllowed.has(token) ? piiVault.get(piiScope!, token).value : token));
+          res.writeHead(up.status, responseHeaders(up)); res.end(deliver);
+        } catch {
+          deliveryError = "audit_pii_delivery_failed";
+          fail(502, deliveryError);
+          if (!verdict.out) judge(captured);
+        }
+      } else {
+        captured = enforcing ? await pipeGated(up, res, route as Api, sse, `msg_audit_${rid.replaceAll("-", "")}`, judge) : await pipe(up, res);
+        if (!enforcing) judge(captured);
+      }
       const { out, gated, notice } = verdict;
       gated.forEach((call) => metrics.actionGate.inc({ mode: call.mode, result: call.result, ...useCaseLabel() }));
       let tokenBudget: Record<string, unknown> | undefined;
@@ -345,7 +399,7 @@ export function createProxy(o: ProxyOpts) {
         reservation = undefined;
       }
       const red = (s: string) => {
-        const result = inspect(s, profile.carnet);
+        const result = inspect(piiVault ? s.replace(PII_TOKEN, "[REDACTED:pii-token]") : s, profile.carnet);
         return result.findings.some((f) => f.inKey || f.unredactable) ? "[REDACTED:unredactable-content]" : result.value as string;
       };
       if (out && up.status >= 200 && up.status < 400) {
@@ -353,7 +407,7 @@ export function createProxy(o: ProxyOpts) {
         if (out.usage?.output == null) metrics.unknownUsage.inc({ provider: context.provider, field: "output" });
       }
       const full = vkey?.logContent === true;
-      write({ ...(tokenBudget && { tokenBudget }), ...(gated.length && { actionGate: { calls: gated, ...(notice && { rewritten: true }) } }), ...(composition && { context: scaleToProvider(composition, up.status < 400 ? promptTokens(route as Api, out?.usage) : undefined) }), upstreamStatus: up.status, clientAborted: !res.writableFinished || undefined, responseModel: out?.model, usage: out?.usage, stop: out?.stop,
+      write({ ...(deliveryError && { error: deliveryError }), ...(tokenBudget && { tokenBudget }), ...(gated.length && { actionGate: { calls: gated, ...(notice && { rewritten: true }) } }), ...(composition && { context: scaleToProvider(composition, up.status < 400 ? promptTokens(route as Api, out?.usage) : undefined) }), upstreamStatus: up.status, clientAborted: !res.writableFinished || undefined, responseModel: out?.model, usage: out?.usage, stop: out?.stop,
         ...(out && { content: full ? "redacted" : "hash", outputHash: sha256(out.text), ...(full && { output: red(out.text) }),
           toolCalls: out.toolCalls.map((t) => ({ name: t.name, argsHash: sha256(t.args), ...(full && { args: red(t.args) }) })) }),
         ...observe([...traced, ...(out ? quinelingCalls(out.toolCalls) : [])]) });
@@ -402,4 +456,14 @@ async function pipe(up: Response, res: http.ServerResponse): Promise<string> {
   const dec = new TextDecoder(); let all = "";
   try { if (up.body) for await (const c of up.body as any) { res.write(c); all += dec.decode(c, { stream: true }); } } catch { }
   res.end(); return all + dec.decode();
+}
+
+function opaquePiiInput(body: unknown): boolean {
+  if (!body || typeof body !== "object") return false;
+  const object = body as Record<string, unknown>;
+  if (["previous_response_id", "conversation", "prompt", "background", "container", "mcp_servers"].some((k) => object[k])) return true;
+  if (typeof object.type === "string" && /audio|image|file|document|video|computer|web_search|file_search|code_interpreter|redacted_thinking|item_reference|compaction|mcp/.test(object.type)) return true;
+  if (object.type === "base64" || object.type === "url" || object.type === "file") return true;
+  if (Object.keys(object).some((k) => ["input_audio", "audio", "file_data", "image_url", "file_url", "file_id", "encrypted_content"].includes(k))) return true;
+  return Object.values(object).some((v) => v && typeof v === "object" && opaquePiiInput(v));
 }

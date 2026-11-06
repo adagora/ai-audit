@@ -5,7 +5,7 @@ export const state = (v) => {
     case "start": return "Request received";
     case "inspect": return "Inspected and decided";
     case "fetch": return "Forwarded to the provider";
-    case "stream": return "Answer streaming to the client";
+    case "stream": return "Provider response streaming or buffered for customer delivery";
     case "write": return "Answer delivered, record not written yet";
     default:
       if (v.crashed) return "Proxy crashed";

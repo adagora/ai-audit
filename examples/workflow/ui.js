@@ -16,8 +16,8 @@ const groups = [
     ["session", "Linked session", "Two context turns"], ["responses", "Responses SSE", "OpenAI stream"],
     ["anthropic", "Anthropic SSE", "Messages stream"], ["contextGrowth", "Growing context", "5 turns, one prefix rewrite"],
   ] },
-  { name: "Evidence and QDL", items: [
-    ["quineling", "Observe Quineling", "Tool hash and status"], ["qdl", "Run QDL", "Decision and SVG"],
+  { name: "Evidence and native policies", items: [
+    ["quineling", "Observe Quineling", "Tool hash and status"], ["qdl", "Run policy", "Decision and SVG"],
     ["signed", "Signed review", "Detached attestation"], ["telemetry", "Metrics and stats", "Counters and tokens"],
     ["integrity", "Anchor chain", "Verified checkpoint"], ["failClosed", "Fail-closed log", "503; no forwarding"],
   ] },
@@ -33,7 +33,7 @@ const coverage = [
   ["Sessions and context", "session", "Role bytes, linked turns, context map", "HTTP + offline"],
   ["Unknown usage", "noUsage", "Missing token counts retained as unknown", "HTTP / local"],
   ["Quineling tool observation", "quineling", "Operation, source hash, status", "HTTP / local"],
-  ["QDL execution and replay", "qdl", "Decision output, portable SVG and JSON", "Synthetic QDL"],
+  ["Policy execution and replay", "qdl", "Decision output, portable SVG and JSON", "Scripted native policy"],
   ["Signed review", "signed", "Attestation and generated public key", "Synthetic reviewer"],
   ["Hash chain and anchors", "integrity", "Chain check and external checkpoint", "Local evidence"],
   ["Fail-closed logging", "failClosed", "503 when the log has a torn tail", "HTTP / local"],
@@ -56,7 +56,7 @@ const setStatus = (value, warning = false) => { text("status-text", value); elem
 const number = (value) => typeof value === "number" && Number.isFinite(value) ? value.toLocaleString() : value === null || value === undefined ? "unknown" : String(value);
 const routeName = (value) => value?.split("/").pop() ?? "—";
 const findResponseText = (value) => {
-  if (value.qdl) return `QDL ${value.qdl.status}\nOutputs: ${JSON.stringify(value.qdl.output)}\nPortable replay: ${value.portableVerification?.reproduced ? "reproduced" : "unknown"}`;
+  if (value.qdl) return `Policy ${value.qdl.status}\nOutputs: ${JSON.stringify(value.qdl.output)}\nPortable replay: ${value.portableVerification?.reproduced ? "reproduced" : "unknown"}`;
   if (value.verification?.origin) return `Signature: ${value.verification.origin}\nReview: ${value.verification.verdict}\nKey trust: ${value.verification.identity}`;
   if (value.metrics) return `${value.metrics.length} OpenMetrics samples; ${Array.isArray(value.stats) ? value.stats.length : Object.keys(value.stats ?? {}).length} stats groups`;
   if (value.checkpoint) return `Anchor: ${value.anchor?.ok ? "verified" : "failed"}\nChain: ${value.chain?.ok ? "intact" : "broken"}`;
@@ -252,7 +252,7 @@ async function loadState() {
       const link = child("a", "button secondary", label); link.href = showcase.monitoring[index]; link.download = showcase.monitoring[index].split("/").pop(); element("offline-actions").append(link);
     }
     text("offline-command", "Recorded synthetic evidence only. Run npm run example:workflow locally to execute new scenarios.");
-    text("offline-note", "No visitor prompt is sent to OpenAI. Portable QDL receipts include source and synthetic inputs; verify them independently before sharing.");
+    text("offline-note", "No visitor prompt is sent to OpenAI. Portable policy receipts include source and synthetic inputs; verify them independently before sharing.");
   } else {
     text("offline-command", "node dist/src/cli.js verify --log SYNTHETIC_LOG\nnode dist/src/cli.js workbench --log SYNTHETIC_LOG --output workbench.html");
   }

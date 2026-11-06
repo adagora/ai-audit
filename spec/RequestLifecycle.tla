@@ -35,7 +35,7 @@ Start == pc = "start" /\ Check("inspect") /\ UNCHANGED <<logs, refused, usage, c
 BlockOrReject == pc = "inspect" /\ timerArmed' = FALSE /\ DoWrite("n/a", "done") /\ UNCHANGED <<aborted, usageSeen, delivered, forwarded, logOk, diskFull, badFwd, errs>>
 Forward == pc = "inspect" /\ Check("fetch") /\ UNCHANGED <<logs, refused, usage, crashed>> /\ UNCHANGED Env
 FetchErr == pc = "fetch" /\ timerArmed' = FALSE /\ DoWrite("n/a", "done") /\ UNCHANGED <<aborted, usageSeen, delivered, forwarded, logOk, diskFull, badFwd, errs>>
-Headers == pc = "fetch" /\ ~aborted /\ timerArmed' = FALSE /\ pc' = "stream" /\ forwarded' = TRUE /\ UNCHANGED <<logs, refused, usage, aborted, usageSeen, delivered, logOk, diskFull, crashed, failCounted, badFwd, errs>>
+Headers == pc = "fetch" /\ ~aborted /\ timerArmed' \in {FALSE, timerArmed} /\ pc' = "stream" /\ forwarded' = TRUE /\ UNCHANGED <<logs, refused, usage, aborted, usageSeen, delivered, logOk, diskFull, crashed, failCounted, badFwd, errs>>
 UsageChunk == pc = "stream" /\ ~aborted /\ ~usageSeen /\ usageSeen' = TRUE /\ UNCHANGED <<pc, logs, refused, usage, aborted, timerArmed, delivered, forwarded, logOk, diskFull, crashed, failCounted, badFwd, errs>>
 StreamEnd == pc = "stream" /\ pc' = "write" /\ delivered' = TRUE /\ UNCHANGED <<logs, refused, usage, aborted, timerArmed, usageSeen, forwarded, logOk, diskFull, crashed, failCounted, badFwd, errs>>
 \* extract(): usage only if a usage chunk was seen, otherwise undefined (ADR 0012)

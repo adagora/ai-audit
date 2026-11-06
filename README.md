@@ -47,6 +47,7 @@ There is no install script. This repository is not published on npm. `npm instal
 | `no-go` | HTTP 409. The provider is never called. The response lists rule ids. |
 | `advisory` | The original body goes upstream. The finding is still in the log. |
 | Fail closed | A torn log, a full disk, or an attachment the proxy cannot read stops the call. |
+| Reversible PII (opt-in) | Random tokens, an encrypted conversation-scoped vault, and authorized customer-text restoration. See [setup and limits](#optional-reversible-pii-tokens). |
 | Virtual keys | The client holds an `aia-` key. The provider key stays in the proxy process. |
 | Your log | JSONL on disk. One record per inspected call. A daily anchor file kept somewhere else. |
 | Overhead | About 0.6 to 0.7 ms p50 and about 1.1 ms p95 on a loopback mock, redaction included. See [the 2026-10-20 run](docs/performance/2026-10-20/README.md). |
@@ -55,17 +56,23 @@ TypeScript, Node's standard library, no runtime dependencies. The native policy 
 
 ## What it looks like
 
-The [operator console](#operator-console) on a live run: two recordings first, then still images over a synthetic log.
+A fresh, end-to-end run of [Deskhand](https://github.com/adagora/deskhand), Auditline and [IntentGauge](https://github.com/adagora/IntentGauge), using the hosted `gpt-4o-mini` model and synthetic customer data:
 
-![Operator console walkthrough on a live run: the overview, a decision replayed and approved with a note, the recorded action, use cases, request flow, refused, held and redacted requests, sessions, keys, integrity with an anchor and live counters.](docs/images/console-walkthrough.gif)
+![Customer request through the encrypted PII vault, customer consent, staff approval, one sample refund, verified read-back, policy replay, portable receipt, audit console and the live evaluation result.](docs/images/workflow-end-to-end.gif)
 
-The recording is a live run of the [Deskhand](https://github.com/adagora/deskhand) help-desk agent: `gpt-4o-mini` through the Auditline proxy, real Temporal cases and made-up CityWheels bookings. The gateway has three keys, three use cases (`assist`, `shadow` and `off`) and a tool limit on one key. The traffic includes a wrong key, a switched-off use case, a model that the use case does not allow, a tool call outside the key's list and an IBAN in a customer message that the proxy redacts. The reviewer approves a refund decision in the console and the application then records the action.
+The model receives a PII token; the customer reply restores the made-up email. The customer confirms the exact €340 quote, a reviewer approves it in Deskhand, and Temporal issues one refund in an isolated sample ledger and confirms success after read-back. The same audit series links model calls, the native policy decision, review and effect. The downloaded SVG receipt verifies independently.
 
-![Decision receipt walkthrough: the receipt page, the portable SVG receipt, and the output of receipt, verify-receipt, replay, verify and report.](docs/images/receipts-walkthrough.gif)
+The hosted evaluation passed **20/21** cases. Saturday's opening hours were correct, but the model skipped a `search_policies` call required by that fixture. No monetary check failed. All 21 trials have verified Auditline request linkage. The recording keeps the blocked evaluation visible; it does not change expectations to make the run green.
 
-The second recording shows the receipt of that decision as a page and as a portable SVG. The terminal frames show the real output of `receipt`, `verify-receipt`, `replay`, `verify` and `report`, drawn as text. The `report` command prints its labels in Polish.
+The separate feature laboratory runs real gateway requests against scripted providers and fake keys:
 
-The still images below come from synthetic logs with scripted models. They hold no real traffic.
+![All 33 scripted feature checks pass: routing and keys, inspection modes, injection signals, action gates, use cases, token budgets, API streams, context, native receipts, signatures and fail-closed evidence.](docs/images/gateway-feature-tour.gif)
+
+**33/33 checks passed.** This laboratory demonstrates additional controls without paid model calls. Its attachment check proves refusal of an uninspectable reference; it does not demonstrate OCR/PDF processing on this Mac. The scripted three-application control also passed 21/21 eval cases.
+
+[Run evidence, reproduction steps and the feature-by-feature coverage index](docs/verification/three-app-walkthrough.md) distinguish hosted behavior, scripted checks, unit/formal tests and unsupported paths. Captions were added to screenshots of the actual applications. The customer portal is a labeled demo surface; no production channel, real customer data, live audit log, provider key or vault mapping file is published.
+
+The still images below come from synthetic logs with scripted models.
 
 **What needs attention now**, and what the log suggests changing:
 
@@ -117,6 +124,34 @@ node dist/src/cli.js anchor --log audit.jsonl --anchors anchors.jsonl
 ```
 
 With virtual keys configured, the provider sees `[REDACTED:pii-email]` in place of `ada@example.com`. The client still receives the model's answer. The response carries `x-request-id`, which is the id of the `llm-call` row, and `x-audit-finding-count`.
+
+### Optional reversible PII tokens
+
+The default redaction is irreversible. To keep reversible email, phone, PESEL and IBAN mappings, enable the local encrypted vault:
+
+```json
+{
+  "piiVault": { "directory": "./live/pii-vault", "ttlSeconds": 86400 },
+  "keys": [
+    { "name": "customer-delivery", "sha256": "REPLACE_WITH_VIRTUAL_KEY_HASH", "piiRestore": true }
+  ]
+}
+```
+
+Supply `AUDITLINE_PII_VAULT_KEY` separately through your secret manager or protected process environment: exactly 64 hexadecimal characters representing 32 random bytes. `node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))'` generates the value; keep it out of source control, config, shell history and the vault directory. `AI_AUDIT_PII_VAULT_KEY` is also supported. Start with `auditline serve --config gateway.json --mode redact`. The configuration hash above is a placeholder; obtain a real virtual key/hash using `auditline keygen`.
+
+Every request needs `x-audit-pii-scope: <application-selected UUID>`. Use one opaque UUID per customer conversation, selected by your authenticated application. The gateway strips the header before forwarding. Never use customer content as the scope or let an untrusted customer choose another conversation's UUID.
+
+The model receives random `[PII:email:…]` tokens. AES-256-GCM encrypts the mappings on disk and binds them to the virtual key, conversation, token and expiry. Secrets such as API keys remain irreversibly redacted. A failed vault write blocks the upstream request. Plain values exist in gateway memory while processing, not in audit records.
+
+Keys without `piiRestore` receive tokens and are suitable for agent loops. `piiRestore: true` restores **assistant text only**, for tokens present in the request, when delivering to a customer. Keep this key at your trusted delivery boundary. It does not restore tool arguments, reasoning, metadata or upstream errors. Do not feed restored answers back into model context except through inspection. A token from another key/conversation, an unknown token or an expired token in a request is refused before forwarding. Keep tokens in subsequent requests if their identities need to remain stable.
+
+Customer restoration supports Chat Completions, Responses and Anthropic Messages, including SSE tokens split across events. It currently buffers the complete response, capped at 32 MiB, so SSE delivery starts after completion. Malformed, incomplete, oversized or failed restoration returns `502 audit_pii_delivery_failed` without partial response content. Audit hashes/usage refer to the model response before restoration; content logs mask token references.
+
+Vault mode requires virtual keys, redact mode, no PII allowlist and no auxiliary model judge. Binary/remote attachments, audio/video, provider-held history and provider-executed tools are refused in this mode. **Detection remains limited to the scanner's patterns: free-text names/addresses, arbitrary encodings and all incoming channel adapters are not covered. This is not an exhaustive no-PII guarantee.**
+
+Expiry is enforced on reads (24 hours by default, configurable up to 30 days). Schedule `auditline vault-prune --config gateway.json` with the same vault key to authenticate and delete expired mappings. Expiry alone does not delete files or backups. Protect the owner-only directory and backup retention; never store the encryption key alongside them. Key recovery, rotation, KMS integration and quotas are not implemented. Losing/changing the key makes old mappings unusable. See [ADR 0074](docs/adr/0074-scoped-encrypted-pii-tokens.md).
+
 
 Claude Code and the Anthropic SDK:
 

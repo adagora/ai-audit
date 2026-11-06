@@ -28,7 +28,7 @@ The questions were about the order of steps between processes and between a requ
 | AuditChain_clockback_anchors.cfg (pruned anchors by time) | fail | AnchorsConsistent violated |
 | AuditChain_emptysegment.cfg (open, then write) | fail | ChainIntact violated |
 | AuditChain_emptyskipped.cfg (open, then write; an empty current file is left out, finding 10) | pass | pass, 1,239,531 distinct states at the fix of findings 9 and 10 |
-| RequestLifecycle.cfg | pass | pass, 148 distinct states |
+| RequestLifecycle.cfg | pass | pass, 240 distinct states |
 | RequestLifecycle_noguard.cfg | fail | NoCrash violated |
 | RequestLifecycle_noprecheck.cfg | fail | NoForwardOnBadLog violated |
 | RequestLifecycle_residual.cfg | fail | NoForwardWithoutLog violated (known window, ADR 0016) |
@@ -61,7 +61,10 @@ Fixed while building this model: `awaitVerdict` looked for a review only in the 
 ## Charts
 Drawn with `/statechart` (pstack) from the TLA+ models. Each chart uses the config and the view module of the same name in this folder (`<name>.cfg`, `<name>.view.mjs`): the view gives the words on states and arrows, the config gives the bounds and the rules to mark. `/statechart` runs the TLC version that it pins (v1.7.4); with v1.8.0 its SANY reader stops with `Cannot read properties of undefined (reading 'tag')`. A red state breaks a rule; a blue border marks the shortest path to it.
 
-### Request lifecycle (RequestLifecycle.tla, request-lifecycle.cfg: 148 model states)
+### Request lifecycle (RequestLifecycle.tla, request-lifecycle.cfg: 240 model states)
+
+ADR 0074 keeps the deadline armed during buffered customer delivery. `Headers` now permits either an armed or cleared timer, covering both delivery paths. TLC checks 240 distinct states. The grouped chart keeps its topology; its provider-response label was updated manually because the pstack statechart tool is unavailable here.
+
 ```mermaid
 ---
 title: "One request through the proxy, with the log, the disk, the client and the provider failing at any step"
@@ -85,7 +88,7 @@ stateDiagram-v2
   s3: Stopped and recorded
   s4: Refused, refusal recorded
   s5: Forwarded to the provider
-  s6: Answer streaming to the client
+  s6: Provider response streaming or buffered for customer delivery
   s7: Answer delivered, record not written yet
   s8: Delivered, record lost and counted
   s9: Delivered and recorded
@@ -351,3 +354,5 @@ Where a faster form is worth it, the fast code is written next to the proved cod
 | policy histories, 100,000 decisions (offline `report` and `policies`) | 44 ms | 36 ms |
 
 For a 200-message request, all Bend calls together take about 20 µs, against about 9 ms for `inspect()`.
+
+PII vault implementation and validation: [scoped encrypted tokens](pii-vault.md).

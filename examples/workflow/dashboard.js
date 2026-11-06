@@ -17,7 +17,7 @@ const GROUPS = [
   ["APIs and sessions", [["responses", "Responses stream"], ["anthropic", "Anthropic stream"], ["session", "Linked session"], ["contextGrowth", "Context grows over 5 turns"]]],
   ["Alerting", [["alerting", "Held call fires an alert"]]],
   ["Evidence and integrity", [["integrity", "Chain and anchor"], ["failClosed", "Torn log fails closed"], ["telemetry", "Health and metrics"], ["scrub", "Scrub an export"], ["checkQuotes", "Check quoted values"]]],
-  ["Decisions (QDL)", [["quineling", "Observe Quinelings"], ["qdl", "Run QDL and receipt"], ["signed", "Signed review"]]],
+  ["Decisions and evidence", [["quineling", "Observe Quinelings"], ["qdl", "Run policy and receipt"], ["signed", "Signed review"]]],
 ];
 const API_ROUTE = (route) => route?.startsWith("/v1/") || route === "other";
 const OUTCOMES = [
@@ -235,7 +235,7 @@ function renderStats(data) {
   stat(usage, { label: "Unknown usage", value: c.unknownUsage, sub: "Calls without usage, never counted as zero" });
   stat(usage, { label: "Linked sessions", value: logs.real ? null : logs.sessions, sub: logs.real ? ADR_NOTE : "Keyed prefix digests" });
   stat(usage, { label: "Upstream 5xx", value: c.upstream["5xx"] ?? 0, sub: `${fmt(c.upstream["2xx"] ?? 0)} 2xx · ${fmt(c.upstreamErrors)} unreachable or timed out` });
-  stat(usage, { label: "QDL decisions", value: logs.real ? null : logs.decisions, sub: logs.real ? ADR_NOTE : `${fmt(logs.reviews)} reviews recorded` });
+  stat(usage, { label: "Policy decisions", value: logs.real ? null : logs.decisions, sub: logs.real ? ADR_NOTE : `${fmt(logs.reviews)} reviews recorded` });
   stat(usage, { label: "Log write failures", sub: `${fmt(c.logUnavailable)} refused because the log was unavailable`,
     status: c.logWriteFailures ? { tone: "warning", text: `${fmt(c.logWriteFailures)} lost` } : { tone: "good", text: "None" } });
   stat(usage, { label: "Attachments inspected", value: c.attachments, sub: `${fmt(c.quinelings)} Quinelings events seen` });

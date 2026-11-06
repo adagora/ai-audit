@@ -1,3 +1,4 @@
+import type { PiiEntry } from "./pii.js";
 import { availableParallelism } from "node:os";
 import { Worker } from "node:worker_threads";
 import { isPayload, type Finding } from "./scan.js";
@@ -5,7 +6,7 @@ import { isPayload, type Finding } from "./scan.js";
 export const OFFLOAD_CHARS = 256 * 1024;
 export class InspectionStopped extends Error { constructor(readonly code: "audit_inspection_timeout" | "audit_inspection_failed") { super(code); } }
 export class InspectionBusy extends Error { constructor() { super("audit_inspection_busy"); } }
-export interface Inspected { value: unknown; findings: Finding[] }
+export interface Inspected { value: unknown; findings: Finding[]; pii?: PiiEntry[] }
 interface Job { body: unknown; resolve: (r: Inspected) => void; reject: (e: Error) => void }
 interface Slot { worker: Worker; job?: Job; timer?: ReturnType<typeof setTimeout> }
 
@@ -19,7 +20,7 @@ export function scannedCharsAbove(v: unknown, limit: number): boolean {
   return walk(v);
 }
 
-export function createInspectionPool(o: { allowHashes: readonly string[]; timeoutMs: number; size?: number; queueLimit?: number }) {
+export function createInspectionPool(o: { allowHashes: readonly string[]; timeoutMs: number; size?: number; queueLimit?: number; tokenizePii?: boolean }) {
   const size = o.size ?? Math.max(1, Math.min(4, availableParallelism() - 1)), queueLimit = o.queueLimit ?? 64;
   const slots: Slot[] = [], queue: Job[] = [];
   let closed = false;
@@ -36,7 +37,7 @@ export function createInspectionPool(o: { allowHashes: readonly string[]; timeou
     dispatch();
   };
   const spawn = () => {
-    const slot: Slot = { worker: new Worker(new URL("./inspectWorker.js", import.meta.url), { workerData: { allowHashes: [...o.allowHashes] } }) };
+    const slot: Slot = { worker: new Worker(new URL("./inspectWorker.js", import.meta.url), { env: {}, workerData: { allowHashes: [...o.allowHashes], tokenizePii: o.tokenizePii } }) };
     slot.worker.unref();
     slot.worker.on("message", (m: Inspected | { failed: string }) => {
       if ("failed" in m) return drop(slot, "audit_inspection_failed");

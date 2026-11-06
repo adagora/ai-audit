@@ -81,3 +81,4 @@ Format: Nygard (Status, Context, Decision, Consequences), at most ~40 lines, fil
 - [71. Remove the legacy policy runtime during development](0071-native-only-development-reset.md)
 - [72. Decision evidence binds the interpreter implementation](0072-pinned-interpreter-receipts.md)
 - [73. Native policies classify fresh and contradictory evidence](0073-freshness-and-conflict-evidence.md)
+- [74. Optional PII tokens live in a scoped encrypted vault](0074-scoped-encrypted-pii-tokens.md)

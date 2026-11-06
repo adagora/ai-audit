@@ -11,6 +11,7 @@ export interface InspectionProfile {
 
 export interface InspectionOptions {
   mode: Mode;
+  piiVault?: { ttlSeconds?: number };
   pageRedaction?: boolean;
   carnet?: ReadonlySet<string>;
   scope?: "request" | "history";
@@ -26,7 +27,7 @@ export function createInspectionProfile(options: InspectionOptions) {
   const carnet: Allowlist = Object.freeze({ has: (value: string) => entries.has(value) });
   const pageRedaction = options.pageRedaction !== false;
   const configDigest = hash({ mode: options.mode, pageRedaction, scope: options.scope ?? "request",
-    attachments: options.scope === "history" ? "excluded" : "inspect", allowlistDigest: hash([...entries]), ...(options.actionGate && { actionGateDigest: hash(options.actionGate) }) });
+    attachments: options.scope === "history" ? "excluded" : "inspect", allowlistDigest: hash([...entries]), ...(options.actionGate && { actionGateDigest: hash(options.actionGate) }), ...(options.piiVault && { pii: { version: 1, ttlSeconds: options.piiVault.ttlSeconds ?? 86400 } }) });
   const identity = { scannerVersion: SCANNER_VERSION, rulesDigest: RULES_DIGEST, configDigest };
   const receipt: InspectionProfile = Object.freeze({ ...identity, digest: hash(identity) });
   return Object.freeze({ receipt, carnet, allowHashes: Object.freeze(hashes), pageRedaction, mode: options.mode, id: receipt.digest });

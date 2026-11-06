@@ -8,6 +8,7 @@ import { decisionReceipt, renderReceipt } from "./receipt.js";
 import { policyHistories, withChanges } from "./policies.js";
 import { randomBytes } from "node:crypto";
 import { SANDBOX_AVAILABLE, TOOLS_OK, sandboxState } from "./attachments.js";
+import { PiiVault, piiVaultOptions } from "./piiVault.js";
 import { createProxy } from "./proxy.js";
 import { withAuditlineNames } from "./environment.js";
 import { listSessions, renderSessionHtml } from "./contextView.js";
@@ -30,6 +31,7 @@ const { values: a } = parseArgs({ args: rest, options: {
   host: { type: "string", default: "127.0.0.1" }, anchors: { type: "string" }, config: { type: "string" }, by: { type: "string", default: "model" }, name: { type: "string", default: "client" }, "no-page-redaction": { type: "boolean", default: false }, "unsafe-no-sandbox": { type: "boolean", default: false }, "log-content": { type: "boolean", default: false }, "allow-hashes": { type: "string" }, from: { type: "string", default: "1970-01-01" }, to: { type: "string", default: "9999-12-31" },
   input: { type: "string" }, session: { type: "string" }, output: { type: "string" }, format: { type: "string" }, "max-record-bytes": { type: "string" },
   policy: { type: "string" }, inputs: { type: "string" }, "system-id": { type: "string" }, "use-case": { type: "string" }, "llm-call": { type: "string" }, correlation: { type: "string" },
+  "pii-restore": { type: "boolean", default: false },
   "private-key": { type: "string" }, "public-key": { type: "string" }, attestation: { type: "string" },
   decision: { type: "string" }, reviewer: { type: "string" }, verdict: { type: "string" }, note: { type: "string" },
   source: { type: "string" }, answer: { type: "string" }, metrics: { type: "string" }, "notify-url": { type: "string" }, "overdue-minutes": { type: "string" },
@@ -177,6 +179,7 @@ if (cmd === "attest-keygen") {
     console.error("audit_injection_model_required"); process.exit(2);
   }
   const server = createProxy({ upstreamOpenai: a["upstream-openai"]!, upstreamAnthropic: a["upstream-anthropic"]!, mode: a.mode as Mode, log, carnet,
+    piiVault: piiVaultOptions(cfg.piiVault, env.AI_AUDIT_PII_VAULT_KEY),
     injectionJudge, actionGate: cfg.actionGate, useCases: cfg.useCases,
     pageRedaction: !a["no-page-redaction"] && cfg.pageRedaction !== false, keys, budgetDirectory: cfg.budgetDirectory,
     aliases: cfg.aliases, adminKeySha256: env.AI_AUDIT_ADMIN_KEY ? sha256(env.AI_AUDIT_ADMIN_KEY) : cfg.adminKeySha256,
@@ -185,11 +188,18 @@ if (cmd === "attest-keygen") {
   server.listen(Number(a.port), a.host, () => {
     const addr = server.address();
     const bound = addr && typeof addr === "object" ? addr : { address: a.host, port: Number(a.port) };
-    console.error(JSON.stringify({ event: "listening", url: `http://${bound.address}:${bound.port}`, mode: a.mode, log: a.log, rotateBytes: log.rotateBytes, sandbox: sandboxState(SANDBOX_AVAILABLE, unsafeNoSandbox), attachmentTools: TOOLS_OK, virtualKeys: keys.length, contentLoggingKeys: keys.filter((k: any) => k.logContent === true).length, aliases: Object.keys(cfg.aliases ?? {}), useCases: Object.keys(cfg.useCases ?? {}) }));
+    console.error(JSON.stringify({ event: "listening", url: `http://${bound.address}:${bound.port}`, mode: a.mode, log: a.log, rotateBytes: log.rotateBytes, sandbox: sandboxState(SANDBOX_AVAILABLE, unsafeNoSandbox), attachmentTools: TOOLS_OK, virtualKeys: keys.length, piiVault: !!cfg.piiVault, contentLoggingKeys: keys.filter((k: any) => k.logContent === true).length, aliases: Object.keys(cfg.aliases ?? {}), useCases: Object.keys(cfg.useCases ?? {}) }));
   });
+} else if (cmd === "vault-prune") {
+  try {
+    const env = withAuditlineNames(process.env), cfg = a.config ? JSON.parse(readFileSync(a.config, "utf8")) : {};
+    const options = piiVaultOptions(cfg.piiVault, env.AI_AUDIT_PII_VAULT_KEY);
+    if (!options) throw new Error("audit_pii_vault_config_invalid");
+    console.log(JSON.stringify({ removed: new PiiVault(options).prune() }));
+  } catch { console.error("audit_pii_vault_unavailable"); process.exitCode = 2; }
 } else if (cmd === "keygen") {
   const key = "aia-" + randomBytes(24).toString("base64url");
-  console.log(`key (give to the client, not stored): ${key}\nconfig entry: ${JSON.stringify({ name: a.name, sha256: sha256(key), models: ["*"], logContent: a["log-content"] })}`);
+  console.log(`key (give to the client, not stored): ${key}\nconfig entry: ${JSON.stringify({ name: a.name, sha256: sha256(key), models: ["*"], logContent: a["log-content"], ...(a["pii-restore"] && { piiRestore: true }) })}`);
 } else if (cmd === "stats") {
   if (!["key", "model", "hour"].includes(a.by!)) { console.error("--by key|model|hour"); process.exit(2); }
   console.table(stats(log, a.by as any, a.from, a.to));
@@ -293,4 +303,4 @@ if (cmd === "attest-keygen") {
     console.error(cause instanceof Error && /^audit_[a-z_]+$/.test(cause.message) ? cause.message : "audit_command_failed"); process.exitCode = 2;
   }
 } else if (cmd === "report") console.log(report(log, a.from!, a.to!).md);
-else { console.error("usage: ai-audit serve|console|await|effect|verify|anchor|rotate|prune|report|stats|context|workbench|keygen|profile|scrub|check-quotes|decide|approve|replay|lab|receipt|verify-receipt|attest-keygen|attest|verify-attestation|policies [options]; see README.md for command examples"); process.exit(2); }
+else { console.error("usage: ai-audit serve|vault-prune|console|await|effect|verify|anchor|rotate|prune|report|stats|context|workbench|keygen|profile|scrub|check-quotes|decide|approve|replay|lab|receipt|verify-receipt|attest-keygen|attest|verify-attestation|policies [options]; see README.md for command examples"); process.exit(2); }

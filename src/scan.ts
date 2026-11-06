@@ -8,7 +8,7 @@ import { bendList, bendListOf, fromBendList, type BendList } from "./context.js"
 export type Mode = "redact" | "no-go" | "advisory";
 export type Allowlist = Pick<ReadonlySet<string>, "has">;
 interface Rule { readonly id: string; readonly re: RegExp; readonly group?: number; readonly keywords?: readonly string[]; readonly valid?: (m: string) => boolean; readonly field?: RegExp }
-export const SCANNER_VERSION = "7";
+export const SCANNER_VERSION = "8";
 export const MAX_JSON_DEPTH = 256;
 const KEY_END = String.raw`(?![\w-])`, JWT_END = String.raw`(?![\w\/\\=-])`;
 
@@ -121,7 +121,7 @@ const validBeforeSpace = (r: Rule, text: string, start: number, end: number) => 
     if (whole.test(match.slice(0, cut)) && r.valid!(match.slice(0, cut))) return start + cut;
   return undefined;
 };
-export function scanText(text: string, carnet?: Allowlist): Span[] {
+export function scanText(text: string, carnet?: Allowlist, secretsFirst = false): Span[] {
   const lower = text.toLowerCase(), spans: Span[] = [];
   for (const r of RULES) {
     if (r.keywords && !r.keywords.some((k) => lower.includes(k))) continue;
@@ -129,7 +129,8 @@ export function scanText(text: string, carnet?: Allowlist): Span[] {
     for (let m = re.exec(text); m; m = re.exec(text)) {
       let [s, e] = m.indices![r.group ?? 0]!, [matchStart, matchEnd] = m.indices![0]!;
       if (/^\[REDACTED:[\w-]+\]$/.test(text.slice(s, e))) continue;
-      if (r.valid && !r.valid(text.slice(s, e))) {
+      const credentialPii = secretsFirst && r.id === "named-credential" && r.valid && !r.valid(text.slice(s, e)) && literal(text.slice(s, e)) && scanText(text.slice(s, e), carnet).some((p) => p.rule.startsWith("pii-"));
+      if (r.valid && !r.valid(text.slice(s, e)) && !credentialPii) {
         const cut = r.group === undefined ? validBeforeSpace(r, text, matchStart, matchEnd) : undefined;
         if (cut === undefined) continue;
         e = matchEnd = re.lastIndex = cut;
@@ -147,32 +148,34 @@ export function scanText(text: string, carnet?: Allowlist): Span[] {
       if (!allowed(j[2], carnet)) spans.push({ start, end, matchStart: start, matchEnd: end, rule: "jwt", value: j[2] });
     }
   }
-  return mergeSpans(text, spans);
+  return mergeSpans(text, spans, secretsFirst);
 }
 
 type BendGroup = { start: number; end: number; ms: number; me: number; first: number; grown: boolean };
 
-export function mergeSpans(text: string, spans: Span[]): Span[] {
+export function mergeSpans(text: string, spans: Span[], secretsFirst = false): Span[] {
   if (spans.length < 2) return spans.map((s) => ({ start: s.start, end: s.end, matchStart: s.matchStart, matchEnd: s.matchEnd, rule: s.rule, value: s.value }));
   const sorted = [...spans].sort((a, b) => a.start - b.start || b.end - a.end);
   const groups = fromBendList(BendSpans.merge(bendListOf(sorted, (s, id) => ({ $: "Raw", start: s.start, end: s.end, ms: s.matchStart, me: s.matchEnd, id }))) as BendList<BendGroup>);
-  return groups.map((g) => {
-    const first = sorted[g.first];
-    return { start: g.start, end: g.end, matchStart: g.ms, matchEnd: g.me, rule: first.rule, value: g.grown ? text.slice(g.start, g.end) : first.value };
+  return groups.map((g, i) => {
+    const first = sorted[g.first], owner = secretsFirst ? sorted.slice(g.first, groups[i + 1]?.first ?? sorted.length).find((s) => !s.rule.startsWith("pii-")) ?? first : first;
+    return { start: g.start, end: g.end, matchStart: g.ms, matchEnd: g.me, rule: owner.rule, value: g.grown ? text.slice(g.start, g.end) : first.value };
   });
 }
 
 type BendPiece = { $: "Keep"; from: number; to: number } | { $: "Hide"; i: number };
 const maskPlan = (ends: number[], spans: Span[]) =>
   fromBendList(BendMask.cut(bendList(ends), bendListOf(spans, (s) => ({ $: "Cut", start: s.start, end: s.end }))) as BendList<BendList<BendPiece>>).map((p) => fromBendList(p));
-const assemble = (joined: string, pieces: BendPiece[], spans: Span[]) => pieces.map((p) => (p.$ === "Keep" ? joined.slice(p.from, p.to) : `[REDACTED:${spans[p.i].rule}]`)).join("");
+export type Replacement = (span: Span) => string;
+const masked: Replacement = (span) => `[REDACTED:${span.rule}]`;
+const assemble = (joined: string, pieces: BendPiece[], spans: Span[], replacement: Replacement = masked) => pieces.map((p) => (p.$ === "Keep" ? joined.slice(p.from, p.to) : replacement(spans[p.i]))).join("");
 
-export const redactText = (text: string, spans: Span[]) => assemble(text, maskPlan([text.length], spans)[0], spans);
+export const redactText = (text: string, spans: Span[], replacement?: Replacement) => assemble(text, maskPlan([text.length], spans)[0], spans, replacement);
 
 const MASKING_PASSES = 4;
 export const isPayload = (s: string) => /^data:[\w.+-]+\/[\w.+-]+(?:;[^,]*)?;base64,/.test(s);
 const outsideStrings = (json: string) => json.replace(/"(?:[^"\\]|\\.)*"/g, (s) => `"${" ".repeat(s.length - 2)}"`);
-function maskOnce(v: string, carnet: Allowlist | undefined, path: string, findings: Finding[], depth: number): string {
+function maskOnce(v: string, carnet: Allowlist | undefined, path: string, findings: Finding[], depth: number, replacement?: Replacement): string {
   if (/^\s*[\[{]/.test(v)) {
     let parsed: unknown;
     try { parsed = JSON.parse(v); } catch { }
@@ -185,23 +188,23 @@ function maskOnce(v: string, carnet: Allowlist | undefined, path: string, findin
         findings.push({ rule: "deep-json", path, unredactable: true });
         return v;
       }
-      const nested = inspect(parsed, carnet, `${path}#json`, [], false, depth), json = nested.findings.length ? JSON.stringify(nested.value) : v;
-      const spans = scanText(outsideStrings(json), carnet);
+      const nested = inspect(parsed, carnet, `${path}#json`, [], false, depth, replacement), json = nested.findings.length ? JSON.stringify(nested.value) : v;
+      const spans = scanText(outsideStrings(json), carnet, !!replacement);
       for (const f of nested.findings) findings.push(f);
       spans.forEach((s) => findings.push({ rule: s.rule, path }));
-      return spans.length ? redactText(json, spans) : json;
+      return spans.length ? redactText(json, spans, replacement) : json;
     }
   }
-  const spans = scanText(v, carnet); spans.forEach((s) => findings.push({ rule: s.rule, path }));
-  return spans.length ? redactText(v, spans) : v;
+  const spans = scanText(v, carnet, !!replacement); spans.forEach((s) => findings.push({ rule: s.rule, path }));
+  return spans.length ? redactText(v, spans, replacement) : v;
 }
 
-export function inspect(v: unknown, carnet?: Allowlist, path = "$", findings: Finding[] = [], payload = false, depth = 0): { value: unknown; findings: Finding[] } {
+export function inspect(v: unknown, carnet?: Allowlist, path = "$", findings: Finding[] = [], payload = false, depth = 0, replacement?: Replacement): { value: unknown; findings: Finding[] } {
   if (typeof v === "string") {
     if (payload || isPayload(v)) return { value: v, findings };
     let value = v;
     for (let pass = 0; ; pass++) {
-      const found: Finding[] = [], masked = maskOnce(value, carnet, path, found, depth);
+      const found: Finding[] = [], masked = maskOnce(value, carnet, path, found, depth, replacement);
       for (const f of found) findings.push(pass < MASKING_PASSES ? f : { ...f, unredactable: true });
       if (!found.length) return { value, findings };
       value = masked;
@@ -214,25 +217,25 @@ export function inspect(v: unknown, carnet?: Allowlist, path = "$", findings: Fi
   }
   if (Array.isArray(v)) {
     const before = findings.length;
-    let value = joinParts(v, carnet, path, findings).map((x, i) => inspect(x, carnet, `${path}[${i}]`, findings, false, depth + 1).value);
+    let value = joinParts(v, carnet, path, findings, replacement).map((x, i) => inspect(x, carnet, `${path}[${i}]`, findings, false, depth + 1, replacement).value);
     if (findings.length === before) return { value, findings };
     for (let pass = 1; ; pass++) {
-      const found: Finding[] = [], joined = joinParts(value, carnet, path, found);
+      const found: Finding[] = [], joined = joinParts(value, carnet, path, found, replacement);
       for (const f of found) findings.push(pass < MASKING_PASSES ? f : { ...f, unredactable: true });
       if (!found.length || pass === MASKING_PASSES) return { value: joined, findings };
-      value = joined.map((x, i) => (partText(x) === partText(value[i]) ? x : inspect(x, carnet, `${path}[${i}]`, findings, false, depth + 1).value));
+      value = joined.map((x, i) => (partText(x) === partText(value[i]) ? x : inspect(x, carnet, `${path}[${i}]`, findings, false, depth + 1, replacement).value));
     }
   }
   if (v && typeof v === "object") {
     const o: Record<string, unknown> = {};
     for (const [k, x] of Object.entries(v)) {
-      const keySpans = scanText(k, carnet), nextPath = `${path}.${keySpans.length ? "<key>" : k}`;
+      const keySpans = scanText(k, carnet, !!replacement), nextPath = `${path}.${keySpans.length ? "<key>" : k}`;
       keySpans.forEach((s) => findings.push({ rule: s.rule, path: `${path}.<key>`, inKey: true }));
       const binary = k === "data" && (v as any).type === "base64";
       const field = typeof x === "string" && x.length && !binary && !isPayload(x) && !/^\[REDACTED:[\w-]+\]$/.test(x) && !allowed(x, carnet)
         ? RULES.find((r) => r.field?.test(k) && (!r.valid || r.valid(x))) : undefined;
       if (field) findings.push({ rule: field.id, path: nextPath });
-      const value = field ? `[REDACTED:${field.id}]` : inspect(x, carnet, nextPath, findings, binary, depth + 1).value;
+      const value = field ? `[REDACTED:${field.id}]` : inspect(x, carnet, nextPath, findings, binary, depth + 1, replacement).value;
       Object.defineProperty(o, k, { value, enumerable: true, writable: true, configurable: true });
     }
     return { value: o, findings };
@@ -249,23 +252,25 @@ export type SpanRange = Pick<Span, "start" | "end" | "matchStart" | "matchEnd">;
 export const takenAcrossParts = (starts: number[], spans: SpanRange[]): boolean[] =>
   fromBendList(BendParts["taken.fast"](bendList(starts.slice(1)), bendListOf(spans, (s) => ({ $: "Span", start: s.start, end: s.end, ms: s.matchStart, me: s.matchEnd }))) as BendList<{ t: boolean }>).map((m) => m.t);
 
-export function maskParts(texts: string[], spans: Span[]): string[] {
+export function maskParts(texts: string[], spans: Span[], replacement?: Replacement): string[] {
   const ends: number[] = []; let total = 0; texts.forEach((t) => ends.push((total += t.length)));
   const joined = texts.join("");
-  return maskPlan(ends, spans).map((pieces) => assemble(joined, pieces, spans));
+  const seen = new Set<Span>();
+  const once: Replacement | undefined = replacement && ((span) => { if (seen.has(span)) return ""; seen.add(span); return replacement(span); });
+  return maskPlan(ends, spans).map((pieces) => assemble(joined, pieces, spans, once));
 }
 
 const partText = (x: any): string | undefined => (typeof x === "string" ? x : x && typeof x === "object" && typeof x.text === "string" ? x.text : undefined);
-function joinParts(arr: unknown[], carnet: Allowlist | undefined, path: string, findings: Finding[]): unknown[] {
+function joinParts(arr: unknown[], carnet: Allowlist | undefined, path: string, findings: Finding[], replacement?: Replacement): unknown[] {
   const idx: number[] = [], texts: string[] = [];
   arr.forEach((x, i) => { const t = partText(x); if (t !== undefined && !isPayload(t)) { idx.push(i); texts.push(t); } });
   if (texts.length < 2) return arr;
   const starts: number[] = []; let joined = ""; texts.forEach((t) => { starts.push(joined.length); joined += t; });
   const part = (pos: number) => lastWhere(starts.length, (k) => starts[k] <= pos);
-  const spans = scanText(joined, carnet), taken = takenAcrossParts(starts, spans);
+  const spans = scanText(joined, carnet, !!replacement), taken = takenAcrossParts(starts, spans);
   const cross = spans.filter((_, i) => taken[i]);
   if (!cross.length) return arr;
-  const out = arr.slice(), next = maskParts(texts, cross);
+  const out = arr.slice(), next = maskParts(texts, cross, replacement);
   for (const s of cross.reverse()) {
     const first = idx[part(s.matchStart)], last = idx[part(s.matchEnd - 1)];
     findings.push({ rule: s.rule, path: first === last ? `${path}[${first}]` : `${path}[${first}..${last}]` });

@@ -1,0 +1,264 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-06",
+  "basis": "Observed local execution; screenshots of running applications; uncommitted worktrees",
+  "provider": "openai",
+  "model": "gpt-4o-mini",
+  "customerData": "synthetic",
+  "realPayments": false,
+  "providerCalls": 44,
+  "workflow": {
+    "status": "completed",
+    "amountMinor": 34000,
+    "currency": "EUR",
+    "refundCount": 1,
+    "readBackBeforeClaim": true,
+    "policyEvidence": "recorded",
+    "privacyAndWorkflowChecks": {
+      "customerContactMaskedUpstream": true,
+      "customerContactRestored": true,
+      "oneRefund": true,
+      "readBackBeforeClaim": true,
+      "decisionEvidence": true
+    }
+  },
+  "evaluation": {
+    "trials": 21,
+    "passed": 20,
+    "failed": 1,
+    "errors": 0,
+    "criticalFailures": 0,
+    "gatePassed": false,
+    "failures": [
+      {
+        "case": "hours-saturday",
+        "checks": [
+          {
+            "id": "tool-search_policies",
+            "reason": "Required ordered subsequence: search_policies"
+          }
+        ],
+        "executionError": null
+      }
+    ],
+    "verifiedAuditTrials": 21,
+    "sourceBookingsUnchanged": true,
+    "targetRevision": "a287734465bf6f7b723f6a82e855b4962121f2477872130404e763a87f0559ab"
+  },
+  "scriptedControl": {
+    "trials": 21,
+    "passed": 21,
+    "gatePassed": true
+  },
+  "gatewayFeatureLab": {
+    "total": 33,
+    "passed": 33,
+    "checks": {
+      "clean": {
+        "pass": true,
+        "status": 200,
+        "expected": "200, original bytes forwarded"
+      },
+      "redact": {
+        "pass": true,
+        "status": 200,
+        "expected": "200, key masked before upstream"
+      },
+      "block": {
+        "pass": true,
+        "status": 409,
+        "expected": "409, upstream not called"
+      },
+      "advisory": {
+        "pass": true,
+        "status": 200,
+        "expected": "200, finding logged, original forwarded"
+      },
+      "injection": {
+        "pass": true,
+        "status": 200,
+        "expected": "200 with an advisory signal"
+      },
+      "quineling": {
+        "pass": true,
+        "status": 200,
+        "expected": "Quinelings result observed"
+      },
+      "anthropic": {
+        "pass": true,
+        "status": 200,
+        "expected": "200, Anthropic stream recorded"
+      },
+      "responses": {
+        "pass": true,
+        "status": 200,
+        "expected": "200, Responses stream recorded"
+      },
+      "contextGrowth": {
+        "pass": true,
+        "status": 200,
+        "expected": "five turns in one session as the context grows"
+      },
+      "session": {
+        "pass": true,
+        "status": 200,
+        "expected": "second turn linked to the session"
+      },
+      "outage": {
+        "pass": true,
+        "status": 503,
+        "expected": "503 from upstream is recorded"
+      },
+      "noUsage": {
+        "pass": true,
+        "status": 200,
+        "expected": "200, usage unknown, not zero"
+      },
+      "alias": {
+        "pass": true,
+        "status": 200,
+        "expected": "200, alias resolved to mock-model"
+      },
+      "attachment": {
+        "pass": true,
+        "status": 422,
+        "expected": "422, remote file refused"
+      },
+      "virtualKey": {
+        "pass": true,
+        "status": 401,
+        "expected": "401 and a refusal record"
+      },
+      "telemetry": {
+        "pass": true,
+        "status": 200,
+        "expected": "health ok, metrics served"
+      },
+      "integrity": {
+        "pass": true,
+        "status": 200,
+        "expected": "chain and anchor verify"
+      },
+      "failClosed": {
+        "pass": true,
+        "status": 503,
+        "expected": "torn log: 503, nothing forwarded"
+      },
+      "qdl": {
+        "pass": true,
+        "status": 200,
+        "expected": "Policy completed and receipt verifies"
+      },
+      "refusalModel": {
+        "pass": true,
+        "status": 403,
+        "expected": "403 and a refusal record with the model"
+      },
+      "injectionResent": {
+        "pass": true,
+        "status": 200,
+        "expected": "resent tool result counted once"
+      },
+      "gateObserve": {
+        "pass": true,
+        "status": 200,
+        "expected": "observe: call recorded as held, delivered"
+      },
+      "gateEnforce": {
+        "pass": true,
+        "status": 200,
+        "expected": "enforce: call held, notice delivered"
+      },
+      "gatePass": {
+        "pass": true,
+        "status": 200,
+        "expected": "address typed by the user passes"
+      },
+      "keyTools": {
+        "pass": true,
+        "status": 200,
+        "expected": "tool outside the key list is held"
+      },
+      "useCaseShadow": {
+        "pass": true,
+        "status": 200,
+        "expected": "shadow row: tool outside its list is recorded"
+      },
+      "useCaseOff": {
+        "pass": true,
+        "status": 403,
+        "expected": "row switched off: 403 and a refusal record"
+      },
+      "useCaseMissing": {
+        "pass": true,
+        "status": 400,
+        "expected": "no use case named: 400 before inspection"
+      },
+      "budget": {
+        "pass": true,
+        "status": 429,
+        "expected": "exhausted budget returns 429"
+      },
+      "alerting": {
+        "pass": true,
+        "status": 200,
+        "expected": "held call fires the tool-call alert"
+      },
+      "checkQuotes": {
+        "pass": true,
+        "status": 200,
+        "expected": "wrong value and missing quote found"
+      },
+      "scrub": {
+        "pass": true,
+        "status": 200,
+        "expected": "key removed from the export copy"
+      },
+      "signed": {
+        "pass": true,
+        "status": 200,
+        "expected": "signature verifies"
+      }
+    }
+  },
+  "evidence": {
+    "chainVerified": true,
+    "anchorStorage": "Local demo files, not independently retained WORM storage",
+    "portableReceiptReproduced": true,
+    "portableReceiptImplementationMatched": true,
+    "portableReceiptOrigin": "not-verified",
+    "portableReceiptHumanApproval": "not-verified"
+  },
+  "checks": {
+    "auditlineUnitTests": {
+      "pass": 493,
+      "skip": 20,
+      "fail": 0
+    },
+    "auditlineFormalConfigurations": 19,
+    "auditlineFormalRegressionTests": 54,
+    "deskhandUnitTests": 169,
+    "deskhandTemporalAndAuditTests": 34,
+    "intentgaugeUnitTests": 59,
+    "intentgaugeIntegrationTests": 5
+  },
+  "sourceDigests": {
+    "auditline": {
+      "src/pii.ts": "b3d6521aadf2da6cd5d61032af635db5b9fd79c66d010b5924317862cadb48ca",
+      "src/piiVault.ts": "fa717e99ddfb0cb79aa9669cfa5ad51ae521c69dd73a77ff9a7d50f6094b9d6b",
+      "src/piiDelivery.ts": "fa3348bad9edae3b4346558b916e9b7599ba04056d940917514fee4f143f22a1",
+      "src/proxy.ts": "1e9c72c21df7868a600b01093937a365f9d5b6bd78cfcf5f51ed9848781424c4",
+      "src/policyRuntime.ts": "d430a8ec4faabf791c6c96242c08161f7986d7b42d8ef4054c2a08cf25fe6a71"
+    },
+    "deskhand": {
+      "citywheels/openai_model.py": "9e5b1c136892cf4bcf5381d28eedc6c34f405c8ff3d656169e7cc4304deae8c7",
+      "orchestration/__main__.py": "b58c93cb56637327070782b2a223f6388eaae8e318128a7c6954bc15210243c8",
+      "policies/refund.json": "4fc7142d7f22d69c4b20ee1bbdc9a136450d923cbbb5f18d5e14b7dd47d99c8c"
+    },
+    "intentgauge": {
+      "integrations/citywheels/target.mjs": "76f554a29b772a85c39cdfd1d10005853c81a8af5fe52f0586b8c7152af58fe6",
+      "integrations/citywheels/bridge.py": "9cf7adfe0051e572807a111d326ad0c71f2220b0ab1f7803831d76503cd477ea",
+      "integrations/citywheels/audit.mjs": "52aee21f795d73e4653cd7919b5c619c2e9d525955fd8e19d06d327d8e57ff76"
+    }
+  }
+}

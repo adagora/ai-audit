@@ -1,0 +1,150 @@
+{
+  "recordedAt": "2026-11-06T14:16:04.921Z",
+  "provider": "openai",
+  "model": "gpt-4o-mini",
+  "mainScenes": [
+    {
+      "title": "01 / A customer asks to cancel a booking",
+      "detail": "Hosted gpt-4o-mini · synthetic customer and booking · actual application screens",
+      "duration": 5
+    },
+    {
+      "title": "02 / Original contact restored only on the customer delivery path",
+      "detail": "The captured provider request contains a scoped PII token. The customer receives the synthetic email.",
+      "duration": 5
+    },
+    {
+      "title": "03 / The customer confirms the exact €340 quote",
+      "detail": "Consent alone does not issue a refund. The ledger still has zero refunds; staff review is required.",
+      "duration": 4
+    },
+    {
+      "title": "04 / Deskhand: a reviewer sees the case and exact quote",
+      "detail": "The review goes through the application gateway and signals the real Temporal workflow.",
+      "duration": 4
+    },
+    {
+      "title": "05 / Approval is bound to the displayed quote digest",
+      "detail": "The application checks the current quote again before writing to its isolated sample backend.",
+      "duration": 4
+    },
+    {
+      "title": "06 / Cancellation and refund settle, then the application reads back",
+      "detail": "Exactly one refund is written to the sample ledger. Success follows verified read-back.",
+      "duration": 5
+    },
+    {
+      "title": "07 / Model calls, policy decision, review and effect share one case",
+      "detail": "Real request IDs and correlation IDs connect the application to Auditline; no prompt values are stored.",
+      "duration": 4
+    },
+    {
+      "title": "08 / Replay reproduces the decision from recorded evidence",
+      "detail": "The migrated native policy retains the same refund rule and rounding; approval is a separate record.",
+      "duration": 4
+    },
+    {
+      "title": "09 / A portable SVG receipt verifies independently",
+      "detail": "The receipt proves the recorded calculation. It does not authenticate a reviewer by itself.",
+      "duration": 4
+    },
+    {
+      "title": "10 / Deskhand authority: scope, tier, limits and expiry",
+      "detail": "The seeded demonstration grant is visible. This recording does not claim production qualification.",
+      "duration": 4
+    },
+    {
+      "title": "11 / Deskhand rules: what the application actually enforces",
+      "detail": "Refund rules, customer consent, staff review and quote expiry remain application responsibilities.",
+      "duration": 4
+    },
+    {
+      "title": "12 / IntentGauge results remain visible in the operator cockpit",
+      "detail": "The live run passed 20 of 21 cases. The required policy-search tool check failed; no monetary check failed.",
+      "duration": 4
+    },
+    {
+      "title": "13 / Health: Temporal, worker, gateway, chain and evals",
+      "detail": "These are live checks against this isolated stack, not prerecorded status values.",
+      "duration": 4
+    },
+    {
+      "title": "14 / Auditline: the actual run, decisions and inspection outcomes",
+      "detail": "The gateway handled every model call with reversible PII protection and virtual-key authentication.",
+      "duration": 4
+    },
+    {
+      "title": "15 / Request flow: inspect, decide, forward, gate, deliver, record",
+      "detail": "Counts derive from the hash-chained log. Inspection runs before any model request is forwarded.",
+      "duration": 4
+    },
+    {
+      "title": "16 / Sessions and context: growth without storing prompt values",
+      "detail": "Context composition and session linkage are metadata. The original contact stays in the separate vault.",
+      "duration": 4
+    },
+    {
+      "title": "17 / Virtual keys, allowed use cases and model/tool limits",
+      "detail": "The trusted delivery key may restore customer text; ordinary agent keys remain tokenized.",
+      "duration": 4
+    },
+    {
+      "title": "18 / Integrity: chain verification and the new anchor",
+      "detail": "The end-to-end run checks its chain and creates a fresh anchor after the case and evaluations finish.",
+      "duration": 4
+    },
+    {
+      "title": "19 / IntentGauge: fresh hosted-model evaluation, including its failure",
+      "detail": "All 21 trials have verified Auditline request linkage. A failed check blocks the evaluation.",
+      "duration": 5
+    },
+    {
+      "title": "20 / Inspect cases and failed assertions instead of hiding them",
+      "detail": "Saturday opening hours were correct, but the model skipped the tool call required by this fixture.",
+      "duration": 5
+    },
+    {
+      "title": "21 / Finished: one refund, verified read-back, honest evaluation result",
+      "detail": "Customer data was synthetic. Hosted model calls, the three applications and all displayed evidence are real.",
+      "duration": 6
+    }
+  ],
+  "extraScenes": [
+    {
+      "title": "FEATURE LAB / Extra gateway options on scripted traffic",
+      "detail": "Separate local laboratory · mock providers and fake keys · real gateway requests",
+      "duration": 4
+    },
+    {
+      "title": "FEATURE LAB / All 33 feature checks passed",
+      "detail": "Results are actual assertions, including refusal and failure paths. Attachments are rejected, not OCR-tested here.",
+      "duration": 5
+    },
+    {
+      "title": "FEATURE LAB / Routing, keys, inspection modes and injection signals",
+      "detail": "Redact, no-go and advisory use separate proxies. Injection signals are advisory.",
+      "duration": 4
+    },
+    {
+      "title": "FEATURE LAB / Tool gates, use cases and durable token budgets",
+      "detail": "Observe, enforce, user-origin pass, per-key tool lists, off/shadow use cases and budget exhaustion.",
+      "duration": 4
+    },
+    {
+      "title": "FEATURE LAB / API streams, context, native policies and signed evidence",
+      "detail": "Responses and Anthropic streams, five-turn context, native receipt replay and signature verification.",
+      "duration": 4
+    },
+    {
+      "title": "FEATURE LAB / Counters come from the completed checks",
+      "detail": "Findings, advisory signals, held tools and refusals are measured by the running proxies.",
+      "duration": 4
+    },
+    {
+      "title": "FEATURE LAB / Inspect individual scenarios and request metadata",
+      "detail": "The request console makes the policy view and recorded outcomes visible for each synthetic scenario.",
+      "duration": 4
+    }
+  ],
+  "pageErrors": []
+}
