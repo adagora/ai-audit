@@ -79,3 +79,5 @@ Format: Nygard (Status, Context, Decision, Consequences), at most ~40 lines, fil
 - [69. The project is called Auditline, and the old names keep working](0069-auditline-name-and-compatibility.md)
 - [70. Auditline owns a bounded, versioned policy interpreter](0070-native-policy-runtime.md)
 - [71. Remove the legacy policy runtime during development](0071-native-only-development-reset.md)
+- [72. Decision evidence binds the interpreter implementation](0072-pinned-interpreter-receipts.md)
+- [73. Native policies classify fresh and contradictory evidence](0073-freshness-and-conflict-evidence.md)

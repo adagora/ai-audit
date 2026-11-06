@@ -23,7 +23,8 @@
     "verify:formal": "bash spec/run.sh && npm run build && node --test dist/test/logsafety.test.js dist/test/audit.test.js dist/test/qdl.test.js dist/test/laws.test.js dist/test/segments.test.js dist/test/refusals.test.js dist/test/verdict.test.js",
     "verify:bend": "bash bend/run.sh",
     "verify:native-install": "npm run build && node scripts/verify-native-install.mjs",
-    "bench:policy": "npm run build && node bench/policy-runtime.mjs"
+    "bench:policy": "npm run build && node bench/policy-runtime.mjs",
+    "example:evidence": "npm run build && node examples/evidence-policy/run.mjs"
   },
   "keywords": [
     "ai-act",

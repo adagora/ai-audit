@@ -65,7 +65,7 @@ test("a floor receipt and a confirmed-or-estimated receipt keep the same step va
     assert.equal(html.includes(email), false);
     assert.equal(floor.policy.sourceHash, first.step.qdl.sourceHash);
     assert.equal(floor.policy.version, 1);
-    assert.equal(floor.policy.registry, "auditline-policy-1");
+    assert.equal(floor.policy.registry, "auditline-policy-2");
     assert.match(floor.policy.registryDigest ?? "", /^[0-9a-f]{64}$/);
     assert.match(html, /Source hash is the program identity/);
     assert.equal(floor.calculation.final, 189);

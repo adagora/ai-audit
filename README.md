@@ -492,9 +492,9 @@ ai-audit receipt --log audit.jsonl --decision ID --format json --output decision
 ai-audit verify-receipt --input decision.svg
 ```
 
-The HTML page includes SVG and JSON downloads for a completed, consistent decision. The SVG shows a named policy step index beside its calculation steps and embeds the exact program and inputs in XML metadata. You can place it in a report or send it to someone who has Auditline. Version 2 receipts need no external SDK. Old version 1 receipts are unsupported. The SVG, JSON and HTML output paths must be new files; they never replace the source log.
+The HTML page includes SVG and JSON downloads for a completed, consistent decision. The SVG shows a named policy step index beside its calculation steps and embeds the exact program and inputs in XML metadata. You can place it in a report or send it to someone who has Auditline. Version 3 receipts bind the exact interpreter implementation and need no external SDK. Old unpinned receipts are unsupported. The SVG, JSON and HTML output paths must be new files; they never replace the source log.
 
-`verify-receipt` checks that the program can be recovered and that the recorded calculation runs again. For SVG, it also checks that the visible drawing matches the embedded data. It returns `origin: "not-verified"` and `humanApproval: "not-verified"`: a recipient cannot authenticate the log, its external anchor, the author or a human review from this file alone. Keep the original log and an independently stored anchor for those checks. A PNG or screenshot loses the replay metadata. [ADR 0036](docs/adr/0036-portable-qdl-decision-receipts.md).
+`verify-receipt` requires the same trusted interpreter implementation before recovering the program and replaying the calculation. A changed build is rejected even if it would produce the same output. For SVG, it also checks that the visible drawing matches the embedded data. It returns `origin: "not-verified"` and `humanApproval: "not-verified"`: a recipient cannot authenticate the log, its external anchor, the author or a human review from this file alone. Keep the original log and an independently stored anchor for those checks. A PNG or screenshot loses the replay metadata. [ADR 0036](docs/adr/0036-portable-qdl-decision-receipts.md).
 
 ### Sign a reviewed decision and checkpoint
 
@@ -835,7 +835,7 @@ ai-audit policies --system-id shop --use-case quote
 
 `--llm-call` must already be an `llm-call` id in the same log. The response header can arrive before that row is appended, and `decide` in that window returns `audit_unknown_llm_call`.
 
-A policy file is a native `"format": "auditline-policy"` version 1 policy or `{"source": "<program source>"}`. Native examples are in `examples/evaluation/machining-policy.json` and `examples/quineling-wycena/policy.json`. Native operations are arithmetic, comparisons, conditional choices, reports and simulated actions; unsupported operations refuse explicitly. See [native policies](docs/native-policies.md) for the format and limits. Inputs are a JSON object. Both are scanned before compile. Any finding refuses the decision and does not store the value.
+A policy file is a native `"format": "auditline-policy"` version 1 or 2 policy or `{"source": "<program source>"}`. Native examples are in `examples/evaluation/machining-policy.json` and `examples/quineling-wycena/policy.json`. Native operations are arithmetic, comparisons, conditional choices, reports and simulated actions; version 2 adds freshness/conflict assessment and distinct-source evidence gates; unsupported operations refuse explicitly. See [native policies](docs/native-policies.md) for the format and limits. Inputs are a JSON object. Both are scanned before compile. Any finding refuses the decision and does not store the value.
 
 #### Act on a decision after its verdict
 
@@ -853,6 +853,8 @@ ai-audit effect --decision "$DECISION_ID" --action send-quote-to-customer --stat
 `npm run build && node examples/evaluation/policy-lab/run.mjs` loads a fake session through the proxy and a mock provider, then compares two policies on it. The walkthrough, including what Quinelings will and will not do, is [docs/decisions.md](docs/decisions.md).
 
 `npm run example:evaluate` checks a native machining quote policy on labeled cases. `npm run example:evaluate -- --openai --output /private/tmp/quote-evaluation.json` also evaluates the same facts with OpenAI Decisions, recording misses, false alerts, repeat changes, latency and usage. The evaluator runs offline from proxy traffic; see [the evaluation guide](examples/evaluation/README.md).
+
+`npm run example:evidence` records current, stale and contradictory observations through real CLI processes, then replays decisions and verifies implementation-pinned JSON/SVG receipts. The policy fixes age/revision limits; requests supply only the recorded clock. See [the evidence example](examples/evidence-policy/README.md).
 
 `npm run example:wycena -- --console` prices five toolroom parts with a 64-node native rule and fixed company rates, then opens the operator console so each quote waits for a review. See [the toolroom quote rule](examples/quineling-wycena/README.md). [examples/quineling-wycena/live-mail](examples/quineling-wycena/live-mail/README.md) runs the same rule on four synthetic customer mails with the real proxy, a real model, the console in a browser and the CLI, each as its own process.
 
@@ -1093,7 +1095,7 @@ Rows with `tokensComplete: false` are a lower bound. Do not add the missing call
 
 ### An old development policy or receipt does not load
 
-Only `auditline-policy` version 1 and portable receipt version 2 are supported. The legacy QDL interpreter and SDK were removed during development. Create a new native policy and decision; do not edit or rehash an old receipt to make it look verified.
+Scalar `auditline-policy` version 1 and evidence-capable version 2 are supported. Portable receipts require version 3 with a matching implementation manifest. The legacy QDL interpreter and SDK were removed during development. Create a new native policy and decision; do not edit or rehash an old receipt to make it look verified.
 
 ## Limitations
 

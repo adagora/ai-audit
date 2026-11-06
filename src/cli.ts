@@ -37,7 +37,7 @@ const { values: a } = parseArgs({ args: rest, options: {
   "baseline-limit": { type: "string", default: "2" }, "candidate-limit": { type: "string", default: "3" },
   "rotate-bytes": { type: "string", default: String(256 * 1024 * 1024) }, "keep-days": { type: "string" }, "inspect-timeout-ms": { type: "string", default: "5000" },
 } });
-const NOT_REPRODUCED = new Set(["audit_qdl_source_missing", "audit_qdl_source_invalid", "audit_qdl_source_mismatch", "audit_qdl_intent_mismatch"]);
+const NOT_REPRODUCED = new Set(["audit_qdl_source_missing", "audit_qdl_source_invalid", "audit_qdl_source_mismatch", "audit_qdl_intent_mismatch", "audit_policy_implementation_missing", "audit_policy_implementation_mismatch"]);
 const log = new AuditLog(a.log!);
 const allowlist = () => {
   if (!a["allow-hashes"]) return undefined;

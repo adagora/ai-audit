@@ -88,7 +88,7 @@ test("portable verification rejects changed inputs, outputs, runtime identity, s
   await assert.rejects(verifyPortableReceipt(svg.replace("</svg>", '<script>alert(1)</script></svg>')), /audit_package_presentation_mismatch/);
   assert.throws(() => parseDecisionPackage('{"format":"unknown"}'), /audit_invalid_decision_package/);
   assert.throws(() => parseDecisionPackage('{"format":"ai-audit-decision-package'), /audit_invalid_decision_package/);
-  assert.throws(() => parseDecisionPackage(JSON.stringify(bundle).replace('"version":2', '"version":2,"version":2')), /audit_invalid_decision_package/);
+  assert.throws(() => parseDecisionPackage(JSON.stringify(bundle).replace('"version":3', '"version":3,"version":3')), /audit_invalid_decision_package/);
   assert.throws(() => parseDecisionPackage(JSON.stringify({ ...bundle, prompt: "unexpected field" })), /audit_invalid_decision_package/);
 });
 

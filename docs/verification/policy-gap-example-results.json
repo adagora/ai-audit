@@ -1,0 +1,32 @@
+{
+  "mode": "synthetic",
+  "clock": "recorded input, not current wall time",
+  "results": [
+    {
+      "case": "current",
+      "state": "supported",
+      "allowed": true,
+      "action": "simulated",
+      "implementationDigest": "4b75a2dbdf1c8e430ba21f03d28ceda5b2895de506ed4cc8488732694ec2578d",
+      "skipped": []
+    },
+    {
+      "case": "stale",
+      "state": "supported",
+      "allowed": false,
+      "action": "skipped",
+      "implementationDigest": "4b75a2dbdf1c8e430ba21f03d28ceda5b2895de506ed4cc8488732694ec2578d",
+      "skipped": [
+        "stale"
+      ]
+    },
+    {
+      "case": "conflict",
+      "state": "conflict",
+      "allowed": false,
+      "action": "skipped",
+      "implementationDigest": "4b75a2dbdf1c8e430ba21f03d28ceda5b2895de506ed4cc8488732694ec2578d",
+      "skipped": []
+    }
+  ]
+}

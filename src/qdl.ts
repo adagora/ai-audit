@@ -2,6 +2,7 @@ import { policyRuntime } from "./policyAdapter.js";
 import { existsSync, statSync } from "node:fs";
 import { AuditLog, canon, decisionConsistency, sha256, verifyAnchors, type Entry, type Rec } from "./audit.js";
 import { inspect, type Allowlist } from "./scan.js";
+import type { PolicyRuntimeBinding } from "./policyImplementation.js";
 
 export type QdlStatus = "completed" | "refused" | "failed";
 export interface QdlFault { code: string; path: string; nodeId?: string }
@@ -10,6 +11,7 @@ export interface QdlStep {
   status?: QdlStatus; inputs?: Record<string, unknown>;
   sourceHash?: string; source?: string; intent?: unknown; intentHash?: string;
   inputHash?: string; outputsHash?: string; error?: QdlFault; findings?: { rule: string; path: string }[];
+  runtime?: PolicyRuntimeBinding;
 }
 export type QdlRec = Rec & { qdl: QdlStep };
 export interface Program { intent?: unknown; source?: string }
@@ -61,6 +63,8 @@ function retainedEntry(e: Omit<Entry, "output" | "step">, carnet?: Allowlist): O
 export async function recordQdl(log: AuditLog, e: Omit<Entry, "output" | "step">, prog: Program, inputs: Record<string, unknown>, carnet?: Allowlist): Promise<{ decision: Rec; step: QdlRec }> {
   const entry = retainedEntry(e, carnet);
   const { s, refusal } = await session(prog);
+  const described = s.describe();
+  const runtime: PolicyRuntimeBinding = { registry: described.registry, registryDigest: described.registryDigest, implementationDigest: described.implementation.digest };
   const findings = inspect({ inputs, program: prog.source ?? prog.intent, params: entry.params, sources: entry.sources, model: entry.model, prompt: entry.prompt?.templateId }, carnet).findings;
   if (findings.length) {
     const decision = log.record({ systemId: entry.systemId, useCase: entry.useCase, llmCallId: entry.llmCallId, correlation: entry.correlation, input: entry.input, output: undefined, qdlDecision: true });
@@ -72,12 +76,13 @@ export async function recordQdl(log: AuditLog, e: Omit<Entry, "output" | "step">
   try { artifact = prog.source !== undefined ? s.recover({ source: prog.source }) : s.compile(prog.intent as any); }
   catch (err) { if (!refusal(err)) throw err; outcome = { status: "refused", error: fault(err) }; }
   outcome ??= evaluate(s, refusal, artifact, inputs, "record");
+  s.describe();
   if (artifact) storeProgram(log, artifact);
   const program = artifact ? { sourceHash: artifact.id }
     : prog.source !== undefined ? { source: prog.source } : { intent: prog.intent, intentHash: sha256(canon(prog.intent)) };
   const decision = log.record({ ...entry, output: outcome.outputs, qdlDecision: true });
   const step = log.append({ kind: "decision", id: decision.id + ":qdl", ts: decision.ts, refId: decision.id,
-    qdl: { status: outcome.status, ...program, inputs, inputHash: outcome.inputHash,
+    qdl: { status: outcome.status, ...program, inputs, runtime, inputHash: outcome.inputHash,
       outputsHash: outcome.outputs && sha256(canon(outcome.outputs)), error: outcome.error } }) as QdlRec;
   return { decision, step };
 }
@@ -90,6 +95,10 @@ export async function replayQdl(log: AuditLog, id: string, recs: Rec[] = log.rea
   const source = q.source ?? recs.find((x) => x.kind === "program" && x.id === q.sourceHash)?.source;
   if (q.sourceHash !== undefined && typeof source !== "string") throw new Error("audit_qdl_source_missing");
   const { s, refusal } = await session({ ...(typeof source === "string" && { source }), intent: q.intent });
+  if (!q.runtime) throw new Error("audit_policy_implementation_missing");
+  const described = s.describe();
+  if (q.runtime.registry !== described.registry || q.runtime.registryDigest !== described.registryDigest
+    || q.runtime.implementationDigest !== described.implementation.digest) throw new Error("audit_policy_implementation_mismatch");
   let artifact: any, outcome: Outcome | undefined;
   if (q.sourceHash !== undefined) {
     const source = q.source ?? recs.find((x) => x.kind === "program" && x.id === q.sourceHash)?.source;

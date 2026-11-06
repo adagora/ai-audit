@@ -1,0 +1,95 @@
+[
+  {
+    "name": "current",
+    "expectedState": "supported",
+    "expectedAllowed": true,
+    "inputs": {
+      "amount": 250,
+      "clock": {
+        "now": 1000
+      },
+      "evidence": [
+        {
+          "id": "a",
+          "source": "review-a",
+          "claim": "release-eligible",
+          "value": true,
+          "kind": "observation",
+          "observedAt": 900,
+          "revision": 2
+        },
+        {
+          "id": "b",
+          "source": "review-b",
+          "claim": "release-eligible",
+          "value": true,
+          "kind": "observation",
+          "observedAt": 980,
+          "revision": 3
+        }
+      ]
+    }
+  },
+  {
+    "name": "stale",
+    "expectedState": "supported",
+    "expectedAllowed": false,
+    "inputs": {
+      "amount": 250,
+      "clock": {
+        "now": 1000
+      },
+      "evidence": [
+        {
+          "id": "a",
+          "source": "review-a",
+          "claim": "release-eligible",
+          "value": true,
+          "kind": "observation",
+          "observedAt": 900,
+          "revision": 2
+        },
+        {
+          "id": "b",
+          "source": "review-b",
+          "claim": "release-eligible",
+          "value": true,
+          "kind": "observation",
+          "observedAt": 899,
+          "revision": 3
+        }
+      ]
+    }
+  },
+  {
+    "name": "conflict",
+    "expectedState": "conflict",
+    "expectedAllowed": false,
+    "inputs": {
+      "amount": 250,
+      "clock": {
+        "now": 1000
+      },
+      "evidence": [
+        {
+          "id": "a",
+          "source": "review-a",
+          "claim": "release-eligible",
+          "value": true,
+          "kind": "observation",
+          "observedAt": 900,
+          "revision": 2
+        },
+        {
+          "id": "b",
+          "source": "review-b",
+          "claim": "release-eligible",
+          "value": false,
+          "kind": "observation",
+          "observedAt": 980,
+          "revision": 3
+        }
+      ]
+    }
+  }
+]

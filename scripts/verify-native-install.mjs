@@ -30,7 +30,22 @@ try {
   cli("policies");
   for (const format of ["json", "svg", "html"]) {
     cli("receipt", "--decision", decision.decision, "--format", format, "--output", `receipt.${format}`);
-    if (format !== "html") assert.equal(cli("verify-receipt", "--input", `receipt.${format}`).reproduced, true);
+    if (format !== "html") {
+      const verified = cli("verify-receipt", "--input", `receipt.${format}`);
+      assert.equal(verified.reproduced, true);
+      assert.equal(verified.implementation.matched, true);
+    }
   }
-  console.log(JSON.stringify({ productionPackages: 0, sdkInstalled: false, decide: "completed", replay: "reproduced", receipts: ["json", "svg", "html"], review: "recorded", policies: "read" }));
+  writeFileSync(join(dir, "evidence-policy.json"), readFileSync(new URL("examples/evidence-policy/policy.json", root)));
+  const cases = JSON.parse(readFileSync(new URL("examples/evidence-policy/cases.json", root), "utf8"));
+  for (const item of cases) {
+    writeFileSync(join(dir, "evidence-inputs.json"), JSON.stringify(item.inputs));
+    const recorded = cli("decide", "--policy", "evidence-policy.json", "--inputs", "evidence-inputs.json", "--system-id", "native-install", "--use-case", "release");
+    assert.equal(recorded.outputs[1], item.expectedAllowed);
+    assert.equal(recorded.outputs[0].state, item.expectedState);
+    cli("receipt", "--decision", recorded.decision, "--format", "json", "--output", `${item.name}.json`);
+    const verified = cli("verify-receipt", "--input", `${item.name}.json`);
+    assert.equal(verified.implementation.matched, true);
+  }
+  console.log(JSON.stringify({ productionPackages: 0, sdkInstalled: false, decide: "completed", replay: "reproduced", receipts: ["json", "svg", "html"], implementation: "matched", evidenceCases: cases.length, review: "recorded", policies: "read" }));
 } finally { rmSync(dir, { recursive: true, force: true }); }

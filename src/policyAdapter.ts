@@ -1,4 +1,5 @@
 import { compilePolicy, recoverPolicy, evaluatePolicy, PolicyError, POLICY_RUNTIME, POLICY_LIMITS, type PolicyArtifact, type PolicyResult } from "./policyRuntime.js";
+import { policyImplementation, type PolicyImplementation } from "./policyImplementation.js";
 
 export interface RuntimeArtifact {
   id: string; source: string;
@@ -11,14 +12,14 @@ export interface RuntimeIndex { nodeIds: string[]; inputs: Record<string, string
 export interface RuntimeSession {
   compile(intent: unknown): RuntimeArtifact;
   recover(input: { source: string }): RuntimeArtifact;
-  describe(): { registry: string; registryDigest: string };
+  describe(): { registry: string; registryDigest: string; implementation: PolicyImplementation };
   run(input: { artifactId: string; requestId: string; inputs: Record<string, unknown> }): RuntimeRun;
   index(id: string): RuntimeIndex;
 }
 
 class NativeSession implements RuntimeSession {
   private readonly sources = new Map<string, string>();
-  describe() { return POLICY_RUNTIME; }
+  describe() { return { ...POLICY_RUNTIME, implementation: policyImplementation() }; }
   private retain(artifact: PolicyArtifact) {
     if (!this.sources.has(artifact.id) && this.sources.size >= POLICY_LIMITS.sessionPrograms) throw new PolicyError("policy_session_limit");
     this.sources.set(artifact.id, artifact.source);
@@ -35,7 +36,9 @@ class NativeSession implements RuntimeSession {
     return source;
   }
   run(input: { artifactId: string; requestId: string; inputs: Record<string, unknown> }) {
+    policyImplementation();
     const result = evaluatePolicy(this.source(input.artifactId), input.inputs);
+    policyImplementation();
     return { result };
   }
   index(id: string) {

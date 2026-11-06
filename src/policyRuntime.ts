@@ -1,62 +1,14 @@
-import { createHash } from "node:crypto";
+import { PolicyError, POLICY_LIMITS, digest, canonical, object, refuse, identifier, bounded, fields, type PolicyJson, type PolicyFault } from "./policyValue.js";
+import { validateEvidenceRecords, validateEvidenceClock, validateEvidenceParameters, evaluateEvidence, evidenceAllows } from "./policyEvidence.js";
+export { PolicyError, POLICY_LIMITS, type PolicyJson, type PolicyFault } from "./policyValue.js";
 
-export type PolicyJson = null | boolean | number | string | PolicyJson[] | { [key: string]: PolicyJson };
-export interface PolicyFault { code: string; path: string; nodeId?: string }
-export class PolicyError extends Error {
-  constructor(readonly code: string, readonly path = "$") { super(code); }
-}
-export const POLICY_LIMITS = Object.freeze({ bytes: 65536, depth: 24, values: 8192, collection: 512, string: 16384, nodes: 64, outputs: 16, traceBytes: 262144, sessionPrograms: 128 });
-const semantics = "auditline-policy-1:ordered-eager-dimensional-ieee754-finite-safe-integers-negative-zero-normalized:public-rationale-input-basis:arithmetic-compare-compareValues-choose-report-action";
-const digest = (text: string) => createHash("sha256").update(text).digest("hex");
-const canonical = (x: PolicyJson): string => Array.isArray(x) ? `[${x.map(canonical).join(",")}]` : x !== null && typeof x === "object"
-  ? `{${Object.keys(x).sort().map((k) => `${JSON.stringify(k)}:${canonical(x[k])}`).join(",")}}` : JSON.stringify(x);
-export const POLICY_RUNTIME = Object.freeze({ registry: "auditline-policy-1", registryDigest: digest(semantics + canonical(POLICY_LIMITS)) });
-const unsafe = new Set(["__proto__", "constructor", "prototype"]);
-const object = (x: unknown): x is Record<string, any> => x !== null && typeof x === "object" && !Array.isArray(x);
-const refuse = (ok: unknown, code: string, path = "$"): void => { if (!ok) throw new PolicyError(code, path); };
-const identifier = (x: unknown): x is string => typeof x === "string" && /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(x) && !unsafe.has(x);
+const semantics = "auditline-policy-2:ordered-eager-dimensional-ieee754-finite-safe-integers-negative-zero-normalized:public-rationale-input-basis:arithmetic-compare-compareValues-choose-report-action:evidenceFresh-inclusive-clock-policy-limits-distinct-source-conflict:evidenceAllows-supported-quorum";
+export const POLICY_RUNTIME = Object.freeze({ registry: "auditline-policy-2", registryDigest: digest(semantics + canonical(POLICY_LIMITS)) });
 
-function bounded(value: unknown): PolicyJson {
-  let count = 0;
-  const visit = (x: unknown, depth: number): PolicyJson => {
-    refuse(++count <= POLICY_LIMITS.values && depth <= POLICY_LIMITS.depth, "policy_limit");
-    if (x === null || typeof x === "boolean") return x;
-    if (typeof x === "number") { refuse(Number.isFinite(x), "policy_nonfinite"); return x === 0 ? 0 : x; }
-    if (typeof x === "string") { refuse(x.length <= POLICY_LIMITS.string, "policy_limit"); return x; }
-    refuse(object(x) || Array.isArray(x), "policy_json");
-    refuse(Object.getPrototypeOf(x) === Object.prototype || Object.getPrototypeOf(x) === null || Array.isArray(x), "policy_json");
-    const keys = Object.keys(x as object);
-    refuse(keys.length <= POLICY_LIMITS.collection, "policy_limit");
-    if (Array.isArray(x)) {
-      refuse(keys.length === x.length && keys.every((k, i) => k === String(i)), "policy_json");
-      return keys.map((k) => {
-        const property = Object.getOwnPropertyDescriptor(x, k)!;
-        refuse(Object.hasOwn(property, "value"), "policy_json");
-        return visit(property.value, depth + 1);
-      });
-    }
-    const out: Record<string, PolicyJson> = Object.create(null);
-    for (const k of keys) {
-      refuse(!unsafe.has(k) && k.length <= 128, "policy_key");
-      const property = Object.getOwnPropertyDescriptor(x, k)!;
-      refuse(Object.hasOwn(property, "value"), "policy_json");
-      out[k] = visit(property.value, depth + 1);
-    }
-    return out;
-  };
-  const result = visit(value, 0);
-  refuse(Buffer.byteLength(canonical(result)) <= POLICY_LIMITS.bytes, "policy_limit");
-  return result;
-}
-
-function fields(x: unknown, required: string[], optional: string[] = [], path = "$"): asserts x is Record<string, any> {
-  refuse(object(x) && required.every((k) => Object.hasOwn(x, k)) && Object.keys(x).every((k) => required.includes(k) || optional.includes(k)), "policy_shape", path);
-}
-
-export type PolicyType = { kind: "number"; unit: string; integer?: boolean; min?: number; max?: number } | { kind: "boolean" | "string" | "null" };
+export type PolicyType = { kind: "number"; unit: string; integer?: boolean; min?: number; max?: number } | { kind: "boolean" | "string" | "null" | "evidence" | "evidenceClock" };
 export interface PolicyInput { id: string; type: PolicyType; name?: string; value?: PolicyJson; basis?: "confirmed" | "testimony" | "suspected" | "open" }
 export interface PolicyNode { id: string; op: string; inputs: string[]; params: Record<string, PolicyJson>; type?: PolicyType }
-export interface NativePolicy { format: "auditline-policy"; version: 1; name: string; rationale?: string; inputs: PolicyInput[]; steps: PolicyNode[]; outputs: string[] }
+export interface NativePolicy { format: "auditline-policy"; version: 1 | 2; name: string; rationale?: string; inputs: PolicyInput[]; steps: PolicyNode[]; outputs: string[] }
 export interface PolicyArtifact { id: string; source: string; policy: NativePolicy }
 export interface PolicyResult {
   status: "completed" | "failed"; inputHash: string; outputs?: PolicyJson[];
@@ -71,10 +23,12 @@ function validateType(type: unknown, path: string): asserts type is PolicyType {
     refuse(typeof t.unit === "string" && t.unit.length > 0 && t.unit.length <= 64, "policy_type", path);
     refuse(t.integer === undefined || typeof t.integer === "boolean", "policy_type", path);
     refuse((t.min === undefined || typeof t.min === "number") && (t.max === undefined || typeof t.max === "number") && !(t.min > t.max), "policy_type", path);
-  } else { fields(t, ["kind"], [], path); refuse(["boolean", "string", "null"].includes(t.kind), "policy_type", path); }
+  } else { fields(t, ["kind"], [], path); refuse(["boolean", "string", "null", "evidence", "evidenceClock"].includes(t.kind), "policy_type", path); }
 }
 
 function assertValue(value: PolicyJson, type: PolicyType, path: string) {
+  if (type.kind === "evidence") { validateEvidenceRecords(value, path); return; }
+  if (type.kind === "evidenceClock") { validateEvidenceClock(value, path); return; }
   const valid = type.kind === "null" ? value === null : typeof value === type.kind;
   refuse(valid, "policy_type", path);
   if (type.kind === "number") {
@@ -119,6 +73,12 @@ function inferNode(node: PolicyNode, args: InferredType[], path: string): Inferr
     refuse(compatible(a, other) && ["number", "boolean", "string", "null"].includes(a.kind), "policy_type", path);
     refuse(["eq", "ne"].includes(node.params.operator as string) || a.kind === "number", "policy_type", path);
     result = { kind: "boolean" };
+  } else if (node.op === "evidenceFresh") {
+    refuse(a.kind === "evidence" && b.kind === "string" && c.kind === "evidenceClock", "policy_type", path);
+    result = { kind: "evidenceResult" };
+  } else if (node.op === "evidenceAllows") {
+    refuse(a.kind === "evidenceResult", "policy_type", path);
+    result = { kind: "boolean" };
   } else if (node.op === "choose") {
     refuse(a.kind === "boolean" && compatible(b, c), "policy_type", path);
     result = { kind: b.kind, unit: b.unit, integer: !!b.integer && !!c.integer };
@@ -136,7 +96,7 @@ function validateNode(node: PolicyNode, path: string) {
   fields(node, ["id", "op", "inputs", "params"], ["type"], path);
   refuse(identifier(node.id) && Array.isArray(node.inputs) && node.inputs.every(identifier), "policy_node", path);
   const p = node.params;
-  const arity: Record<string, number> = { arithmetic: 2, compare: 1, compareValues: 2, choose: 3, action: 2 };
+  const arity: Record<string, number> = { arithmetic: 2, compare: 1, compareValues: 2, choose: 3, action: 2, evidenceFresh: 3, evidenceAllows: 1 };
   refuse(Object.hasOwn(arity, node.op) || node.op === "report", "policy_operation", path);
   refuse(node.inputs.length === (arity[node.op] ?? node.inputs.length) && node.inputs.length <= 16, "policy_arity", path);
   if (node.op === "arithmetic") { fields(p, ["kind"], [], path); refuse(["add", "sub", "mul", "div", "floorDiv", "min", "max"].includes(p.kind as string), "policy_operation", path); }
@@ -145,6 +105,11 @@ function validateNode(node: PolicyNode, path: string) {
     refuse(operators.includes(p.operator as string), "policy_operation", path);
   }
   if (node.op === "choose") fields(p, [], [], path);
+  if (node.op === "evidenceFresh") validateEvidenceParameters(p, path + ".params");
+  if (node.op === "evidenceAllows") {
+    fields(p, ["minSources"], [], path);
+    refuse(typeof p.minSources === "number" && Number.isSafeInteger(p.minSources) && p.minSources >= 1 && p.minSources <= POLICY_LIMITS.evidenceRecords, "policy_evidence_parameters", path);
+  }
   if (node.op === "action") {
     fields(p, ["allowed", "action"], [], path);
     refuse(typeof p.allowed === "boolean" && typeof p.action === "string" && p.action.length > 0 && p.action.length <= 120, "policy_action", path);
@@ -159,7 +124,7 @@ function validateNode(node: PolicyNode, path: string) {
 export function compilePolicy(value: unknown): PolicyArtifact {
   const p: unknown = bounded(value);
   fields(p, ["format", "version", "name", "inputs", "steps", "outputs"], ["rationale"]);
-  refuse(p.format === "auditline-policy" && p.version === 1, "policy_version");
+  refuse(p.format === "auditline-policy" && (p.version === 1 || p.version === 2), "policy_version");
   refuse(typeof p.name === "string" && p.name.length > 0 && p.name.length <= 120, "policy_name");
   refuse(p.rationale === undefined || typeof p.rationale === "string" && p.rationale.length <= 512, "policy_rationale");
   refuse(Array.isArray(p.inputs) && Array.isArray(p.steps) && p.inputs.length + p.steps.length > 0 && p.inputs.length + p.steps.length <= POLICY_LIMITS.nodes, "policy_limit");
@@ -171,6 +136,7 @@ export function compilePolicy(value: unknown): PolicyArtifact {
     refuse(input.basis === undefined || ["confirmed", "testimony", "suspected", "open"].includes(input.basis), "policy_basis", path + ".basis");
     refuse(identifier(input.id) && !ids.has(input.id) && Object.hasOwn(input, "name") !== Object.hasOwn(input, "value"), "policy_input", path);
     validateType(input.type, path + ".type");
+    refuse(p.version === 2 || !["evidence", "evidenceClock"].includes(input.type.kind), "policy_version", path);
     if (Object.hasOwn(input, "name")) {
       refuse(identifier(input.name) && !names.has(input.name), "policy_input", path);
       names.add(input.name);
@@ -181,6 +147,8 @@ export function compilePolicy(value: unknown): PolicyArtifact {
   for (const [i, node] of p.steps.entries()) {
     const path = `$.steps[${i}]`;
     validateNode(node, path);
+    refuse(p.version === 2 || !["evidenceFresh", "evidenceAllows"].includes(node.op), "policy_version", path);
+    refuse(node.type === undefined || p.version === 2 || !["evidence", "evidenceClock"].includes(node.type.kind), "policy_version", path);
     refuse(!ids.has(node.id) && node.inputs.every((id: string) => ids.has(id)), "policy_reference", path);
     types.set(node.id, inferNode(node, node.inputs.map((id: string) => types.get(id)!), path));
     ids.add(node.id);
@@ -210,6 +178,8 @@ function compare(a: PolicyJson, b: PolicyJson, op: string): boolean {
 
 function calculate(node: PolicyNode, args: PolicyJson[]): PolicyJson {
   const [a, b, c] = args, p = node.params;
+  if (node.op === "evidenceFresh") return evaluateEvidence(a, b, c, p);
+  if (node.op === "evidenceAllows") return evidenceAllows(a, p.minSources);
   if (node.op === "arithmetic") {
     refuse(typeof a === "number" && typeof b === "number", "policy_type");
     const x = a as number, y = b as number;

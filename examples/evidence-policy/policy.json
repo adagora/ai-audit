@@ -1,0 +1,87 @@
+{
+  "format": "auditline-policy",
+  "version": 2,
+  "name": "Two current reviews before release",
+  "rationale": "Require current, uncontradicted observations from two named sources. Source labels and the recorded clock are supplied by the host, not authenticated by this policy.",
+  "inputs": [
+    {
+      "id": "evidence",
+      "name": "evidence",
+      "type": {
+        "kind": "evidence"
+      }
+    },
+    {
+      "id": "claim",
+      "value": "release-eligible",
+      "type": {
+        "kind": "string"
+      }
+    },
+    {
+      "id": "clock",
+      "name": "clock",
+      "type": {
+        "kind": "evidenceClock"
+      }
+    },
+    {
+      "id": "amount",
+      "name": "amount",
+      "type": {
+        "kind": "number",
+        "unit": "PLN",
+        "min": 0
+      }
+    }
+  ],
+  "steps": [
+    {
+      "id": "assessment",
+      "op": "evidenceFresh",
+      "inputs": [
+        "evidence",
+        "claim",
+        "clock"
+      ],
+      "params": {
+        "allowedKinds": [
+          "observation"
+        ],
+        "allowedSources": [
+          "review-a",
+          "review-b"
+        ],
+        "maxAge": 100,
+        "minRevision": 2
+      }
+    },
+    {
+      "id": "allowed",
+      "op": "evidenceAllows",
+      "inputs": [
+        "assessment"
+      ],
+      "params": {
+        "minSources": 2
+      }
+    },
+    {
+      "id": "proposal",
+      "op": "action",
+      "inputs": [
+        "allowed",
+        "amount"
+      ],
+      "params": {
+        "allowed": true,
+        "action": "release-proposal"
+      }
+    }
+  ],
+  "outputs": [
+    "assessment",
+    "allowed",
+    "proposal"
+  ]
+}

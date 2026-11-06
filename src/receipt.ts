@@ -18,6 +18,7 @@ export interface DecisionReceipt {
   };
   inputs: { recorded: ReceiptFact[]; assertions: ReceiptFact[]; basisNote: string };
   policy: {
+    implementationDigest?: string;
     sourceHash?: string;
     name?: string;
     registry?: string;
@@ -132,8 +133,9 @@ export async function decisionReceipt(log: AuditLog, id: string, opts?: { anchor
     llm: { ...(call && { id: call.id }), linked: Boolean(call), findings, tools, retained },
     inputs: { recorded, assertions, basisNote },
     policy: {
+      ...(q?.runtime?.implementationDigest && { implementationDigest: q.runtime.implementationDigest }),
       ...(q?.sourceHash && { sourceHash: q.sourceHash }), ...(version?.name || view.payload?.name ? { name: version?.name ?? view.payload?.name } : {}),
-      ...(view.registry && { registry: view.registry }), ...(view.registryDigest && { registryDigest: view.registryDigest }),
+      ...(q?.runtime?.registry && { registry: q.runtime.registry }), ...(q?.runtime?.registryDigest && { registryDigest: q.runtime.registryDigest }),
       ...(version && { version: version.version, current: version.current }),
       changes: version?.version === 1 ? [] : versionChanges, changeNote: changeNote(version?.version, version?.version === 1 ? [] : versionChanges),
     },
@@ -226,6 +228,7 @@ export function renderReceipt(receipt: DecisionReceipt, sharing?: { json: string
     <tr><th>Source hash</th><td><code>${esc(receipt.policy.sourceHash ?? "none")}</code></td></tr>
     <tr><th>Name</th><td>${esc(receipt.policy.name ?? "")}</td></tr>
     <tr><th>Runtime pin</th><td>${esc(receipt.policy.registry ?? "unavailable")} ${esc(receipt.policy.registryDigest ?? "")}</td></tr>
+    <tr><th>Interpreter implementation</th><td><code>${esc(receipt.policy.implementationDigest ?? "not recorded")}</code></td></tr>
     <tr><th>Version</th><td>${esc(receipt.policy.version ?? "")}${receipt.policy.current ? " current in the full log" : ""}</td></tr>
     <tr><th>Changes from the previous version</th><td>${esc(receipt.policy.changeNote)}</td></tr>
   </table>

@@ -1,5 +1,5 @@
 # 71. Remove the legacy policy runtime during development
-Status: Accepted (2026-11-05). Supersedes the legacy replay and SDK retention decisions in [0070](0070-native-policy-runtime.md), [0004](0004-quinelings-optional.md) and the QDL input/runtime contracts in [0023](0023-decision-records-cli-and-outcomes.md) and [0036](0036-portable-qdl-decision-receipts.md).
+Status: Accepted (2026-11-05); receipt version 2 superseded by [0072](0072-pinned-interpreter-receipts.md), language extended by [0073](0073-freshness-and-conflict-evidence.md). Supersedes the legacy replay and SDK retention decisions in [0070](0070-native-policy-runtime.md), [0004](0004-quinelings-optional.md) and the QDL input/runtime contracts in [0023](0023-decision-records-cli-and-outcomes.md) and [0036](0036-portable-qdl-decision-receipts.md).
 
 ## Context
 The project is in development. The owner explicitly authorizes removing old policy compatibility rather than maintaining an SDK solely to verify disposable development receipts. The native runtime already covers the machining and governor policies.

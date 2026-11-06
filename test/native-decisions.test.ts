@@ -46,13 +46,13 @@ test("native receipts identify runtime and reject altered source, version, input
     const log = new AuditLog(join(dir, "audit.jsonl"));
     const { decision } = await recordQdl(log, { systemId: "native", useCase: "governor", input: "synthetic" }, { intent: governorIntent(2) }, { failures: 2 });
     const receipt = await createDecisionPackage(log, decision.id);
-    assert.equal(receipt.version, 2);
-    assert.equal(receipt.program.registry, "auditline-policy-1");
+    assert.equal(receipt.version, 3);
+    assert.equal(receipt.program.registry, "auditline-policy-2");
     const json = packageJson(receipt), svg = await renderDecisionSvg(receipt);
     assert.equal((await verifyPortableReceipt(json)).reproduced, true);
     assert.equal((await verifyPortableReceipt(svg)).reproduced, true);
     assert.ok(svg.includes("An Auditline policy index"));
-    for (const changed of [json.replace('"version": 2', '"version": 1'), json.replace('"failures": 2', '"failures": 3'), json.replace('"registry": "auditline-policy-1"', '"registry": "other"'), svg.replace("Calculation reproduced", "Trusted calculation")]) {
+    for (const changed of [json.replace('"version": 3', '"version": 2'), json.replace('"failures": 2', '"failures": 3'), json.replace('"registry": "auditline-policy-2"', '"registry": "other"'), svg.replace("Calculation reproduced", "Trusted calculation")]) {
       await assert.rejects(verifyPortableReceipt(changed));
     }
     await assert.rejects(verifyPortableReceipt(JSON.stringify(receipt)), /audit_package_not_as_written/);

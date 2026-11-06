@@ -4,12 +4,13 @@ import { readEvidenceRecords } from "./evidence.js";
 import { replayQdl, type QdlStep } from "./qdl.js";
 import { hasDuplicateKeys, inspect } from "./scan.js";
 import { POLICY_COLORS, renderPolicyIndex, xmlEscape as esc } from "./policySvg.js";
+import { isPolicyImplementation, verifyPolicyImplementation, type PolicyImplementation } from "./policyImplementation.js";
 
 export interface DecisionPackage {
   format: "ai-audit-decision-package";
-  version: 2;
+  version: 3;
   decision: { id: string; llmCallId?: string };
-  program: { source: string; sourceHash: string; registry: string; registryDigest: string };
+  program: { source: string; sourceHash: string; registry: string; registryDigest: string; implementation: PolicyImplementation };
   run: { inputs: Record<string, unknown>; inputHash: string; outputs: unknown[]; outputsHash: string };
   origin: { logDigest: string; decisionHash: string; stepHash: string };
   digest: string;
@@ -24,13 +25,13 @@ const fields = (value: unknown, required: string[], optional: string[] = []): va
 
 function packageShape(value: unknown): asserts value is DecisionPackage {
   if (!fields(value, ["format", "version", "decision", "program", "run", "origin", "digest"])
-    || value.format !== "ai-audit-decision-package" || value.version !== 2
+    || value.format !== "ai-audit-decision-package" || value.version !== 3
     || !fields(value.decision, ["id"], ["llmCallId"]) || typeof value.decision.id !== "string"
     || (value.decision.llmCallId !== undefined && typeof value.decision.llmCallId !== "string")
-    || !fields(value.program, ["source", "sourceHash", "registry", "registryDigest"])
+    || !fields(value.program, ["source", "sourceHash", "registry", "registryDigest", "implementation"])
     || typeof value.program.source !== "string" || Buffer.byteLength(value.program.source) > 2 * 1024 * 1024
     || typeof value.program.sourceHash !== "string" || !/^ap_[0-9a-f]{64}$/.test(value.program.sourceHash)
-    || typeof value.program.registry !== "string" || !hash(value.program.registryDigest)
+    || typeof value.program.registry !== "string" || !hash(value.program.registryDigest) || !isPolicyImplementation(value.program.implementation)
     || !fields(value.run, ["inputs", "inputHash", "outputs", "outputsHash"]) || !object(value.run.inputs)
     || typeof value.run.inputHash !== "string" || !/^ai_[0-9a-f]{64}$/.test(value.run.inputHash) || !Array.isArray(value.run.outputs) || !hash(value.run.outputsHash)
     || !fields(value.origin, ["logDigest", "decisionHash", "stepHash"])
@@ -60,6 +61,7 @@ export async function reproducePackage(value: DecisionPackage) {
   const session = new m.Session();
   const described = session.describe();
   if (described.registry !== value.program.registry || described.registryDigest !== value.program.registryDigest) throw new Error("audit_package_runtime_mismatch");
+  verifyPolicyImplementation(value.program.implementation);
   const artifact = session.recover({ source: value.program.source });
   if (artifact.id !== value.program.sourceHash) throw new Error("audit_package_source_mismatch");
   const run = session.run({ artifactId: artifact.id, requestId: "verify-package", inputs: value.run.inputs as Parameters<typeof session.run>[0]["inputs"] });
@@ -81,11 +83,11 @@ export async function createDecisionPackage(log: AuditLog, id: string): Promise<
   const replay = await replayQdl(log, main.id, records);
   if (!replay.reproduced || replay.status !== "completed" || !replay.output) throw new Error("audit_package_replay_failed");
   const m = await policyRuntime({ source });
-  const { registry, registryDigest } = new m.Session().describe();
+  const { registry, registryDigest, implementation } = new m.Session().describe();
   const value: DecisionPackage = {
-    format: "ai-audit-decision-package", version: 2,
+    format: "ai-audit-decision-package", version: 3,
     decision: { id: main.id, ...(main.llmCallId && { llmCallId: main.llmCallId }) },
-    program: { source, sourceHash: q.sourceHash, registry, registryDigest },
+    program: { source, sourceHash: q.sourceHash, registry, registryDigest, implementation },
     run: { inputs: q.inputs, inputHash: q.inputHash, outputs: replay.output, outputsHash: q.outputsHash },
     origin: { logDigest, decisionHash: main.hash, stepHash: step.hash }, digest: "",
   };
@@ -112,7 +114,7 @@ export async function renderDecisionSvg(value: DecisionPackage): Promise<string>
     const id = artifact.payload.task?.outputs?.[index] ?? `output ${index + 1}`;
     const type = nodes.find((node: any) => node.id === id)?.type;
     const unit = type?.kind === "number" ? type.unit : undefined;
-    const label = object(output) ? `${output.status ?? "receipt"}${typeof output.action === "string" ? `: ${output.action}` : ""}` : shortValue(output, 35);
+    const label = object(output) ? `${output.state ?? output.status ?? "receipt"}${typeof output.action === "string" ? `: ${output.action}` : ""}` : shortValue(output, 35);
     return `${id} = ${label}${typeof unit === "string" && unit !== "one" ? ` ${unit}` : ""}`;
   }).join(" · ");
   const rows = steps.map((step: any, i: number) => {
@@ -140,8 +142,9 @@ ${body}
 <text x="48" y="728" font-size="13">Review the embedded data before sharing.</text>
 <text x="48" y="754" font-size="13">Long display values are shortened; metadata keeps them whole.</text>
 ${rows}
-<line x1="32" y1="${height - 78}" x2="1068" y2="${height - 78}" stroke="#b7ae9d"/>
-<text x="32" y="${height - 52}" font-size="12" font-family="monospace">Program ${esc(value.program.sourceHash)}</text>
+<line x1="32" y1="${height - 96}" x2="1068" y2="${height - 96}" stroke="#b7ae9d"/>
+<text x="32" y="${height - 74}" font-size="12" font-family="monospace">Program ${esc(value.program.sourceHash)}</text>
+<text x="32" y="${height - 52}" font-size="12" font-family="monospace">Interpreter ${esc(value.program.implementation.digest)}</text>
 <text x="32" y="${height - 30}" font-size="12" font-family="monospace">Package ${esc(value.digest)}</text>
 <text x="32" y="${height - 10}" font-size="11">Verify with: ai-audit verify-receipt --input receipt.svg · Keep the original SVG; image conversion can remove metadata.</text>
 </g></svg>`;
@@ -153,5 +156,5 @@ export async function verifyPortableReceipt(text: string) {
   const svg = text.trimStart().startsWith("<");
   if (svg && text.trim() !== (await renderDecisionSvg(value)).trim()) throw new Error("audit_package_presentation_mismatch");
   if (!svg && text.trim() !== packageJson(value)) throw new Error("audit_package_not_as_written");
-  return { reproduced: true, sourceHash: value.program.sourceHash, digest: value.digest, presentation: svg ? "matched" : "not-included", origin: "not-verified", humanApproval: "not-verified" };
+  return { reproduced: true, sourceHash: value.program.sourceHash, implementation: { matched: true, digest: value.program.implementation.digest }, digest: value.digest, presentation: svg ? "matched" : "not-included", origin: "not-verified", humanApproval: "not-verified" };
 }
